@@ -1,0 +1,24 @@
+name: Pull and Replace Code
+
+on:
+  workflow_dispatch:
+
+jobs:
+  replace-code:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone source repo
+        run: |
+          git clone https://${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/dbflow-hcmut/dbflow-frontend source
+
+      - name: Replace and push to current repo
+        run: |
+          cd source
+          git checkout main
+          
+          git remote remove origin
+          git remote add origin https://x-access-token:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/thnhtai19/dbflow-fontend-bot
+          
+          git push origin main:backup-main
+
+          git push --force origin main
