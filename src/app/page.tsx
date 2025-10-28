@@ -1,4 +1,4 @@
-import ConceptualPage from "./projects/[id]/conceptual/page";
+import ConceptualPage from "./projects/[id]/page";
 
 export default function Home() {
   return (

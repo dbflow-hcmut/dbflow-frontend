@@ -3,40 +3,47 @@ import { useEffect, useRef, useState } from "react";
 import { NodeResizer, Position, useNodeId, useStore, useReactFlow } from "reactflow";
 import ErdHandle from "../../erd-handle";
 
-type AttributeData = {
+type RelationColumn = {
     name: string;
-    isKey?: boolean;
+    type?: string;
+    isPrimary?: boolean;
+    isNullable?: boolean;
 };
 
-const AttributeNode: React.FC<{ data: AttributeData }> = ({ data }) => {
+export type RelationTableData = {
+    name: string;
+    columns: RelationColumn[];
+};
+
+const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
     const nodeId = useNodeId();
     const isSelected = useStore((store) => store.nodeInternals.get(nodeId!)?.selected);
     const [isHovered, setIsHovered] = useState(false);
-    const [isEditing, setIsEditing] = useState(false);
+    const [isEditingName, setIsEditingName] = useState(false);
     const [localName, setLocalName] = useState(data.name);
     const { setNodes } = useReactFlow();
-    const editableRef = useRef<HTMLDivElement | null>(null);
+    const nameRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
-        if (!isEditing) {
+        if (!isEditingName) {
             setLocalName(data.name);
         }
-    }, [data.name, isEditing]);
+    }, [data.name, isEditingName]);
 
     const commitName = (rawText: string) => {
         const trimmed = rawText.trim();
         const nextValue = trimmed.length > 0 ? trimmed : data.name;
-        if (!nodeId) return setIsEditing(false);
+        if (!nodeId) return setIsEditingName(false);
         setNodes((nodes) =>
-            nodes.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, name: nextValue } } : n))
+            nodes.map((n) => (n.id === nodeId ? { ...n, data: { ...(n.data as any), name: nextValue } } : n))
         );
         setLocalName(nextValue);
-        setIsEditing(false);
+        setIsEditingName(false);
     };
 
     useEffect(() => {
-        if (isEditing && editableRef.current) {
-            const el = editableRef.current;
+        if (isEditingName && nameRef.current) {
+            const el = nameRef.current;
             el.focus();
             const range = document.createRange();
             range.selectNodeContents(el);
@@ -45,32 +52,38 @@ const AttributeNode: React.FC<{ data: AttributeData }> = ({ data }) => {
             sel?.removeAllRanges();
             sel?.addRange(range);
         }
-    }, [isEditing]);
+    }, [isEditingName]);
 
     return (
-        <div 
-            className="w-full h-full relative"
+        <div
+            className="w-full h-full relative bg-transparent"
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
         >
             <NodeResizer
                 color='var(--color-primary)'
                 isVisible={isSelected}
-                minWidth={100}
-                minHeight={50}
+                minWidth={140}
+                minHeight={100}
             />
+
             <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" style={{ overflow: "visible" }}>
-                <ellipse 
-                    cx="50" cy="50" rx="49" ry="48" 
+                <rect 
+                    x="1" y="1" width="98" height="98"
                     fill="#fff" 
                     stroke="var(--color-gray-800)" 
                     strokeWidth={2} 
                     vectorEffect="non-scaling-stroke" 
+                    rx={4}
+                    ry={4}
                 />
+                <line x1="1" y1="24" x2="99" y2="24" stroke="var(--color-gray-800)" strokeWidth={2} vectorEffect="non-scaling-stroke" />
             </svg>
-            {isEditing ? (
+
+            {/* Header */}
+            {isEditingName ? (
                 <div
-                    ref={editableRef}
+                    ref={nameRef}
                     contentEditable
                     suppressContentEditableWarning={true}
                     onBlur={(e) => commitName(e.currentTarget.innerText)}
@@ -82,15 +95,15 @@ const AttributeNode: React.FC<{ data: AttributeData }> = ({ data }) => {
                             commitName(e.currentTarget.innerText);
                         } else if (e.key === "Escape") {
                             e.preventDefault();
-                            setIsEditing(false);
+                            setIsEditingName(false);
                             setLocalName(data.name);
                         }
                     }}
                     className={classNames(
-                        "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2",
-                        "text-xs font-semibold text-black text-center whitespace-pre-wrap cursor-text pointer-events-auto nodrag nopan",
-                        "bg-transparent outline-none border border-transparent focus:outline-none",
-                        "min-w-[80%] max-w-[90%] px-1"
+                        "absolute left-0 top-0 w-full h-6",
+                        "text-xs font-bold text-black text-center flex items-center justify-center",
+                        "cursor-text pointer-events-auto nodrag nopan",
+                        "bg-transparent outline-none border border-transparent focus:outline-none"
                     )}
                     style={{ userSelect: "text", WebkitUserSelect: "text" }}
                     tabIndex={0}
@@ -101,22 +114,57 @@ const AttributeNode: React.FC<{ data: AttributeData }> = ({ data }) => {
             ) : (
                 <div
                     className={classNames(
-                        "absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2",
-                        "text-xs font-semibold text-black text-center whitespace-nowrap cursor-text",
-                        { 'underline underline-offset-6': data.isKey },
+                        "absolute left-0 top-0 w-full h-6",
+                        "text-xs font-bold text-black text-center flex items-center justify-center",
+                        "cursor-text"
                     )}
                     onDoubleClick={(e) => {
                         e.stopPropagation();
-                        setIsEditing(true);
+                        setIsEditingName(true);
                     }}
                     draggable={false}
                 >
                     {localName}
                 </div>
             )}
+
+            {/* Columns */}
+            <div className="absolute left-0 top-6 w-full bottom-0 overflow-hidden">
+                <div className="px-2 py-1">
+                    {data.columns?.length ? (
+                        <ul className="space-y-1">
+                            {data.columns.map((col, idx) => (
+                                <li key={idx} className="text-[10px] leading-tight text-black flex items-center gap-1">
+                                    {col.isPrimary && <span className="inline-block w-1.5 h-1.5 rounded-full bg-black" />}
+                                    <span className="font-semibold">{col.name}</span>
+                                    {col.type && <span className="text-gray-700">: {col.type}</span>}
+                                    {col.isNullable === false && <span className="text-red-600"> NOT NULL</span>}
+                                </li>
+                            ))}
+                        </ul>
+                    ) : (
+                        <div className="text-[10px] text-gray-700">No columns</div>
+                    )}
+                </div>
+            </div>
+
             <ErdHandle 
                 id="top"
                 position={Position.Top}
+                isConnectable={!isSelected}
+                isHovered={isHovered}
+                isSelected={isSelected}
+            />
+            <ErdHandle 
+                id="left"
+                position={Position.Left}
+                isConnectable={!isSelected}
+                isHovered={isHovered}
+                isSelected={isSelected}
+            />
+            <ErdHandle 
+                id="right"
+                position={Position.Right}
                 isConnectable={!isSelected}
                 isHovered={isHovered}
                 isSelected={isSelected}
@@ -132,4 +180,6 @@ const AttributeNode: React.FC<{ data: AttributeData }> = ({ data }) => {
     );
 };
 
-export default AttributeNode;
+export default RelationTableNode;
+
+

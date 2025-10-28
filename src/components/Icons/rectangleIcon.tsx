@@ -1,9 +1,9 @@
-const PolygonIcon = (
+const RectangleIcon = (
     props: React.SVGProps<SVGSVGElement> & { variant?: 'single' | 'double' }
   ) => {
     const {
-      width = 20,
-      height = 20,
+      width = 30,
+      height = 30,
       stroke = '#1F1F1F',
       fill = 'transparent',
       strokeWidth = 1,
@@ -13,8 +13,8 @@ const PolygonIcon = (
   
     const w = Number(width);
     const h = Number(height);
-    const size = Math.min(w, h);
-    const rectSize = size * 0.6;
+    const rectW = w * 0.8;
+    const rectH = h * 0.6;
     const centerX = w / 2;
     const centerY = h / 2;
   
@@ -27,35 +27,33 @@ const PolygonIcon = (
         {...rest}
       >
         <rect
-          x={centerX - rectSize / 2}
-          y={centerY - rectSize / 2}
-          width={rectSize}
-          height={rectSize}
-          rx={rectSize * 0.1}
-          ry={rectSize * 0.1}
+          x={centerX - rectW / 2}
+          y={centerY - rectH / 2}
+          width={rectW}
+          height={rectH}
+          rx={rectW * 0.1}
+          ry={rectW * 0.1}
           fill={fill}
           stroke={stroke}
           strokeWidth={strokeWidth}
-          transform={`rotate(45 ${centerX} ${centerY})`}
         />
   
         {variant === 'double' && (
           <rect
-            x={centerX - rectSize * 0.4}
-            y={centerY - rectSize * 0.4}
-            width={rectSize * 0.8}
-            height={rectSize * 0.8}
-            rx={rectSize * 0.08}
-            ry={rectSize * 0.08}
+            x={centerX - rectW * 0.4}
+            y={centerY - rectH * 0.4}
+            width={rectW * 0.8}
+            height={rectH * 0.8}
+            rx={rectW * 0.08}
+            ry={rectW * 0.08}
             fill="none"
             stroke={stroke}
             strokeWidth={strokeWidth}
-            transform={`rotate(45 ${centerX} ${centerY})`}
           />
         )}
       </svg>
     );
   };
   
-  export default PolygonIcon;
+  export default RectangleIcon;
   

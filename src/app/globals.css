@@ -1,30 +1,268 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-primary-50: #ECF6FE;
+  --color-primary-100: #D2E9FD;
+  --color-primary-200: #AED8FB;
+  --color-primary-300: #88C6F9;
+  --color-primary-400: #64B5F7;
+  --color-primary-500: #42A5F5;
+  --color-primary-600: #388CD0;
+  --color-primary-700: #2F75AE;
+  --color-primary-800: #265E8C;
+  --color-primary-900: #1E4A6E;
+
+  --color-dark-50: #E8E8E8;
+  --color-dark-100: #C9C9C9;
+  --color-dark-200: #9D9D9E;
+  --color-dark-300: #707071;
+  --color-dark-400: #444446;
+  --color-dark-500: #1C1C1D;
+  --color-dark-600: #181819;
+  --color-dark-700: #141415;
+  --color-dark-800: #0F0F11;
+  --color-dark-900: #0D0D0D;
+
+  --color-bg-light: #FAF8F8;
+  --color-bg-light-100: #F6F7FE;
+
+
+  --color-bg-dark: #1C1C1D;
+  --color-bg-dark-100: #1F1F1F;
+  --color-bg-dark-200: #282C34;
+
+  --color-text-light: #1A1C1E;
+  --color-text-dark: #FAF8F8;
+
+  --color-primary: #42a5f5;
+  --color-primary-dark: #067cd6;
+  --color-primary-light: #a7d6f9;
+}
+
+@font-face {
+  font-family: 'Gilroy';
+  src: url('/Gilroy/400-Gilroy-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Gilroy';
+  src: url('/Gilroy/500-Gilroy-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Gilroy';
+  src: url('/Gilroy/600-Gilroy-Semibold.ttf') format('truetype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Gilroy';
+  src: url('/Gilroy/700-Gilroy-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Removed 800/900 weights to avoid mismatched sources; add when files exist */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: var(--color-gray-100);
+  --foreground: var(--color-text-light);
+}
+
+.dark {
+  --background: var(--color-dark-500);
+  --foreground: var(--color-text-dark);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: 'Gilroy', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: var(--color-dark-500);
+    --foreground: var(--color-text-dark);
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: 'Gilroy', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
+* {
+  font-family: 'Gilroy', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Ensure Ant Design uses Gilroy globally */
+:where(.ant-*) {
+  font-family: 'Gilroy', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+}
+
+.remote-cursor {
+  background-color: rgba(255, 0, 0, 0.3);
+}
+
+.remote-selection {
+  background-color: rgba(255, 77, 79, 0.18);
+}
+
+.remote-selection-inline {
+  background-color: rgba(255, 0, 0, 0.2);
+}
+
+.remote-cursor-label {
+  position: absolute;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1;
+  transform: translateY(-100%);
+  pointer-events: none;
+  white-space: nowrap;
+  display: flex !important;
+}
+
+.remote-selection-line {
+  background-color: rgba(255, 77, 79, 0.18);
+}
+
+.remote-caret {
+  position: absolute;
+  width: 2px;
+  background-color: #ff4d4f;
+}
+
+/* .ant-form-item-with-help .ant-form-item-explain {
+  padding-top: 5px;
+} */
+
+.ant-notification .ant-notification-notice-content .ant-notification-notice-with-icon {
+  display: flex;
+  align-items: start;
+  gap: 0.625rem;
+  /* 2.5 * 0.25rem */
+}
+
+/* success */
+.ant-notification .notification-success-custom .ant-notification-notice-content .ant-notification-notice-with-icon .ant-notification-notice-icon {
+  position: relative;
+  top: 0;
+}
+
+/* error */
+.ant-notification .notification-error-custom .ant-notification-notice-content .ant-notification-notice-with-icon .ant-notification-notice-icon {
+  position: relative;
+  top: 0;
+}
+
+.ant-notification .notification-error-custom-dark .ant-notification-notice-content .ant-notification-notice-with-icon .ant-notification-notice-icon {
+  position: relative;
+  top: 0;
+}
+
+
+.ant-notification .ant-notification-notice-content .ant-notification-notice-with-icon .ant-notification-notice-message {
+  margin-bottom: 0;
+  margin-inline-start: 0;
+  font-size: 14px !important;
+  font-weight: 400;
+  color: #1f2937;
+  /* text-gray-900 */
+}
+
+.ant-notification .ant-notification-notice-content .ant-notification-notice-with-icon .ant-notification-notice-description {
+  display: none;
+}
+
+.ant-notification .ant-notification-notice-close {
+  top: 50%;
+  right: 1rem;
+  /* 4 * 0.25rem */
+  align-items: end !important;
+  transform: translateY(-50%);
+}
+
+.ant-notification .notification-success-custom {
+  border-radius: 0.125rem;
+  /* 2px */
+  padding-left: 1rem;
+  /* 4 * 0.25rem */
+  padding-right: 1rem;
+  /* 4 * 0.25rem */
+  padding-top: 0.5rem;
+  /* 2 * 0.25rem */
+  border: 1px solid #88D488 !important;
+  /* border-green-200 */
+  background-color: #E5F7E5 !important;
+  /* bg-green-50 */
+  font-family: 'Gilroy', sans-serif !important;
+}
+
+.ant-notification .notification-error-custom {
+  border-radius: 0.125rem;
+  /* 2px */
+  padding-left: 1rem;
+  /* 4 * 0.25rem */
+  padding-right: 1rem;
+  /* 4 * 0.25rem */
+  padding-bottom: 0.5rem;
+  /* 2 * 0.25rem */
+  border: 1px solid #F99A9D !important;
+  /* border-red-500 */
+  background-color: #FDE9EA !important;
+  /* bg-red-50 */
+  font-family: 'Gilroy', sans-serif !important;
+}
+
+.ant-notification .notification-error-custom-dark {
+  border-radius: 0.125rem;
+  /* 2px */
+  padding-left: 1rem;
+  /* 4 * 0.25rem */
+  padding-right: 1rem;
+  /* 4 * 0.25rem */
+  padding-bottom: 0.5rem;
+  /* 2 * 0.25rem */
+  border: 1px solid #333334 !important;
+  /* border-red-500 */
+  background-color: #21252B !important;
+  /* bg-red-50 */
+  font-family: 'Gilroy', sans-serif !important;
+  /* shadow */
+  box-shadow: rgba(0, 0, 0, 0.1) 0px 4px 12px !important;
+}
+
+.ant-notification .notification-error-custom-dark .ant-notification-notice-content .ant-notification-notice-with-icon .ant-notification-notice-message {
+  color: #a9a9a9 !important;
+  /* text-gray-900 */
+}
+
+.ant-notification .notification-error-custom-dark .ant-notification-notice-close {
+  color: #a9a9a9 !important;
+}
+
+.ant-notification-close-icon {
+  color: red !important;
+}
 
 .react-flow__resize-control.nodrag.handle {
   background-color: white !important;
@@ -34,8 +272,14 @@ body {
   border-radius: 2px !important;
 }
 
-@theme {
-  --color-primary: #42a5f5;
-  --color-primary-dark: #067cd6;
-  --color-primary-light: #a7d6f9;
+.search-modal .ant-modal-content {
+  padding: 0 !important;
+}
+
+.search-modal .ant-modal-header {
+  display: none !important;
+}
+
+.search-modal .ant-modal-footer {
+  display: none !important;
 }

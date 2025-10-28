@@ -1,13 +1,14 @@
 import classNames from "classnames";
 import { useEffect, useRef, useState } from "react";
-import { Position, NodeResizer, useNodeId, useStore, useReactFlow } from "reactflow";
+import { NodeResizer, Position, useNodeId, useStore, useReactFlow } from "reactflow";
 import ErdHandle from "../../erd-handle";
 
-type RelationshipData = {
+type EntityData = {
     name: string;
+    variant?: 'single' | 'double' | 'dashed';
 };
 
-const RelationshipNode: React.FC<{ data: RelationshipData }> = ({ data }) => {
+const EntityNode: React.FC<{ data: EntityData }> = ({ data }) => {
     const nodeId = useNodeId();
     const isSelected = useStore((store) => store.nodeInternals.get(nodeId!)?.selected);
     const [isHovered, setIsHovered] = useState(false);
@@ -27,7 +28,11 @@ const RelationshipNode: React.FC<{ data: RelationshipData }> = ({ data }) => {
         const nextValue = trimmed.length > 0 ? trimmed : data.name;
         if (!nodeId) return setIsEditing(false);
         setNodes((nodes) =>
-            nodes.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, name: nextValue } } : n))
+            nodes.map((n) =>
+                n.id === nodeId
+                    ? { ...n, data: { ...n.data, name: nextValue } }
+                    : n
+            )
         );
         setLocalName(nextValue);
         setIsEditing(false);
@@ -46,32 +51,75 @@ const RelationshipNode: React.FC<{ data: RelationshipData }> = ({ data }) => {
         }
     }, [isEditing]);
 
+    const containerRef = useRef<HTMLDivElement | null>(null);
+    const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+
+    useEffect(() => {
+        if (!containerRef.current) return;
+        const el = containerRef.current;
+        const update = () => {
+            const rect = el.getBoundingClientRect();
+            setSize({ w: rect.width, h: rect.height });
+        };
+        update();
+        const ro = new ResizeObserver(update);
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
+
+    const gapPx = 6;
+    const sx = size.w > 0 ? size.w / 100 : 1;
+    const sy = size.h > 0 ? size.h / 100 : 1;
+    const offX = gapPx / sx;
+    const offY = gapPx / sy;
+
     return (
         <div 
+            ref={containerRef}
             className="w-full h-full relative"
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
         >
             <NodeResizer
-                color="var(--color-primary)"
+                color='var(--color-primary)'
                 isVisible={isSelected}
                 minWidth={100}
-                minHeight={80}
+                minHeight={50}
             />
-            <svg 
-                width="100%" 
-                height="100%" 
-                viewBox="0 0 100 100" 
-                preserveAspectRatio="none" 
-                className="overflow-visible"
-            >
-                <polygon
-                    points="50,0 100,50 50,100 0,50"
-                    fill="#fff"
-                    stroke="var(--color-gray-800)"
-                    strokeWidth={2}
-                    vectorEffect="non-scaling-stroke"
+
+            <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" style={{ overflow: "visible" }}>
+                <rect 
+                    x="1" y="1" width="98" height="98"
+                    fill="#fff" 
+                    stroke="var(--color-gray-800)" 
+                    strokeWidth={1} 
+                    vectorEffect="non-scaling-stroke" 
+                    rx={4}
+                    ry={4}
                 />
+                {data.variant === 'double' && (
+                    <rect 
+                        x={1 + offX} y={1 + offY} width={98 - 2 * offX} height={98 - 2 * offY}
+                        fill="none" 
+                        stroke="var(--color-gray-800)" 
+                        strokeWidth={1} 
+                        vectorEffect="non-scaling-stroke" 
+                        rx={Math.max(0, 4 - Math.min(offX, offY))}
+                        ry={Math.max(0, 4 - Math.min(offX, offY))}
+                    />
+                )}
+                {data.variant === 'dashed' && (
+                    <rect 
+                        x="1" y="1" width="98" height="98"
+                        fill="none" 
+                        stroke="var(--color-gray-800)" 
+                        strokeDasharray="6 5"
+                        strokeWidth={1} 
+                        vectorEffect="non-scaling-stroke" 
+                        rx={4}
+                        ry={4}
+                    />
+                )}
             </svg>
             {isEditing ? (
                 <div
@@ -107,7 +155,8 @@ const RelationshipNode: React.FC<{ data: RelationshipData }> = ({ data }) => {
                 <div
                     className={classNames(
                         "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2",
-                        "text-xs font-semibold text-black text-center whitespace-nowrap cursor-text"
+                        "text-xs font-semibold text-black text-center whitespace-pre-wrap cursor-text",
+                        "min-w-[80%] max-w-[90%] px-1"
                     )}
                     onDoubleClick={(e) => {
                         e.stopPropagation();
@@ -150,4 +199,4 @@ const RelationshipNode: React.FC<{ data: RelationshipData }> = ({ data }) => {
     );
 };
 
-export default RelationshipNode;
+export default EntityNode;

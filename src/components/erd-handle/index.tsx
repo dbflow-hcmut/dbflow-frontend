@@ -17,9 +17,8 @@ function ErdHandle({
   isHovered = false, 
   isSelected = false 
 }: ErdHandleProps) {
-  // Calculate offset based on position
   const getOffsetStyle = () => {
-    const baseOffset = 1; // 2px inward
+    const baseOffset = 1;
     switch (position) {
       case Position.Top:
         return { top: `${baseOffset}px` };
@@ -36,27 +35,24 @@ function ErdHandle({
 
   return (
     <div style={{ ...style}}>
-      {/* Target Handle - for incoming connections */}
       <Handle 
         type="target" 
         position={position} 
         id={`${id}-target`}
         isConnectable={isConnectable}
         style={getOffsetStyle()}
-        className="!w-2 !h-2 !border-none !bg-transparent"
+        className="!w-1 !h-1 !border-none !bg-transparent"
       />
       
-      {/* Source Handle - for outgoing connections */}
       <Handle 
         type="source" 
         position={position} 
         id={`${id}-source`}
         isConnectable={isConnectable}
         style={getOffsetStyle()}
-        className="!w-2 !h-2 !border-none !bg-transparent"
+        className="!w-1 !h-1 !border-none !bg-transparent"
       />
       
-      {/* Visual indicator */}
       <div 
         className={`w-2 h-2 bg-primary-light border border-primary rounded-full absolute transition-opacity duration-200 pointer-events-none ${
           isHovered && !isSelected ? 'opacity-100' : 'opacity-0'

@@ -3,11 +3,13 @@ import { useEffect, useRef, useState } from "react";
 import { NodeResizer, Position, useNodeId, useStore, useReactFlow } from "reactflow";
 import ErdHandle from "../../erd-handle";
 
-type EntityData = {
+type AttributeData = {
     name: string;
+    isKey?: boolean;
+    variant?: 'single' | 'double' | 'dashed';
 };
 
-const EntityNode: React.FC<{ data: EntityData }> = ({ data }) => {
+const AttributeNode: React.FC<{ data: AttributeData }> = ({ data }) => {
     const nodeId = useNodeId();
     const isSelected = useStore((store) => store.nodeInternals.get(nodeId!)?.selected);
     const [isHovered, setIsHovered] = useState(false);
@@ -15,6 +17,8 @@ const EntityNode: React.FC<{ data: EntityData }> = ({ data }) => {
     const [localName, setLocalName] = useState(data.name);
     const { setNodes } = useReactFlow();
     const editableRef = useRef<HTMLDivElement | null>(null);
+    const containerRef = useRef<HTMLDivElement | null>(null);
+    const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
 
     useEffect(() => {
         if (!isEditing) {
@@ -27,11 +31,7 @@ const EntityNode: React.FC<{ data: EntityData }> = ({ data }) => {
         const nextValue = trimmed.length > 0 ? trimmed : data.name;
         if (!nodeId) return setIsEditing(false);
         setNodes((nodes) =>
-            nodes.map((n) =>
-                n.id === nodeId
-                    ? { ...n, data: { ...n.data, name: nextValue } }
-                    : n
-            )
+            nodes.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, name: nextValue } } : n))
         );
         setLocalName(nextValue);
         setIsEditing(false);
@@ -50,8 +50,28 @@ const EntityNode: React.FC<{ data: EntityData }> = ({ data }) => {
         }
     }, [isEditing]);
 
+    useEffect(() => {
+        if (!containerRef.current) return;
+        const el = containerRef.current;
+        const update = () => {
+            const rect = el.getBoundingClientRect();
+            setSize({ w: rect.width, h: rect.height });
+        };
+        update();
+        const ro = new ResizeObserver(update);
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
+
+    const gapPx = 6;
+    const sx = size.w > 0 ? size.w / 100 : 1;
+    const sy = size.h > 0 ? size.h / 100 : 1;
+    const offX = gapPx / sx;
+    const offY = gapPx / sy;
+
     return (
         <div 
+            ref={containerRef}
             className="w-full h-full relative"
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
@@ -62,17 +82,24 @@ const EntityNode: React.FC<{ data: EntityData }> = ({ data }) => {
                 minWidth={100}
                 minHeight={50}
             />
-
             <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" style={{ overflow: "visible" }}>
-                <rect 
-                    x="1" y="1" width="98" height="98"
+                <ellipse 
+                    cx="50" cy="50" rx="49" ry="48" 
                     fill="#fff" 
                     stroke="var(--color-gray-800)" 
-                    strokeWidth={2} 
+                    strokeWidth={1}
+                    strokeDasharray={data.variant === 'dashed' ? '6 5' : undefined}
                     vectorEffect="non-scaling-stroke" 
-                    rx={4}
-                    ry={4}
                 />
+                {data.variant === 'double' && (
+                    <ellipse
+                        cx="50" cy="50" rx={Math.max(0, 49 - offX)} ry={Math.max(0, 48 - offY)}
+                        fill="none"
+                        stroke="var(--color-gray-800)"
+                        strokeWidth={1}
+                        vectorEffect="non-scaling-stroke"
+                    />
+                )}
             </svg>
             {isEditing ? (
                 <div
@@ -109,7 +136,8 @@ const EntityNode: React.FC<{ data: EntityData }> = ({ data }) => {
                     className={classNames(
                         "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2",
                         "text-xs font-semibold text-black text-center whitespace-pre-wrap cursor-text",
-                        "min-w-[80%] max-w-[90%] px-1"
+                        "min-w-[80%] max-w-[90%] px-1",
+                        { 'underline underline-offset-6': data.isKey }
                     )}
                     onDoubleClick={(e) => {
                         e.stopPropagation();
@@ -128,20 +156,6 @@ const EntityNode: React.FC<{ data: EntityData }> = ({ data }) => {
                 isSelected={isSelected}
             />
             <ErdHandle 
-                id="left"
-                position={Position.Left}
-                isConnectable={!isSelected}
-                isHovered={isHovered}
-                isSelected={isSelected}
-            />
-            <ErdHandle 
-                id="right"
-                position={Position.Right}
-                isConnectable={!isSelected}
-                isHovered={isHovered}
-                isSelected={isSelected}
-            />
-            <ErdHandle 
                 id="bottom"
                 position={Position.Bottom}
                 isConnectable={!isSelected}
@@ -152,4 +166,4 @@ const EntityNode: React.FC<{ data: EntityData }> = ({ data }) => {
     );
 };
 
-export default EntityNode;
+export default AttributeNode;
