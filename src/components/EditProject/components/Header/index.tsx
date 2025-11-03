@@ -32,8 +32,8 @@ const Header: React.FC<HeaderProps> = ({
     return (
         <div className="pt-4 bg-transparent flex items-center justify-between px-4 fixed top-0 z-10 w-full">
             <div className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12">
-                <div className="cursor-pointer mx-2">
-                    <Image width={26} height={26} src="/dbflow.png" alt="Logo" />
+                <div className="cursor-pointer mx-1">
+                    <Image width={26} height={26} src="/favicon.ico" alt="Logo" />
                 </div>
                 {!isEditingDiagramName ? (
                     <div
