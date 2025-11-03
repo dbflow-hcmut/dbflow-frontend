@@ -51,7 +51,7 @@ export default function SearchModal(props: ISearchModalProps) {
                 {search.length > 0 && (
                     <div className="pb-4 px-4">
                         <div className="text-sm text-gray-500">
-                            Search results for "{search}"
+                            Search results for &quot{search}&quot
                         </div>
                     </div>
                 )}

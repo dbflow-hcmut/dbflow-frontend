@@ -78,8 +78,8 @@ const RelationshipNode: React.FC<{ data: RelationshipData }> = ({ data }) => {
             <NodeResizer
                 color="var(--color-primary)"
                 isVisible={isSelected}
-                minWidth={100}
-                minHeight={80}
+                minWidth={70}
+                minHeight={40}
             />
             <svg 
                 width="100%" 

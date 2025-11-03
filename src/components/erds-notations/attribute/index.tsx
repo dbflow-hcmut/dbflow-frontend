@@ -79,8 +79,8 @@ const AttributeNode: React.FC<{ data: AttributeData }> = ({ data }) => {
             <NodeResizer
                 color='var(--color-primary)'
                 isVisible={isSelected}
-                minWidth={100}
-                minHeight={50}
+                minWidth={70}
+                minHeight={30}
             />
             <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" style={{ overflow: "visible" }}>
                 <ellipse 
@@ -137,7 +137,7 @@ const AttributeNode: React.FC<{ data: AttributeData }> = ({ data }) => {
                         "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2",
                         "text-xs font-semibold text-black text-center whitespace-pre-wrap cursor-text",
                         "min-w-[80%] max-w-[90%] px-1",
-                        { 'underline underline-offset-6': data.isKey }
+                        { 'underline underline-offset-3': data.isKey }
                     )}
                     onDoubleClick={(e) => {
                         e.stopPropagation();
@@ -158,6 +158,20 @@ const AttributeNode: React.FC<{ data: AttributeData }> = ({ data }) => {
             <ErdHandle 
                 id="bottom"
                 position={Position.Bottom}
+                isConnectable={!isSelected}
+                isHovered={isHovered}
+                isSelected={isSelected}
+            />
+            <ErdHandle 
+                id="left"
+                position={Position.Left}
+                isConnectable={!isSelected}
+                isHovered={isHovered}
+                isSelected={isSelected}
+            />
+            <ErdHandle 
+                id="right"
+                position={Position.Right}
                 isConnectable={!isSelected}
                 isHovered={isHovered}
                 isSelected={isSelected}

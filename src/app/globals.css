@@ -29,15 +29,15 @@
   --color-bg-light-100: #F6F7FE;
 
 
-  --color-bg-dark: #1C1C1D;
+  /* --color-bg-dark: #1C1C1D;
   --color-bg-dark-100: #1F1F1F;
-  --color-bg-dark-200: #282C34;
+  --color-bg-dark-200: #282C34; */
 
   --color-text-light: #1A1C1E;
-  --color-text-dark: #FAF8F8;
+  /* --color-text-dark: #FAF8F8; */
 
   --color-primary: #42a5f5;
-  --color-primary-dark: #067cd6;
+  /* --color-primary-dark: #067cd6; */
   --color-primary-light: #a7d6f9;
 }
 
@@ -75,7 +75,7 @@
 
 /* Removed 800/900 weights to avoid mismatched sources; add when files exist */
 
-:root {
+/* :root {
   --background: var(--color-gray-100);
   --foreground: var(--color-text-light);
 }
@@ -83,7 +83,7 @@
 .dark {
   --background: var(--color-dark-500);
   --foreground: var(--color-text-dark);
-}
+} */
 
 @theme inline {
   --color-background: var(--background);
@@ -92,12 +92,12 @@
   --font-mono: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
 }
 
-@media (prefers-color-scheme: dark) {
+/* @media (prefers-color-scheme: dark) {
   :root {
     --background: var(--color-dark-500);
     --foreground: var(--color-text-dark);
   }
-}
+} */
 
 body {
   background: var(--background);

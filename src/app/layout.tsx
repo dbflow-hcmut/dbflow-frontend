@@ -6,6 +6,7 @@ import AntdThemeProvider from "@/providers/AntdThemeProvider";
 import { AntdRegistry } from "@ant-design/nextjs-registry";
 import AppShell from "@/components/AppShell";
 import NotificationRoot from "@/providers/notification";
+import SessionProvider from "@/providers/SessionProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -29,22 +30,29 @@ export default function RootLayout({
         <link rel="icon" href="/favicon.ico" sizes="any" />
         <link rel="shortcut icon" href="/favicon.ico" />
         <link rel="apple-touch-icon" href="/favicon.ico" />
+        {/* <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var d=window.matchMedia('(prefers-color-scheme: dark)').matches;var t=localStorage.getItem('theme');if(d&&t==='light'){localStorage.removeItem('theme');}}catch{}`,
+          }}
+        /> */}
         <link rel="preload" as="font" href="/Gilroy/400-Gilroy-Regular.ttf" type="font/ttf" crossOrigin="anonymous" />
         <link rel="preload" as="font" href="/Gilroy/500-Gilroy-Medium.ttf" type="font/ttf" crossOrigin="anonymous" />
         <link rel="preload" as="font" href="/Gilroy/600-Gilroy-Semibold.ttf" type="font/ttf" crossOrigin="anonymous" />
         <link rel="preload" as="font" href="/Gilroy/700-Gilroy-Bold.ttf" type="font/ttf" crossOrigin="anonymous" />
       </head>
-      <body className="antialiased min-h-screen bg-bg-light dark:bg-bg-dark text-text-light dark:text-text-dark" suppressHydrationWarning>
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-          <AntdRegistry>
-            <AntdThemeProvider>
-              <NotificationRoot />
-              <AppShell>
-                {children}
-              </AppShell>
-            </AntdThemeProvider>
-          </AntdRegistry>
-        </ThemeProvider>
+      <body className="antialiased min-h-screen bg-bg-light text-text-light" suppressHydrationWarning>
+        <SessionProvider>
+          <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
+            <AntdRegistry>
+              <AntdThemeProvider>
+                <NotificationRoot />
+                <AppShell>
+                  {children}
+                </AppShell>
+              </AntdThemeProvider>
+            </AntdRegistry>
+          </ThemeProvider>
+        </SessionProvider>
       </body>
     </html>
   );

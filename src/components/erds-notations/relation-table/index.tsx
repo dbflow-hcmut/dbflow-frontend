@@ -35,7 +35,7 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
         const nextValue = trimmed.length > 0 ? trimmed : data.name;
         if (!nodeId) return setIsEditingName(false);
         setNodes((nodes) =>
-            nodes.map((n) => (n.id === nodeId ? { ...n, data: { ...(n.data as any), name: nextValue } } : n))
+            nodes.map((n) => (n.id === nodeId ? { ...n, data: { ...(n.data), name: nextValue } } : n))
         );
         setLocalName(nextValue);
         setIsEditingName(false);
