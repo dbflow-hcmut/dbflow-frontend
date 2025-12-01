@@ -72,6 +72,18 @@ type ModelCategory = {
     notes?: string;
 };
 
+type NodeStyleMeta = {
+    meta?: {
+        entity?: {
+            variant?: string;
+        };
+        relationship?: {
+            variant?: string;
+            cardinalities?: Record<string, string>;
+        };
+    };
+};
+
 export type ConceptualModelPayload = {
     model: {
         id: string;
@@ -119,7 +131,7 @@ const getEntityKind = (node: StoredDiagramNode): "strong" | "weak" => {
     if (node.entityRender?.doubleStroke) {
         return "weak";
     }
-    const metaVariant = (node.style as Record<string, any> | undefined)?.meta?.entity?.variant;
+    const metaVariant = (node.style as NodeStyleMeta | undefined)?.meta?.entity?.variant;
     return metaVariant === "double" ? "weak" : "strong";
 };
 
@@ -127,15 +139,13 @@ const getRelationshipType = (node: StoredDiagramNode): "association" | "identify
     if (node.relationshipRender?.doubleStroke) {
         return "identifying";
     }
-    const metaVariant = (node.style as Record<string, any> | undefined)?.meta?.relationship?.variant;
+    const metaVariant = (node.style as NodeStyleMeta | undefined)?.meta?.relationship?.variant;
     return metaVariant === "double" ? "identifying" : "association";
 };
 
 const getRelationshipCardinalityMeta = (node: StoredDiagramNode): Record<string, string> | undefined => {
-    return (node.style as Record<string, any> | undefined)?.meta?.relationship?.cardinalities;
+    return (node.style as NodeStyleMeta | undefined)?.meta?.relationship?.cardinalities;
 };
-
-const getNodeMeta = (node: StoredDiagramNode) => (node.style as Record<string, any> | undefined)?.meta;
 
 const getAttributeId = (node: StoredDiagramNode) => node.attributeId ?? node.id;
 const getEntityId = (node: StoredDiagramNode) => node.entityId ?? node.id;

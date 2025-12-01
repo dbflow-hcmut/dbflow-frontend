@@ -78,7 +78,7 @@ export const useCollaborationAwareness = ({
         return () => {
             awareness.setLocalState(null);
         };
-    }, [enabled, awareness, sessionId, currentUserName, currentUserAvatar, localColor]);
+    }, [enabled, awareness, sessionId, currentUserName, currentUserAvatar, localColor, schemaId]);
 
     useEffect(() => {
         if (!enabled || !awareness) {

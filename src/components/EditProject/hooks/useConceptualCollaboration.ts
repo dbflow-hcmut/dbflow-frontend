@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Dispatch, SetStateAction, RefObject } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import type { Node, Edge } from "reactflow";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
