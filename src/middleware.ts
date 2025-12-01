@@ -7,6 +7,7 @@ export default auth((req) => {
 
   const isAuthRoute = pathname.startsWith("/auth");
   const isApiRoute = pathname.startsWith("/api");
+  const isNotFoundRoute = pathname.startsWith("/not-found");
   const isPublicRoute = pathname.startsWith("/_next");
 
   if (pathname === "/") {
@@ -20,7 +21,7 @@ export default auth((req) => {
     return NextResponse.redirect(new URL("/projects", req.url));
   }
 
-  if (!isLoggedIn && !isAuthRoute && !isApiRoute && !isPublicRoute) {
+  if (!isLoggedIn && !isAuthRoute && !isApiRoute && !isNotFoundRoute && !isPublicRoute) {
     const signInUrl = new URL("/auth/signin", req.url);
     signInUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(signInUrl);

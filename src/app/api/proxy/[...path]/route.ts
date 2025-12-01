@@ -11,13 +11,26 @@ async function forward(req: NextRequest) {
   const headers: Record<string, string> = {
     accept: req.headers.get("accept") || "application/json",
   };
+  
+  const method = req.method;
+  let requestBody: string | undefined;
+  
+  if (method !== "GET" && method !== "HEAD") {
+    requestBody = await req.text();
+    const contentType = req.headers.get("content-type");
+    if (contentType) {
+      headers["content-type"] = contentType;
+    }
+  }
+  
   if (access) headers["cookie"] = `access_token=${access}`;
 
-  const method = req.method;
-  const init: RequestInit = { method, headers, cache: "no-store" };
-  if (method !== "GET" && method !== "HEAD") {
-    init.body = req.body;
-  }
+  const init: RequestInit = { 
+    method, 
+    headers, 
+    cache: "no-store",
+    ...(requestBody && { body: requestBody }),
+  };
 
   const beRes = await fetch(url, init);
 
@@ -28,8 +41,12 @@ async function forward(req: NextRequest) {
     return res;
   }
 
-  const body = await beRes.text();
-  return new NextResponse(body, {
+  if (beRes.status === 404) {
+    return NextResponse.redirect(new URL(`/not-found`, req.nextUrl.origin));
+  }
+
+  const responseBody = await beRes.text();
+  return new NextResponse(responseBody, {
     status: beRes.status,
     headers: {
       "content-type": beRes.headers.get("content-type") || "application/json",

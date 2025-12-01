@@ -9,6 +9,7 @@ type ErdEdgeData = {
     fromMult?: string;
     toMult?: string;
     lineStyle?: 'single' | 'double' | 'bracket';
+    bracketDirection?: 'from' | 'to';
 };
 
 const ErdEdge: React.FC<EdgeProps<ErdEdgeData>> = (props) => {
@@ -186,25 +187,32 @@ const ErdEdge: React.FC<EdgeProps<ErdEdgeData>> = (props) => {
                 )}
 
                 {/* Bracket notation */}
-                {lineStyle === 'bracket' && (
-                    <g
-                        transform={`translate(${nearTargetX}, ${nearTargetY}) rotate(${(angle * 180) / Math.PI})`}
-                    >
-                        <path
-                            d={`
-                                M ${-bracketLength / 2 - 8},${-bracketOffset - 2}
-                                L ${-bracketLength / 2},${-bracketOffset - 2}
-                                C ${bracketLength / 2},${-bracketOffset - 2} ${bracketLength / 2},${bracketOffset + 2} ${-bracketLength / 2},${bracketOffset + 2}
-                                L ${-bracketLength / 2 - 8},${bracketOffset + 2}
-                            `}
-                            fill="none"
-                            stroke={selected ? '#42a5f5' : 'var(--color-gray-700)'}
-                            strokeWidth="1"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                        />
-                    </g>
-                )}
+                {lineStyle === 'bracket' && (() => {
+                    const bracketDirection = data?.bracketDirection || 'to';
+                    const bracketX = bracketDirection === 'from' ? nearSourceX : nearTargetX;
+                    const bracketY = bracketDirection === 'from' ? nearSourceY : nearTargetY;
+                    const bracketAngle = bracketDirection === 'from' ? angle + Math.PI : angle;
+                    
+                    return (
+                        <g
+                            transform={`translate(${bracketX}, ${bracketY}) rotate(${(bracketAngle * 180) / Math.PI})`}
+                        >
+                            <path
+                                d={`
+                                    M ${-bracketLength / 2 - 8},${-bracketOffset - 2}
+                                    L ${-bracketLength / 2},${-bracketOffset - 2}
+                                    C ${bracketLength / 2},${-bracketOffset - 2} ${bracketLength / 2},${bracketOffset + 2} ${-bracketLength / 2},${bracketOffset + 2}
+                                    L ${-bracketLength / 2 - 8},${bracketOffset + 2}
+                                `}
+                                fill="none"
+                                stroke={selected ? '#42a5f5' : 'var(--color-gray-700)'}
+                                strokeWidth="1"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                            />
+                        </g>
+                    );
+                })()}
 
 
 

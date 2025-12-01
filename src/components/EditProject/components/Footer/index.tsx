@@ -10,6 +10,7 @@ type FooterProps = {
     isRightPanelOpen: boolean;
     onToggleSidebar: () => void;
     onToggleRightPanel: () => void;
+    onToggleChatBox: () => void;
 };
 
 const Footer: React.FC<FooterProps> = ({
@@ -17,6 +18,7 @@ const Footer: React.FC<FooterProps> = ({
     isRightPanelOpen,
     onToggleSidebar,
     onToggleRightPanel,
+    onToggleChatBox,
 }) => {
     return (
         <div className="pb-4 bg-transparent flex items-center justify-between px-4 fixed bottom-0 z-10 w-full">
@@ -79,7 +81,10 @@ const Footer: React.FC<FooterProps> = ({
                     </div>
                 </div>
 
-                <div className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12 w-12 justify-center cursor-pointer">                        
+                <div 
+                    onClick={onToggleChatBox}
+                    className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12 w-12 justify-center cursor-pointer hover:bg-gray-50 transition-colors"
+                >                        
                     <svg
                         xmlns="http://www.w3.org/2000/svg"
                         width="24"

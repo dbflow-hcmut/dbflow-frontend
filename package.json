@@ -12,6 +12,7 @@
   "dependencies": {
     "@ant-design/nextjs-registry": "^1.1.0",
     "@ant-design/v5-patch-for-react-19": "^1.0.3",
+    "@hocuspocus/provider": "^3.4.0",
     "antd": "^5.27.3",
     "classnames": "^2.5.1",
     "gojs": "3.0.26",
@@ -25,7 +26,8 @@
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "reactflow": "^11.11.4",
-    "swr": "^2.3.6"
+    "swr": "^2.3.6",
+    "yjs": "^13.6.27"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

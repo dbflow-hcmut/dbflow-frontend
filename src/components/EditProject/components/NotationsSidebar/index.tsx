@@ -4,9 +4,13 @@ import { Plus, Table2 } from "lucide-react";
 import RectangleIcon from "@/components/Icons/rectangleIcon";
 import OvalIcon from "@/components/Icons/oval";
 import PolygonIcon from "@/components/Icons/polygon";
+import { ProjectSchemasResponse } from "@/types/projects.type";
+import classNames from "classnames";
+import { SchemaType } from "@/utils/constants";
 
 type NotationsSidebarProps = {
     isOpen: boolean;
+    onAddPage: () => void;
     onAddEntity: () => void;
     onAddDoubleEntity: () => void;
     onAddAttribute: () => void;
@@ -16,10 +20,14 @@ type NotationsSidebarProps = {
     onAddDoubleRelationship: () => void;
     onAddConstraint: (symbol: 'd' | 'o' | 'u') => void;
     onAddRelationTable: () => void;
+    projectSchemasData: ProjectSchemasResponse[] | null;
+    selectedSchema: ProjectSchemasResponse | null;
+    setSelectedSchema: (schema: ProjectSchemasResponse) => void;
 };
 
 const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
     isOpen,
+    onAddPage,
     onAddEntity,
     onAddDoubleEntity,
     onAddAttribute,
@@ -29,6 +37,9 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
     onAddDoubleRelationship,
     onAddConstraint,
     onAddRelationTable,
+    projectSchemasData,
+    selectedSchema,
+    setSelectedSchema,
 }) => {
     return (
         <div 
@@ -41,23 +52,42 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
             <div className="w-64">
                 <div className="border-b border-gray-200 my-auto flex items-center justify-between py-2 px-4">
                     <div className="text-lg font-semibold">Pages</div>
-                    <Plus className="cursor-pointer" size={18} />
+                    <Plus className="cursor-pointer" size={18} onClick={onAddPage} />
                 </div>
 
-                <div className="border-b border-gray-200 py-2 min-h-10 flex flex-col gap-2">
-                    <div className="text-sm mx-2 bg-gray-100 rounded-md p-2 cursor-pointer hover:bg-gray-100">
-                        Page 1
-                    </div>
-                    <div className="text-sm mx-2 rounded-md p-2 cursor-pointer hover:bg-gray-100">
-                        Page 2
-                    </div>
+                <div className="border-b border-gray-200 py-2 min-h-40 flex flex-col gap-2">
+                    {projectSchemasData?.map((schema) => (
+                        <div 
+                            key={schema.id} 
+                            className={classNames("text-sm mx-2 rounded-md p-2 cursor-pointer hover:bg-gray-100", {
+                                "bg-gray-100": selectedSchema?.id === schema.id,
+                            })} 
+                            onClick={() => setSelectedSchema(schema)}
+                        >
+                            <div className="flex items-center justify-between">
+                                <div className="text-xs flex-1 truncate">
+                                    {schema.name}
+                                </div>
+                                <span className={classNames(
+                                    "px-2 py-0.5 text-xs font-medium rounded ml-2 shrink-0",
+                                    {
+                                        "bg-green-50 text-green-600": schema.type === SchemaType.CONCEPTUAL,
+                                        "bg-amber-50 text-amber-600": schema.type === SchemaType.LOGICAL,
+                                        "bg-cyan-50 text-cyan-600": schema.type === SchemaType.PHYSICAL,
+                                    }
+                                )}>
+                                    {schema.type}
+                                </span>
+                            </div>
+                        </div>
+                    ))}
                 </div>
 
                 <div className="border-b border-gray-200 my-auto">
                     <div className="text-lg font-semibold py-2 px-4">Notations</div>
                 </div>
                 <div className="py-2">
-                    <div className="border-b border-gray-200 pb-2 mb-2">
+                    <div className="border-b border-gray-200 pb-2 mb-2" hidden={selectedSchema?.type !== SchemaType.CONCEPTUAL}>
                         <div className="px-2">
                             <Collapse
                                 bordered={false}
@@ -186,7 +216,7 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                         </div>
                     </div>
 
-                    <div className="border-b border-gray-200 pb-2 mb-2">
+                    <div className="border-b border-gray-200 pb-2 mb-2" hidden={selectedSchema?.type !== SchemaType.LOGICAL && selectedSchema?.type !== SchemaType.PHYSICAL}>
                         <div className="px-2">
                             <Collapse
                                 bordered={false}

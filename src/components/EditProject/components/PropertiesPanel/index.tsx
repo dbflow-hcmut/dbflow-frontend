@@ -1,24 +1,38 @@
 import React, { useMemo } from "react";
-import { Input, Checkbox } from "antd";
+import { Input, Checkbox, Select } from "antd";
 import { X } from "lucide-react";
 import { Node, Edge } from "reactflow";
 import type { AttributeData, NodeData, RelationshipData, EntityData } from "../../index";
 
+export type ErdEdgeData = {
+    label?: string;
+    fromMult?: string;
+    toMult?: string;
+    lineStyle?: 'single' | 'double' | 'bracket';
+    bracketDirection?: 'from' | 'to';
+};
+
 type PropertiesPanelProps = {
     isOpen: boolean;
     selectedNode: Node<NodeData> | undefined;
+    selectedEdge: Edge<ErdEdgeData> | undefined;
     propertiesName: string;
     nodes: Node<NodeData>[];
-    edges: Edge[];
+    edges: Edge<ErdEdgeData>[];
     onClose: () => void;
     onUpdateName: (name: string) => void;
     onUpdateAttributeKey: (checked: boolean) => void;
     onUpdateRelationshipCardinality: (entityId: string, cardinality: string) => void;
+    onUpdateEdgeFromMult: (value: string) => void;
+    onUpdateEdgeToMult: (value: string) => void;
+    onUpdateEdgeLineStyle: (style: 'single' | 'double' | 'bracket') => void;
+    onUpdateEdgeBracketDirection: (direction: 'from' | 'to') => void;
 };
 
 const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     isOpen,
     selectedNode,
+    selectedEdge,
     propertiesName,
     nodes,
     edges,
@@ -26,6 +40,10 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     onUpdateName,
     onUpdateAttributeKey,
     onUpdateRelationshipCardinality,
+    onUpdateEdgeFromMult,
+    onUpdateEdgeToMult,
+    onUpdateEdgeLineStyle,
+    onUpdateEdgeBracketDirection,
 }) => {
     const connectedEntities = useMemo(() => {
         if (!selectedNode || selectedNode.type !== 'relationship') return [];
@@ -136,9 +154,55 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                 </>
                             )}
                         </div>
+                    ) : selectedEdge ? (
+                        <div className="flex flex-col gap-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-2">Edge Type</label>
+                                <Select
+                                    value={selectedEdge.data?.lineStyle || 'single'}
+                                    onChange={(value) => onUpdateEdgeLineStyle(value)}
+                                    className="w-full"
+                                    options={[
+                                        { label: 'Single line', value: 'single' },
+                                        { label: 'Double line', value: 'double' },
+                                        { label: 'Identifying', value: 'bracket' },
+                                    ]}
+                                />
+                            </div>
+                            {selectedEdge.data?.lineStyle === 'bracket' && (
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">Identifying Direction</label>
+                                    <Select
+                                        value={selectedEdge.data?.bracketDirection || 'to'}
+                                        onChange={(value) => onUpdateEdgeBracketDirection(value)}
+                                        className="w-full"
+                                        options={[
+                                            { label: 'At source (from)', value: 'from' },
+                                            { label: 'At target (to)', value: 'to' },
+                                        ]}
+                                    />
+                                </div>
+                            )}
+                            <div>
+                                <label className="block text-sm font-medium mb-2">From Multiplicity</label>
+                                <Input
+                                    value={selectedEdge.data?.fromMult || ''}
+                                    onChange={(e) => onUpdateEdgeFromMult(e.target.value)}
+                                    placeholder="e.g., 1, N, 0..1"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-2">To Multiplicity</label>
+                                <Input
+                                    value={selectedEdge.data?.toMult || ''}
+                                    onChange={(e) => onUpdateEdgeToMult(e.target.value)}
+                                    placeholder="e.g., 1, N, 0..1"
+                                />
+                            </div>
+                        </div>
                     ) : (
                         <div className="text-sm text-gray-500 py-4 text-center">
-                            Select a node to edit properties
+                            Select a node or edge to edit properties
                         </div>
                     )}
                 </div>

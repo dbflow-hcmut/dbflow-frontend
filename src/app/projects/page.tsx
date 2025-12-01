@@ -1,24 +1,52 @@
-import { PROXY_USERS_ME } from "@/api";
-import ProjectsMeClient from "@/components/ProjectsMeClient";
+import ProjectsList from "@/components/ProjectsList";
+import { PROXY_PROJECTS } from "@/api";
 import { serverFetchJSON } from "@/lib/serverFetch";
+import { ProjectsResponse } from "@/types/projects.type";
 
-async function fetchMeOnServer() {
-    return serverFetchJSON(PROXY_USERS_ME);
+interface ProjectsPageProps {
+    searchParams: Promise<{
+        page?: string;
+        limit?: string;
+        keyword?: string;
+    }>;
 }
 
-export default async function ProjectsPage() {
-    const serverResult = await fetchMeOnServer();
+async function fetchProjects(page: number = 1, limit: number = 9, keyword?: string) {
+    try {
+        let url = PROXY_PROJECTS;
+        const params = new URLSearchParams();
+        params.set("page", page.toString());
+        params.set("limit", limit.toString());
+        if (keyword) {
+            params.set("keyword", keyword);
+        }
+        url = `${url}?${params.toString()}`;
+        
+        const data = await serverFetchJSON(url);
+        if (data && typeof data === "object" && "items" in data && "pagination" in data) {
+            return data as ProjectsResponse;
+        }
+        return { items: [], pagination: { page: 1, limit: 9, total: 0, totalPages: 0 } };
+    } catch (error) {
+        if (error && typeof error === 'object' && 'digest' in error && typeof error.digest === 'string' && error.digest.includes('NEXT_REDIRECT')) {
+            throw error;
+        }
+        console.error("Error fetching projects:", error);
+        return { items: [], pagination: { page: 1, limit: 9, total: 0, totalPages: 0 } };
+    }
+}
+
+export default async function ProjectsPage({ searchParams }: ProjectsPageProps) {
+    const params = await searchParams;
+    const page = parseInt(params.page || "1", 10);
+    const limit = parseInt(params.limit || "9", 10);
+    const keyword = params.keyword;
+    
+    const result = await fetchProjects(page, limit, keyword);
     return (
-        <div className="p-4 space-y-6">
-            <h1 className="text-xl font-semibold">Projects</h1>
-            <div className="space-y-2">
-                <div className="font-medium">Server fetch /users/me</div>
-                <pre className="bg-gray-100 p-3 rounded text-xs overflow-auto">{JSON.stringify(serverResult, null, 2)}</pre>
-            </div>
-            <div className="space-y-2">
-                <div className="font-medium">Client fetch /users/me</div>
-                <ProjectsMeClient />
-            </div>
-        </div>
+        <ProjectsList 
+            initialProjects={result.items} 
+            initialPagination={result.pagination}
+        />
     );
 }

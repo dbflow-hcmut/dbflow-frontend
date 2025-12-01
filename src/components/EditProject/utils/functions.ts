@@ -3,21 +3,72 @@ import { Node } from "reactflow";
 import type { EntityData, RelationshipData, AttributeData, NodeData } from "../index";
 import type { RelationTableData } from "@/components/erds-notations/relation-table";
 
-type ConstraintData = { symbol: 'd' | 'o' | 'u' };
+export type ConstraintData = { symbol: 'd' | 'o' | 'u' };
+export type ErdEdgeData = {
+    label?: string;
+    fromMult?: string;
+    toMult?: string;
+    lineStyle?: 'single' | 'double' | 'bracket';
+    bracketDirection?: 'from' | 'to';
+};
+export const RELATION_NOTE_PREFIX = '__RELATION__::';
+
+export const generateDiagramId = () => {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+        return `cid_${crypto.randomUUID()}`;
+    }
+    const randomSuffix = `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+    return `cid_${randomSuffix}`;
+};
 
 const deselectAllNodes = <T extends NodeData>(nodes: Node<T>[]): Node<T>[] => {
     return nodes.map((n) => ({ ...n, selected: false }));
 };
 
-export const createNodeCreators = (setNodes: React.Dispatch<React.SetStateAction<Node<NodeData>[]>>) => {
+type NodeCreatorOptions = {
+    getViewportCenter?: () => { x: number; y: number } | null;
+};
+
+const getSpawnPosition = (
+    existingNodes: Node<NodeData>[],
+    getViewportCenter?: () => { x: number; y: number } | null
+) => {
+    const center = getViewportCenter?.();
+    if (!center) {
+        const fallback = existingNodes.at(-1)?.position ?? { x: 0, y: 0 };
+        return {
+            x: fallback.x + 60,
+            y: fallback.y + 60,
+        };
+    }
+
+    const index = existingNodes.length;
+    const angleStep = (2 * Math.PI) / 6;
+    const angle = (index % 6) * angleStep;
+    const radius = 40 + Math.floor(index / 6) * 30;
+
+    return {
+        x: center.x + Math.cos(angle) * radius,
+        y: center.y + Math.sin(angle) * radius,
+    };
+};
+
+export const createNodeCreators = (
+    setNodes: React.Dispatch<React.SetStateAction<Node<NodeData>[]>>,
+    options?: NodeCreatorOptions
+) => {
+    const resolvePosition = (existingNodes: Node<NodeData>[]) =>
+        getSpawnPosition(existingNodes, options?.getViewportCenter);
+
     const addRelationship = () => {
         setNodes((existingNodes) => {
-            const id = `rel_${existingNodes.length + 1}`;
+            const id = generateDiagramId();
+            const name = `rel_${existingNodes.length + 1}`;
             const newNode: Node<RelationshipData> = {
                 id,
                 type: "relationship",
-                position: { x: 1000 + existingNodes.length * 30, y: 1000 + existingNodes.length * 25 },
-                data: { name: id, variant: 'single' },
+                position: resolvePosition(existingNodes),
+                data: { name: name, variant: 'single' },
                 style: { width: 70, height: 40 },
                 selected: true,
             };
@@ -27,12 +78,13 @@ export const createNodeCreators = (setNodes: React.Dispatch<React.SetStateAction
 
     const addDoubleRelationship = () => {
         setNodes((existingNodes) => {
-            const id = `rel_${existingNodes.length + 1}`;
+            const id = generateDiagramId();
+            const name = `rel_${existingNodes.length + 1}`;
             const newNode: Node<RelationshipData> = {
                 id,
                 type: "relationship",
-                position: { x: 1000 + existingNodes.length * 30, y: 1000 + existingNodes.length * 25 },
-                data: { name: id, variant: 'double' },
+                position: resolvePosition(existingNodes),
+                data: { name: name, variant: 'double' },
                 style: { width: 70, height: 40 },
                 selected: true,
             };
@@ -42,12 +94,13 @@ export const createNodeCreators = (setNodes: React.Dispatch<React.SetStateAction
 
     const addEntity = () => {
         setNodes((existingNodes) => {
-            const id = `ent_${existingNodes.length + 1}`;
+            const id = generateDiagramId();
+            const name = `ent_${existingNodes.length + 1}`;
             const newNode: Node<EntityData> = {
                 id,
                 type: "entity",
-                position: { x: 1000 + existingNodes.length * 25, y: 1000 + existingNodes.length * 20 },
-                data: { name: id, fields: [], variant: 'single' },
+                position: resolvePosition(existingNodes),
+                data: { name: name, fields: [], variant: 'single' },
                 style: { width: 70, height: 30 },
                 selected: true,
             };
@@ -57,12 +110,13 @@ export const createNodeCreators = (setNodes: React.Dispatch<React.SetStateAction
 
     const addDoubleEntity = () => {
         setNodes((existingNodes) => {
-            const id = `ent_${existingNodes.length + 1}`;
+            const id = generateDiagramId();
+            const name = `ent_${existingNodes.length + 1}`;
             const newNode: Node<EntityData> = {
                 id,
                 type: "entity",
-                position: { x: 1000 + existingNodes.length * 25, y: 1000 + existingNodes.length * 20 },
-                data: { name: id, fields: [], variant: 'double' },
+                position: resolvePosition(existingNodes),
+                data: { name: name, fields: [], variant: 'double' },
                 style: { width: 70, height: 30 },
                 selected: true,
             };
@@ -72,12 +126,13 @@ export const createNodeCreators = (setNodes: React.Dispatch<React.SetStateAction
 
     const addAttribute = () => {
         setNodes((existingNodes) => {
-            const id = `attr_${existingNodes.length + 1}`;
+            const id = generateDiagramId();
+            const name = `attr_${existingNodes.length + 1}`;
             const newNode: Node<AttributeData> = {
                 id,
                 type: "attribute",
-                position: { x: 1000 + existingNodes.length * 35, y: 1000 + existingNodes.length * 20 },
-                data: { name: id, variant: 'single' },
+                position: resolvePosition(existingNodes),
+                data: { name: name, variant: 'single' },
                 style: { width: 70, height: 30 },
                 selected: true,
             };
@@ -87,12 +142,13 @@ export const createNodeCreators = (setNodes: React.Dispatch<React.SetStateAction
 
     const addMultivaluedAttribute = () => {
         setNodes((existingNodes) => {
-            const id = `attr_${existingNodes.length + 1}`;
+            const id = generateDiagramId();
+            const name = `attr_${existingNodes.length + 1}`;
             const newNode: Node<AttributeData> = {
                 id,
                 type: "attribute",
-                position: { x: 1000 + existingNodes.length * 35, y: 1000 + existingNodes.length * 20 },
-                data: { name: id, variant: 'double' },
+                position: resolvePosition(existingNodes),
+                data: { name: name, variant: 'double' },
                 style: { width: 70, height: 30 },
                 selected: true,
             };
@@ -102,12 +158,13 @@ export const createNodeCreators = (setNodes: React.Dispatch<React.SetStateAction
 
     const addDashedAttribute = () => {
         setNodes((existingNodes) => {
-            const id = `attr_${existingNodes.length + 1}`;
+            const id = generateDiagramId();
+            const name = `attr_${existingNodes.length + 1}`;
             const newNode: Node<AttributeData> = {
                 id,
                 type: "attribute",
-                position: { x: 1000 + existingNodes.length * 35, y: 1000 + existingNodes.length * 20 },
-                data: { name: id, variant: 'dashed' },
+                position: resolvePosition(existingNodes),
+                data: { name: name, variant: 'dashed' },
                 style: { width: 70, height: 30 },
                 selected: true,
             };
@@ -117,11 +174,11 @@ export const createNodeCreators = (setNodes: React.Dispatch<React.SetStateAction
 
     const addConstraint = (symbol: 'd' | 'o' | 'u') => {
         setNodes((existingNodes) => {
-            const id = `cst_${existingNodes.length + 1}`;
+            const id = generateDiagramId();
             const newNode: Node<ConstraintData> = {
                 id,
                 type: "constraint",
-                position: { x: 1000 + existingNodes.length * 20, y: 1000 + existingNodes.length * 15 },
+                position: resolvePosition(existingNodes),
                 data: { symbol },
                 style: { width: 22, height: 22 },
                 selected: true,
@@ -132,11 +189,11 @@ export const createNodeCreators = (setNodes: React.Dispatch<React.SetStateAction
 
     const addRelationTable = () => {
         setNodes((existingNodes) => {
-            const id = `tbl_${existingNodes.length + 1}`;
+            const id = generateDiagramId();
             const newNode: Node<RelationTableData> = {
                 id,
                 type: "relation",
-                position: { x: 1000 + existingNodes.length * 25, y: 1000 + existingNodes.length * 20 },
+                position: resolvePosition(existingNodes),
                 data: { name: id, columns: [] },
                 style: { width: 160, height: 120 },
                 selected: true,
@@ -189,4 +246,3 @@ export const createUpdateFunctions = (
         updateAttributeKey,
     };
 };
-
