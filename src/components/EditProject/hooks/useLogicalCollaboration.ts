@@ -46,6 +46,7 @@ export const useLogicalCollaboration = ({
     const providerRef = useRef<HocuspocusProvider | null>(null);
     const ydocRef = useRef<Y.Doc | null>(null);
     const isSyncingFromYjsRef = useRef(false);
+    const hasLoadedInitialDataRef = useRef(false);
     const lastSyncedDiagramStringRef = useRef<string | null>(null);
     const lastAppliedDiagramStringRef = useRef<string | null>(null);
     const lastSyncedModelStringRef = useRef<string | null>(null);
@@ -61,6 +62,7 @@ export const useLogicalCollaboration = ({
             lastAppliedDiagramStringRef.current = null;
             lastSyncedModelStringRef.current = null;
             lastAppliedModelStringRef.current = null;
+            hasLoadedInitialDataRef.current = false;
             return;
         }
 
@@ -68,6 +70,7 @@ export const useLogicalCollaboration = ({
         lastAppliedDiagramStringRef.current = null;
         lastSyncedModelStringRef.current = null;
         lastAppliedModelStringRef.current = null;
+        hasLoadedInitialDataRef.current = false;
     }, [enabled, schema?.id]);
 
     useEffect(() => {
@@ -114,6 +117,7 @@ export const useLogicalCollaboration = ({
             );
 
             isSyncingFromYjsRef.current = true;
+            hasLoadedInitialDataRef.current = true;
             setNodes(reactNodes);
             setEdges(reactEdges);
 
@@ -242,7 +246,17 @@ export const useLogicalCollaboration = ({
     useEffect(() => {
         if (!enabled) return;
         if (!ydocRef.current || !schema?.id) return;
-        if (isSyncingFromYjsRef.current) return;
+        if (isSyncingFromYjsRef.current) {
+            console.log("[Logical Collaboration] Skipping sync - currently syncing from Yjs");
+            return;
+        }
+        
+        // Prevent syncing empty data if initial data hasn't been loaded yet
+        // This prevents data loss when switching schemas
+        if (!hasLoadedInitialDataRef.current && nodes.length === 0 && edges.length === 0) {
+            console.log("[Logical Collaboration] Skipping sync - no initial data loaded yet and diagram is empty");
+            return;
+        }
 
         const storedNodes = mapReactNodesToStoredNodes(nodes);
         const storedEdges = mapReactEdgesToStoredEdges(edges, nodes);
