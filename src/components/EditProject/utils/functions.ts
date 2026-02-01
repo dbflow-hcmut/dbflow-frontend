@@ -190,12 +190,31 @@ export const createNodeCreators = (
     const addRelationTable = () => {
         setNodes((existingNodes) => {
             const id = generateDiagramId();
+            const tableCount = existingNodes.filter(n => n.type === 'relation').length;
+            const tableName = `table_${tableCount + 1}`;
+            
+            // Calculate initial width based on table name and default column
+            // With new spacing: nameWidth (40) + typeWidth (40) + spacing (20) = ~220px
+            // Estimate: column_1 (~56px) + varchar (~56px) + padding (100px) = ~212px
+            // Table name: ~tableName.length * 8 + 40
+            const defaultColNameWidth = 'column_1'.length * 7 + 40; // ~89px
+            const defaultColTypeWidth = 'varchar'.length * 7 + 40; // ~89px
+            const rowSpacing = 20;
+            const tableNameWidth = tableName.length * 8 + 40;
+            const estimatedRowWidth = defaultColNameWidth + defaultColTypeWidth + rowSpacing;
+            const estimatedWidth = Math.max(220, Math.max(tableNameWidth, estimatedRowWidth));
+            
             const newNode: Node<RelationTableData> = {
                 id,
                 type: "relation",
                 position: resolvePosition(existingNodes),
-                data: { name: id, columns: [] },
-                style: { width: 160, height: 120 },
+                data: { 
+                    name: tableName, 
+                    columns: [
+                        { name: 'column_1', type: 'varchar', isPrimary: false, isNullable: true }
+                    ]
+                },
+                style: { width: estimatedWidth, height: 120 },
                 selected: true,
             };
             return [...deselectAllNodes(existingNodes), newNode];
@@ -241,8 +260,76 @@ export const createUpdateFunctions = (
         );
     };
 
+    const addRelationTableColumn = () => {
+        if (!selectedNode || selectedNode.type !== 'relation') return;
+        const tableData = selectedNode.data as RelationTableData;
+        const newColumn = {
+            name: `column_${(tableData.columns?.length || 0) + 1}`,
+            type: 'varchar',
+            isPrimary: false,
+            isNullable: true,
+        };
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            columns: [...(tableData.columns || []), newColumn],
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
+    const removeRelationTableColumn = (columnIndex: number) => {
+        if (!selectedNode || selectedNode.type !== 'relation') return;
+        const tableData = selectedNode.data as RelationTableData;
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            columns: tableData.columns?.filter((_, idx) => idx !== columnIndex) || [],
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
+    const updateRelationTableColumn = (
+        columnIndex: number,
+        updates: Partial<{ name: string; type: string; isPrimary: boolean; isNullable: boolean }>
+    ) => {
+        if (!selectedNode || selectedNode.type !== 'relation') return;
+        const tableData = selectedNode.data as RelationTableData;
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            columns: tableData.columns?.map((col, idx) =>
+                                idx === columnIndex ? { ...col, ...updates } : col
+                            ) || [],
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
     return {
         updateNodeName,
         updateAttributeKey,
+        addRelationTableColumn,
+        removeRelationTableColumn,
+        updateRelationTableColumn,
     };
 };

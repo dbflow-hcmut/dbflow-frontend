@@ -1,0 +1,406 @@
+import { Node, Viewport, Edge } from "reactflow";
+import type { NodeData } from "../index";
+import type { RelationTableData } from "@/components/erds-notations/relation-table";
+import { generateDiagramId } from "./functions";
+
+type RelationTableEdgeData = {
+    label?: string;
+    controlPoints?: Array<{ x: number; y: number }>;
+};
+
+export const getViewportStorageKey = (schemaId?: string | null) =>
+    schemaId ? `logicalDiagramViewport:${schemaId}` : null;
+
+export const loadViewportFromStorage = (schemaId?: string | null) => {
+    if (typeof window === "undefined") return null;
+    const key = getViewportStorageKey(schemaId);
+    if (!key) return null;
+    try {
+        const stored = window.localStorage.getItem(key);
+        return stored ? (JSON.parse(stored) as Viewport) : null;
+    } catch (error) {
+        console.error("Failed to parse stored viewport:", error);
+        return null;
+    }
+};
+
+export const saveViewportToStorage = (nextViewport: Viewport, schemaId?: string | null) => {
+    if (typeof window === "undefined") return;
+    const key = getViewportStorageKey(schemaId);
+    if (!key) return;
+    try {
+        window.localStorage.setItem(key, JSON.stringify(nextViewport));
+    } catch (error) {
+        console.error("Failed to store viewport:", error);
+    }
+};
+
+type DiagramNodeStyle = {
+    class?: string;
+    stroke?: string | null;
+    fill?: string | null;
+    fontSize?: number;
+    [key: string]: unknown;
+};
+
+export type StoredLogicalDiagramNode = {
+    id: string;
+    type: "table" | "note";
+    position: { x: number; y: number };
+    size: { w: number; h: number };
+    zIndex?: number;
+    style?: DiagramNodeStyle;
+    name?: string;
+    tableId?: string;
+    columns?: Array<{
+        columnId: string;
+        label?: string;
+        decorations?: {
+            pk?: boolean;
+            fk?: boolean;
+            underline?: boolean;
+            italic?: boolean;
+        };
+    }>;
+    text?: string;
+};
+
+type LogicalEdgeType = "fk" | "noteLink";
+
+export type StoredLogicalDiagramEdge = {
+    id: string;
+    type: LogicalEdgeType;
+    source: string;
+    target: string;
+    points?: Array<{ x: number; y: number }>;
+    style?: DiagramNodeStyle;
+    fkRef?: {
+        tableId: string;
+        foreignKeyIndex: number;
+        sourceColumnName?: string; // Lưu column name để map lại handle
+        targetColumnName?: string; // Lưu column name để map lại handle
+    };
+    labels?: {
+        text?: string;
+        position?: { x: number; y: number };
+    };
+};
+
+type LegacyStoredNode = {
+    data?: NodeData;
+};
+
+export type StoredLogicalNode = StoredLogicalDiagramNode & LegacyStoredNode;
+
+const NODE_SIZE_FALLBACKS: Record<string, { w: number; h: number }> = {
+    relation: { w: 160, h: 120 },
+    table: { w: 160, h: 120 },
+    note: { w: 140, h: 90 },
+    default: { w: 100, h: 50 },
+};
+
+const getStoredNodeSize = (node: Node<NodeData>) => {
+    const parsedSize = getNodeSize(node.style);
+    if (parsedSize) return parsedSize;
+    const nodeType = node.type ?? "default";
+    return NODE_SIZE_FALLBACKS[nodeType] ?? NODE_SIZE_FALLBACKS.default;
+};
+
+const parseSizeValue = (value: number | string | undefined): number | undefined => {
+    if (typeof value === "number") {
+        return value;
+    }
+    if (typeof value === "string") {
+        const parsed = Number.parseFloat(value);
+        return Number.isNaN(parsed) ? undefined : parsed;
+    }
+    return undefined;
+};
+
+const getNodeSize = (style: Node<NodeData>["style"]) => {
+    if (!style) return undefined;
+    const width = parseSizeValue(style.width as number | string | undefined);
+    const height = parseSizeValue(style.height as number | string | undefined);
+    if (typeof width === "number" && typeof height === "number") {
+        return { w: width, h: height };
+    }
+    return undefined;
+};
+
+const sanitizeStyleForStorage = (
+    style: Node<NodeData>["style"]
+): DiagramNodeStyle | undefined => {
+    const cleanedStyle = style ? { ...(style as Record<string, unknown>) } : {};
+
+    if ("width" in cleanedStyle) delete cleanedStyle.width;
+    if ("height" in cleanedStyle) delete cleanedStyle.height;
+
+    return Object.keys(cleanedStyle).length > 0 ? (cleanedStyle as DiagramNodeStyle) : undefined;
+};
+
+const ensurePosition = (node: StoredLogicalNode) => node.position ?? { x: 0, y: 0 };
+
+const ensureStyle = (node: StoredLogicalNode) =>
+    node.size ? { width: node.size.w, height: node.size.h } : undefined;
+
+const mapRelationNode = (node: StoredLogicalNode): Node<RelationTableData> => {
+    const dataSource = node.data as RelationTableData | undefined;
+    
+    // Prefer dataSource columns (full RelationColumn data), otherwise use empty array
+    // node.columns is stored format and doesn't have full column info
+    const columns = dataSource?.columns ?? [];
+    
+    return {
+        id: node.tableId ?? node.id,
+        type: "relation",
+        position: ensurePosition(node),
+        data: {
+            name: node.name ?? dataSource?.name ?? node.tableId ?? node.id,
+            columns,
+        },
+        style: ensureStyle(node),
+        zIndex: node.zIndex,
+    };
+};
+
+const mapNoteNode = (node: StoredLogicalNode): Node<NodeData> => {
+    return {
+        id: node.id,
+        type: "entity",
+        position: ensurePosition(node),
+        data: { name: node.name ?? node.id, fields: [] },
+        style: ensureStyle(node),
+        zIndex: node.zIndex,
+    };
+};
+
+const mapStoredNodeToReactNode = (node: StoredLogicalNode): Node<NodeData> => {
+    switch (node.type) {
+        case "table":
+            return mapRelationNode(node);
+        case "note":
+            return mapNoteNode(node);
+        default:
+            return mapRelationNode(node);
+    }
+};
+
+export const mapStoredNodesToReactNodes = (storedNodes: StoredLogicalNode[] = []): Node<NodeData>[] => {
+    return storedNodes.map((node) => ({
+        ...mapStoredNodeToReactNode(node),
+        selected: false,
+    }));
+};
+
+const mapReactRelationNode = (node: Node<RelationTableData>): StoredLogicalNode => {
+    const { name, columns = [] } = node.data;
+
+    // Map columns to stored format
+    const storedColumns: StoredLogicalDiagramNode["columns"] = columns.map((col, idx) => ({
+        columnId: `lid_${node.id}_col_${idx}`,
+        label: col.name,
+        decorations: {
+            pk: col.isPrimary ? true : undefined,
+            fk: false, // Will be determined from edges
+            underline: col.isPrimary ? true : undefined,
+        },
+    }));
+
+    return {
+        id: node.id,
+        type: "table",
+        position: node.position,
+        size: getStoredNodeSize(node),
+        zIndex: node.zIndex,
+        name,
+        tableId: node.id,
+        columns: storedColumns.length > 0 ? storedColumns : undefined,
+        style: sanitizeStyleForStorage(node.style),
+        // Store full column data for model building
+        data: {
+            name,
+            columns,
+        } as RelationTableData,
+    };
+};
+
+const mapReactNodeToStoredNode = (node: Node<NodeData>): StoredLogicalNode => {
+    switch (node.type) {
+        case "relation":
+            return mapReactRelationNode(node as Node<RelationTableData>);
+        default:
+            return {
+                id: node.id,
+                type: "table",
+                position: node.position,
+                size: getStoredNodeSize(node),
+                zIndex: node.zIndex,
+                data: node.data,
+                style: sanitizeStyleForStorage(node.style),
+            };
+    }
+};
+
+export const mapReactNodesToStoredNodes = (reactNodes: Node<NodeData>[] = []): StoredLogicalNode[] => {
+    return reactNodes
+        .filter((node) => node.type === "relation")
+        .map(mapReactNodeToStoredNode);
+};
+
+const mapReactEdgeToStoredEdge = (
+    edge: Edge<RelationTableEdgeData>,
+    nodeMap: Map<string, Node<NodeData>>
+): StoredLogicalDiagramEdge | null => {
+    const sourceNode = nodeMap.get(edge.source);
+    const targetNode = nodeMap.get(edge.target);
+    if (!sourceNode || !targetNode) {
+        return null;
+    }
+
+    // Both nodes should be relation tables for FK edges
+    if (sourceNode.type !== "relation" || targetNode.type !== "relation") {
+        return null;
+    }
+
+    const sourceData = sourceNode.data as RelationTableData;
+    const targetData = targetNode.data as RelationTableData;
+
+    // Extract FK information from edge handles
+    // The source handle should be a column name from source table
+    // The target handle should be a column name from target table
+    const sourceColumnName = edge.sourceHandle?.replace("-source", "") || "";
+    const targetColumnName = edge.targetHandle?.replace("-target", "") || "";
+
+    // Find the column indices
+    const sourceColumnIndex = sourceData.columns?.findIndex((col) => col.name === sourceColumnName) ?? -1;
+    const targetColumnIndex = targetData.columns?.findIndex((col) => col.name === targetColumnName) ?? -1;
+
+    if (sourceColumnIndex === -1 || targetColumnIndex === -1) {
+        return null;
+    }
+
+    // Extract control points from edge data
+    const points = edge.data?.controlPoints?.map((p: { x: number; y: number }) => ({ x: p.x, y: p.y }));
+
+    const storedEdge: StoredLogicalDiagramEdge = {
+        id: edge.id || generateDiagramId(),
+        type: "fk",
+        source: edge.source,
+        target: edge.target,
+        points,
+        style: sanitizeStyleForStorage(edge.style),
+        fkRef: {
+            tableId: sourceNode.id,
+            foreignKeyIndex: sourceColumnIndex,
+            sourceColumnName, // Lưu column name để map lại handle (giống conceptual lưu portId)
+            targetColumnName, // Lưu column name để map lại handle
+        },
+        labels: edge.data?.label
+            ? {
+                  text: edge.data.label,
+                  position: { x: 0, y: 0 }, // Will be calculated from control points
+              }
+            : undefined,
+    };
+
+    return storedEdge;
+};
+
+const isSchemaStoredEdge = (edge: unknown): edge is StoredLogicalDiagramEdge => {
+    if (!edge || typeof edge !== "object") return false;
+    const candidate = edge as StoredLogicalDiagramEdge;
+    return (
+        typeof candidate.id === "string" &&
+        typeof candidate.type === "string" &&
+        typeof candidate.source === "string" &&
+        typeof candidate.target === "string"
+    );
+};
+
+const mapSchemaEdgeToReactEdge = (
+    edge: StoredLogicalDiagramEdge,
+    nodeMap: Map<string, Node<NodeData>>
+): Edge<RelationTableEdgeData> | null => {
+    if (!nodeMap.has(edge.source) || !nodeMap.has(edge.target)) {
+        return null;
+    }
+
+    const sourceNode = nodeMap.get(edge.source);
+    const targetNode = nodeMap.get(edge.target);
+    if (!sourceNode || !targetNode || sourceNode.type !== "relation" || targetNode.type !== "relation") {
+        return null;
+    }
+
+    const sourceData = sourceNode.data as RelationTableData;
+    const targetData = targetNode.data as RelationTableData;
+
+    // Determine source and target handles from FK reference
+    let sourceHandle: string | undefined;
+    let targetHandle: string | undefined;
+
+    if (edge.fkRef) {
+        const fkColumn = sourceData.columns?.[edge.fkRef.foreignKeyIndex];
+        if (fkColumn) {
+            sourceHandle = `${fkColumn.name}-source`;
+        }
+        // For target, we need to find the primary key column
+        const pkColumn = targetData.columns?.find((col) => col.isPrimary);
+        if (pkColumn) {
+            targetHandle = `${pkColumn.name}-target`;
+        }
+    }
+
+    const data: RelationTableEdgeData = {
+        label: edge.labels?.text,
+        controlPoints: edge.points?.map((p) => ({ x: p.x, y: p.y })),
+    };
+
+    const reactEdge: Edge<RelationTableEdgeData> = {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        type: "relation-table-edge",
+        data,
+        ...(sourceHandle ? { sourceHandle } : {}),
+        ...(targetHandle ? { targetHandle } : {}),
+    };
+
+    return reactEdge;
+};
+
+export const mapReactEdgesToStoredEdges = (
+    reactEdges: Edge<RelationTableEdgeData>[] = [],
+    nodes: Node<NodeData>[] = []
+): StoredLogicalDiagramEdge[] => {
+    const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+    return reactEdges
+        .filter((edge) => edge.type === "relation-table-edge")
+        .map((edge) => mapReactEdgeToStoredEdge(edge, nodeMap))
+        .filter((edge): edge is StoredLogicalDiagramEdge => Boolean(edge));
+};
+
+export const mapStoredEdgesToReactEdges = (
+    storedEdges: (StoredLogicalDiagramEdge | Edge)[] = [],
+    nodes: Node<NodeData>[] = []
+): Edge<RelationTableEdgeData>[] => {
+    const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+
+    return storedEdges
+        .map((edge) => {
+            if (isSchemaStoredEdge(edge)) {
+                return mapSchemaEdgeToReactEdge(edge, nodeMap);
+            }
+
+            // Legacy edge format
+            const legacyEdge = edge as Edge;
+            if (!legacyEdge.source || !legacyEdge.target) return null;
+
+            return {
+                ...legacyEdge,
+                type: "relation-table-edge",
+                data: legacyEdge.data || {},
+            };
+        })
+        .filter((edge): edge is Edge<RelationTableEdgeData> => Boolean(edge));
+};
+

@@ -1,12 +1,15 @@
-import React from "react";
-import { Button, Collapse } from "antd";
-import { Plus, Table2 } from "lucide-react";
+import React, { useState } from "react";
+import { Button, Collapse, Dropdown } from "antd";
+import { Plus, Table2, MoreVertical, Edit, Trash2 } from "lucide-react";
+import type { MenuProps } from "antd";
 import RectangleIcon from "@/components/Icons/rectangleIcon";
 import OvalIcon from "@/components/Icons/oval";
 import PolygonIcon from "@/components/Icons/polygon";
 import { ProjectSchemasResponse } from "@/types/projects.type";
 import classNames from "classnames";
 import { SchemaType } from "@/utils/constants";
+import DeleteSchemaModal from "../DeleteSchemaModal";
+import RenameSchemaModal from "../RenameSchemaModal";
 
 type NotationsSidebarProps = {
     isOpen: boolean;
@@ -23,6 +26,8 @@ type NotationsSidebarProps = {
     projectSchemasData: ProjectSchemasResponse[] | null;
     selectedSchema: ProjectSchemasResponse | null;
     setSelectedSchema: (schema: ProjectSchemasResponse) => void;
+    projectId: string | null;
+    onSchemaDeleted?: () => void;
 };
 
 const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
@@ -40,7 +45,76 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
     projectSchemasData,
     selectedSchema,
     setSelectedSchema,
+    projectId,
+    onSchemaDeleted,
 }) => {
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+    const [schemaToDelete, setSchemaToDelete] = useState<ProjectSchemasResponse | null>(null);
+    const [renameModalOpen, setRenameModalOpen] = useState(false);
+    const [schemaToRename, setSchemaToRename] = useState<ProjectSchemasResponse | null>(null);
+
+    const handleDeleteClick = (schema: ProjectSchemasResponse, e: any) => {
+        if (e?.stopPropagation && typeof e.stopPropagation === 'function') {
+            e.stopPropagation();
+        }
+        setSchemaToDelete(schema);
+        setDeleteModalOpen(true);
+    };
+
+    const handleRenameClick = (schema: ProjectSchemasResponse, e: any) => {
+        if (e?.stopPropagation && typeof e.stopPropagation === 'function') {
+            e.stopPropagation();
+        }
+        setSchemaToRename(schema);
+        setRenameModalOpen(true);
+    };
+
+    const handleDeleteSuccess = () => {
+        // If deleted schema was selected, select first available schema
+        if (schemaToDelete && selectedSchema?.id === schemaToDelete.id) {
+            const remainingSchemas = projectSchemasData?.filter(s => s.id !== schemaToDelete.id) || [];
+            if (remainingSchemas.length > 0) {
+                setSelectedSchema(remainingSchemas[0]);
+            }
+        }
+        // Call callback to refresh schemas
+        if (onSchemaDeleted) {
+            onSchemaDeleted();
+        }
+        setSchemaToDelete(null);
+    };
+
+    const handleRenameSuccess = () => {
+        // Call callback to refresh schemas
+        if (onSchemaDeleted) {
+            onSchemaDeleted();
+        }
+        setSchemaToRename(null);
+    };
+
+    const getMenuItems = (schema: ProjectSchemasResponse): MenuProps['items'] => [
+        {
+            key: 'rename',
+            label: (
+                <div className="flex items-center gap-2">
+                    <Edit size={14} />
+                    <span>Rename</span>
+                </div>
+            ),
+            onClick: (e) => handleRenameClick(schema, e as any),
+        },
+        {
+            key: 'delete',
+            label: (
+                <div className="flex items-center gap-2">
+                    <Trash2 size={14} />
+                    <span>Delete</span>
+                </div>
+            ),
+            onClick: (e) => handleDeleteClick(schema, e as any),
+            danger: true,
+        },
+    ];
     return (
         <div 
             className={`absolute h-[calc(100vh-160px)] top-1/2 -translate-y-1/2 left-4 flex flex-col items-center gap-2 bg-white z-10 rounded-lg shadow-md transition-all duration-300 ease-in-out ${
@@ -64,24 +138,62 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                             })} 
                             onClick={() => setSelectedSchema(schema)}
                         >
-                            <div className="flex items-center justify-between">
+                            <div className="flex items-center justify-between gap-2">
                                 <div className="text-xs flex-1 truncate">
                                     {schema.name}
                                 </div>
-                                <span className={classNames(
-                                    "px-2 py-0.5 text-xs font-medium rounded ml-2 shrink-0",
-                                    {
-                                        "bg-green-50 text-green-600": schema.type === SchemaType.CONCEPTUAL,
-                                        "bg-amber-50 text-amber-600": schema.type === SchemaType.LOGICAL,
-                                        "bg-cyan-50 text-cyan-600": schema.type === SchemaType.PHYSICAL,
-                                    }
-                                )}>
-                                    {schema.type}
-                                </span>
+                                <div className="flex items-center gap-2 shrink-0">
+                                    <span className={classNames(
+                                        "px-2 py-0.5 text-xs font-medium rounded",
+                                        {
+                                            "bg-green-50 text-green-600": schema.type === SchemaType.CONCEPTUAL,
+                                            "bg-amber-50 text-amber-600": schema.type === SchemaType.LOGICAL,
+                                            "bg-cyan-50 text-cyan-600": schema.type === SchemaType.PHYSICAL,
+                                        }
+                                    )}>
+                                        {schema.type}
+                                    </span>
+                                    <Dropdown
+                                        menu={{ items: getMenuItems(schema) }}
+                                        trigger={['click']}
+                                        placement="bottomRight"
+                                    >
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                            }}
+                                            className="p-1 hover:bg-gray-200 rounded transition-colors"
+                                        >
+                                            <MoreVertical size={14} className="text-gray-600" />
+                                        </button>
+                                    </Dropdown>
+                                </div>
                             </div>
                         </div>
                     ))}
                 </div>
+
+                <DeleteSchemaModal
+                    open={deleteModalOpen}
+                    schema={schemaToDelete}
+                    projectId={projectId}
+                    onClose={() => {
+                        setDeleteModalOpen(false);
+                        setSchemaToDelete(null);
+                    }}
+                    onSuccess={handleDeleteSuccess}
+                />
+
+                <RenameSchemaModal
+                    open={renameModalOpen}
+                    schema={schemaToRename}
+                    projectId={projectId}
+                    onClose={() => {
+                        setRenameModalOpen(false);
+                        setSchemaToRename(null);
+                    }}
+                    onSuccess={handleRenameSuccess}
+                />
 
                 <div className="border-b border-gray-200 my-auto">
                     <div className="text-lg font-semibold py-2 px-4">Notations</div>

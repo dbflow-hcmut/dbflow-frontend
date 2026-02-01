@@ -1,6 +1,6 @@
 import useSWR from "swr";
-import { apiGet } from "@/lib/clientFetch";
-import { PROXY_PROJECTS } from "@/api";
+import { apiGet, apiDelete } from "@/lib/clientFetch";
+import { PROXY_PROJECTS, PROXY_DELETE_SCHEMA } from "@/api";
 import { ProjectsResponse } from "@/types/projects.type";
 
 export async function getProjects(page: number = 1, limit: number = 9, keyword?: string) {
@@ -28,5 +28,10 @@ export function useProjects(page: number = 1, limit: number = 9, keyword?: strin
         isLoading,
         error: error as Error | undefined,
     };
+}
+
+export async function deleteSchema(projectId: string, schemaId: string): Promise<void> {
+    const url = PROXY_DELETE_SCHEMA(projectId, schemaId);
+    await apiDelete<void>(url);
 }
 

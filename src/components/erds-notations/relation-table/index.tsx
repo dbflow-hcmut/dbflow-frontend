@@ -1,7 +1,15 @@
-import classNames from "classnames";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { NodeResizer, Position, useNodeId, useStore, useReactFlow } from "reactflow";
-import ErdHandle from "../../erd-handle";
+import classNames from "classnames";
+import {
+    DatabaseSchemaNode,
+    DatabaseSchemaNodeHeader,
+    DatabaseSchemaNodeBody,
+    DatabaseSchemaTableRow,
+    DatabaseSchemaTableCell,
+} from "@/components/database-schema-node";
+import { LabeledHandle } from "@/components/labeled-handle";
+import { KeyRound } from "lucide-react";
 
 type RelationColumn = {
     name: string;
@@ -17,12 +25,120 @@ export type RelationTableData = {
 
 const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
     const nodeId = useNodeId();
-    const isSelected = useStore((store) => store.nodeInternals.get(nodeId!)?.selected);
+    const node = useStore((store) => store.nodeInternals.get(nodeId!));
+    const isSelected = node?.selected;
     const [isHovered, setIsHovered] = useState(false);
     const [isEditingName, setIsEditingName] = useState(false);
     const [localName, setLocalName] = useState(data.name);
     const { setNodes } = useReactFlow();
     const nameRef = useRef<HTMLDivElement | null>(null);
+    const contentRef = useRef<HTMLDivElement | null>(null);
+    
+    // Calculate height based on number of columns
+    const headerHeight = 36; // Approximate header height with padding
+    const rowHeight = 32; // Approximate row height with padding
+    const minHeight = 100;
+    const calculatedHeight = headerHeight + (data.columns?.length || 0) * rowHeight;
+    const nodeHeight = Math.max(minHeight, calculatedHeight);
+    
+    // Get initial width from node style or calculate based on content
+    const getInitialWidth = () => {
+        // Try to get width from node style first
+        if (node?.style?.width && typeof node.style.width === 'number') {
+            return node.style.width;
+        }
+        // Otherwise estimate based on columns with new spacing
+        // nameWidth (40) + typeWidth (40) + spacing (20) = ~100px base per column
+        if (data.columns?.length) {
+            const estimatedColWidth = data.columns.length * 180; // Rough estimate per column with new spacing
+            return Math.max(220, estimatedColWidth);
+        }
+        return 220; // Default width for empty table
+    };
+    
+    const [nodeWidth, setNodeWidth] = useState(() => getInitialWidth());
+    const [minWidth, setMinWidth] = useState(200);
+    
+    useEffect(() => {
+        if (!contentRef.current) return;
+        
+        const calculateWidth = () => {
+            const content = contentRef.current;
+            if (!content) return;
+            
+            // Helper to measure text width accurately
+            const measureText = (text: string, fontSize: string, fontWeight: string = 'normal') => {
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                if (!context) return text.length * 7; // Fallback
+                context.font = `${fontWeight} ${fontSize} -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+                return context.measureText(text).width;
+            };
+            
+            let maxWidth = 200; // Minimum width
+            
+            // Measure header (table name)
+            const headerText = localName || data.name || '';
+            const headerTextWidth = measureText(headerText, '14px', '600');
+            // Header padding: px-3 = 12px each side = 24px total
+            maxWidth = Math.max(maxWidth, headerTextWidth + 24);
+            
+            // Measure each row
+            data.columns?.forEach((col) => {
+                let rowWidth = 0;
+                
+                // Left side: column name + handle
+                const colNameWidth = measureText(col.name || '', '12px');
+                rowWidth += colNameWidth;
+                // Label padding: pl-3 = 12px
+                rowWidth += 12;
+                // Handle: w-3 = 12px + margin ~4px
+                rowWidth += 16;
+                // Cell padding: paddingRight 24px
+                rowWidth += 24;
+                
+                // Primary key icon (if present): size 14px + margin ~4px
+                if (col.isPrimary) {
+                    rowWidth += 18;
+                }
+                
+                // Right side: type + NOT NULL + handle
+                // Cell padding: paddingLeft 12px
+                rowWidth += 12;
+                
+                // NOT NULL text (if present)
+                if (col.isNullable === false) {
+                    const notNullWidth = measureText('NOT NULL', '12px');
+                    rowWidth += notNullWidth + 8; // text + spacing
+                }
+                
+                // Type text
+                const typeText = col.type || 'varchar';
+                const typeWidth = measureText(typeText, '12px');
+                rowWidth += typeWidth;
+                // Label padding: pr-3 = 12px
+                rowWidth += 12;
+                // Handle: w-3 = 12px + margin ~4px
+                rowWidth += 16;
+                
+                maxWidth = Math.max(maxWidth, rowWidth);
+            });
+            
+            // Add padding for safety
+            const calculatedMinWidth = Math.max(200, maxWidth + 20);
+            setMinWidth(calculatedMinWidth);
+            
+            // Always update width to fit content
+            setNodeWidth(calculatedMinWidth);
+        };
+        
+        // Wait for DOM to be ready
+        const timeoutId = setTimeout(() => {
+            calculateWidth();
+        }, 10);
+        
+        return () => clearTimeout(timeoutId);
+    }, [data.columns, localName, data.name]);
 
     useEffect(() => {
         if (!isEditingName) {
@@ -54,132 +170,138 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
         }
     }, [isEditingName]);
 
+    // Update node height and width when columns change
+    useEffect(() => {
+        if (!nodeId) return;
+        setNodes((nodes) =>
+            nodes.map((n) =>
+                n.id === nodeId
+                    ? { 
+                        ...n, 
+                        style: { 
+                            ...n.style, 
+                            height: nodeHeight,
+                            width: nodeWidth,
+                        } 
+                    }
+                    : n
+            )
+        );
+    }, [nodeHeight, nodeWidth, nodeId, setNodes]);
+
     return (
         <div
-            className="w-full h-full relative bg-transparent"
+            className="w-full h-full relative"
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
+            style={{ height: nodeHeight }}
         >
             <NodeResizer
                 color='var(--color-primary)'
                 isVisible={isSelected}
-                minWidth={140}
-                minHeight={100}
+                minWidth={minWidth}
+                minHeight={minHeight}
             />
 
-            <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" style={{ overflow: "visible" }}>
-                <rect 
-                    x="1" y="1" width="98" height="98"
-                    fill="#fff" 
-                    stroke="var(--color-gray-800)" 
-                    strokeWidth={2} 
-                    vectorEffect="non-scaling-stroke" 
-                    rx={4}
-                    ry={4}
-                />
-                <line x1="1" y1="24" x2="99" y2="24" stroke="var(--color-gray-800)" strokeWidth={2} vectorEffect="non-scaling-stroke" />
-            </svg>
-
-            {/* Header */}
-            {isEditingName ? (
-                <div
-                    ref={nameRef}
-                    contentEditable
-                    suppressContentEditableWarning={true}
-                    onBlur={(e) => commitName(e.currentTarget.innerText)}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                            e.preventDefault();
-                            commitName(e.currentTarget.innerText);
-                        } else if (e.key === "Escape") {
-                            e.preventDefault();
-                            setIsEditingName(false);
-                            setLocalName(data.name);
-                        }
-                    }}
-                    className={classNames(
-                        "absolute left-0 top-0 w-full h-6",
-                        "text-xs font-bold text-black text-center flex items-center justify-center",
-                        "cursor-text pointer-events-auto nodrag nopan",
-                        "bg-transparent outline-none border border-transparent focus:outline-none"
-                    )}
-                    style={{ userSelect: "text", WebkitUserSelect: "text" }}
-                    tabIndex={0}
-                    draggable={false}
-                >
-                    {localName}
-                </div>
-            ) : (
-                <div
-                    className={classNames(
-                        "absolute left-0 top-0 w-full h-6",
-                        "text-xs font-bold text-black text-center flex items-center justify-center",
-                        "cursor-text"
-                    )}
-                    onDoubleClick={(e) => {
-                        e.stopPropagation();
-                        setIsEditingName(true);
-                    }}
-                    draggable={false}
-                >
-                    {localName}
-                </div>
-            )}
-
-            {/* Columns */}
-            <div className="absolute left-0 top-6 w-full bottom-0 overflow-hidden">
-                <div className="px-2 py-1">
-                    {data.columns?.length ? (
-                        <ul className="space-y-1">
-                            {data.columns.map((col, idx) => (
-                                <li key={idx} className="text-[10px] leading-tight text-black flex items-center gap-1">
-                                    {col.isPrimary && <span className="inline-block w-1.5 h-1.5 rounded-full bg-black" />}
-                                    <span className="font-semibold">{col.name}</span>
-                                    {col.type && <span className="text-gray-700">: {col.type}</span>}
-                                    {col.isNullable === false && <span className="text-red-600"> NOT NULL</span>}
-                                </li>
-                            ))}
-                        </ul>
+            <DatabaseSchemaNode className="w-full h-full">
+                <div ref={contentRef} className="w-full h-full">
+                <DatabaseSchemaNodeHeader style={{ whiteSpace: 'nowrap' }}>
+                    {isEditingName ? (
+                        <div
+                            ref={nameRef}
+                            contentEditable
+                            suppressContentEditableWarning={true}
+                            onBlur={(e) => commitName(e.currentTarget.innerText)}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    commitName(e.currentTarget.innerText);
+                                } else if (e.key === "Escape") {
+                                    e.preventDefault();
+                                    setIsEditingName(false);
+                                    setLocalName(data.name);
+                                }
+                            }}
+                            className={classNames(
+                                "text-center",
+                                "cursor-text pointer-events-auto nodrag nopan",
+                                "bg-transparent outline-none border border-transparent focus:outline-none"
+                            )}
+                            style={{ userSelect: "text", WebkitUserSelect: "text" }}
+                            tabIndex={0}
+                            draggable={false}
+                        >
+                            {localName}
+                        </div>
                     ) : (
-                        <div className="text-[10px] text-gray-700">No columns</div>
+                        <div
+                            className="text-center cursor-text"
+                            onDoubleClick={(e) => {
+                                e.stopPropagation();
+                                setIsEditingName(true);
+                            }}
+                            draggable={false}
+                        >
+                            {localName}
+                        </div>
                     )}
-                </div>
-            </div>
+                </DatabaseSchemaNodeHeader>
 
-            <ErdHandle 
-                id="top"
-                position={Position.Top}
-                isConnectable={!isSelected}
-                isHovered={isHovered}
-                isSelected={isSelected}
-            />
-            <ErdHandle 
-                id="left"
-                position={Position.Left}
-                isConnectable={!isSelected}
-                isHovered={isHovered}
-                isSelected={isSelected}
-            />
-            <ErdHandle 
-                id="right"
-                position={Position.Right}
-                isConnectable={!isSelected}
-                isHovered={isHovered}
-                isSelected={isSelected}
-            />
-            <ErdHandle 
-                id="bottom"
-                position={Position.Bottom}
-                isConnectable={!isSelected}
-                isHovered={isHovered}
-                isSelected={isSelected}
-            />
+                <DatabaseSchemaNodeBody>
+                    {data.columns?.length ? (
+                        data.columns.map((col, idx) => (
+                            <DatabaseSchemaTableRow key={idx} style={{ whiteSpace: 'nowrap' }}>
+                                <DatabaseSchemaTableCell className="font-light flex-1 flex justify-start" style={{ paddingLeft: 0, paddingRight: '24px' }}>
+
+                                    <LabeledHandle
+                                        id={col.name}
+                                        title={col.name}
+                                        type="target"
+                                        position={Position.Left}
+                                        isConnectable={!isSelected}
+                                        labelClassName="p-0 w-full pl-3 text-left"
+                                        showOnHover={true}
+                                        isHovered={isHovered}
+                                    />
+                                    {col.isPrimary && (
+                                        <KeyRound size={14} className="text-gray-500" />
+                                    )}
+                                </DatabaseSchemaTableCell>
+                                <DatabaseSchemaTableCell className="font-thin flex-1 flex justify-end" style={{ paddingRight: 0, paddingLeft: '12px' }}>
+                                    {col.isNullable === false && (
+                                        <span className="text-red-600 text-xs">NOT NULL</span>
+                                    )}
+                                    <LabeledHandle
+                                        id={col.name}
+                                        title={col.type || 'varchar'}
+                                        type="source"
+                                        position={Position.Right}
+                                        isConnectable={!isSelected}
+                                        className="p-0"
+                                        handleClassName="p-0"
+                                        labelClassName="p-0 w-full pr-3 text-right"
+                                        showOnHover={true}
+                                        isHovered={isHovered}
+                                    />
+                                </DatabaseSchemaTableCell>
+                            </DatabaseSchemaTableRow>
+                        ))
+                    ) : (
+                        <DatabaseSchemaTableRow>
+                            <DatabaseSchemaTableCell className="text-gray-500">
+                                No columns
+                            </DatabaseSchemaTableCell>
+                        </DatabaseSchemaTableRow>
+                    )}
+                </DatabaseSchemaNodeBody>
+                </div>
+            </DatabaseSchemaNode>
         </div>
     );
 };
 
-export default RelationTableNode;
+export default memo(RelationTableNode);
 
 

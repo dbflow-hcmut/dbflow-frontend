@@ -11,6 +11,10 @@ type FooterProps = {
     onToggleSidebar: () => void;
     onToggleRightPanel: () => void;
     onToggleChatBox: () => void;
+    onUndo?: () => void;
+    onRedo?: () => void;
+    canUndo?: boolean;
+    canRedo?: boolean;
 };
 
 const Footer: React.FC<FooterProps> = ({
@@ -19,6 +23,10 @@ const Footer: React.FC<FooterProps> = ({
     onToggleSidebar,
     onToggleRightPanel,
     onToggleChatBox,
+    onUndo,
+    onRedo,
+    canUndo = false,
+    canRedo = false,
 }) => {
     return (
         <div className="pb-4 bg-transparent flex items-center justify-between px-4 fixed bottom-0 z-10 w-full">
@@ -112,10 +120,22 @@ const Footer: React.FC<FooterProps> = ({
                 </div>
             </div>
             <div className="flex items-center gap-2">
-                <div className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12 w-12 justify-center cursor-pointer">                        
+                <div 
+                    onClick={onUndo}
+                    className={`flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12 w-12 justify-center cursor-pointer transition-opacity ${
+                        canUndo ? 'hover:bg-gray-50 opacity-100' : 'opacity-40 cursor-not-allowed'
+                    }`}
+                    title="Undo (Ctrl+Z)"
+                >                        
                     <Undo size={24} />
                 </div>
-                <div className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12 w-12 justify-center cursor-pointer">                        
+                <div 
+                    onClick={onRedo}
+                    className={`flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12 w-12 justify-center cursor-pointer transition-opacity ${
+                        canRedo ? 'hover:bg-gray-50 opacity-100' : 'opacity-40 cursor-not-allowed'
+                    }`}
+                    title="Redo (Ctrl+Y or Ctrl+Shift+Z)"
+                >                        
                     <Redo size={24} />
                 </div>
                 <div className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12">

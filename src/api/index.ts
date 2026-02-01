@@ -11,4 +11,6 @@ export const PROXY_USERS_ME = `${PROXY_USERS}/me`;
 export const PROXY_PROJECTS = `${PROXY_BASE}/projects`;
 export const PROXY_PROJECT_DETAIL = (id: string) => `${PROXY_PROJECTS}/${id}`;
 export const PROXY_PROJECT_SCHEMAS = (id: string) => `${PROXY_PROJECT_DETAIL(id)}/schemas`;
+export const PROXY_DELETE_SCHEMA = (projectId: string, schemaId: string) => `${PROXY_PROJECT_DETAIL(projectId)}/schemas/${schemaId}`;
+export const PROXY_UPDATE_SCHEMA = (projectId: string, schemaId: string) => `${PROXY_PROJECT_DETAIL(projectId)}/schemas/${schemaId}`;
 export const PROXY_SCHEMA_DIAGRAM = (schemaId: string) => `${PROXY_BASE}/schemas/${schemaId}/diagram`;
