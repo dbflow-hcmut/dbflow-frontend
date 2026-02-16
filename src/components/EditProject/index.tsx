@@ -41,12 +41,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { SchemaType } from "@/utils/constants";
 import { useConceptualCollaboration } from "./hooks/useConceptualCollaboration";
 import { useLogicalCollaboration } from "./hooks/useLogicalCollaboration";
+import { usePhysicalCollaboration } from "./hooks/usePhysicalCollaboration";
 import { useDiagramViewport } from "./hooks/useDiagramViewport";
 import { useCollaborationAwareness } from "./hooks/useCollaborationAwareness";
 import type { RemoteCollaborator } from "./hooks/useCollaborationAwareness";
 import { useProjectAwareness } from "./hooks/useProjectAwareness";
 import { RemoteCursorsOverlay } from "./components/RemoteCursorsOverlay";
-import { useUserMe } from "@/api/users/client";
+import { useAuth } from "@/providers/AuthProvider";
+import { checkSchemaExistence } from "@/api/projects/client";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 
 export type EntityField = {
@@ -124,7 +126,7 @@ const EditProject = (props: IPropsEditProject) => {
     const [propertiesName, setPropertiesName] = useState("");
     const [selectedSchema, setSelectedSchema] = useState<ProjectSchemasResponse | null>(null);
     const [isLoadingDiagram, setIsLoadingDiagram] = useState(false);
-    
+
     // Undo/Redo hook - lớp trung gian quản lý state
     // maxHistorySize: 0 = không giới hạn
     // schemaId: phân biệt history cho từng diagram
@@ -132,7 +134,7 @@ const EditProject = (props: IPropsEditProject) => {
         maxHistorySize: 0, // 0 = không giới hạn số lượng state
         schemaId: selectedSchema?.id || null,
     });
-    
+
     const isUndoRedoActiveRef = useRef(false);
 
     // Handle undo/redo
@@ -181,9 +183,9 @@ const EditProject = (props: IPropsEditProject) => {
             }
         };
     }, [nodes, edges, saveState]);
-    
+
     const { token } = useToken();
-    const { data: currentUserClient } = useUserMe();
+    const { user: currentUserClient } = useAuth();
     const effectiveUser = currentUserClient ?? currentUser;
     const [sessionId, setSessionId] = useState<string | null>(null);
     const [isAddPageOpen, setIsAddPageOpen] = useState(false);
@@ -212,41 +214,49 @@ const EditProject = (props: IPropsEditProject) => {
 
     useEffect(() => {
         if (!schemaList.length) return;
-        
+
         if (isUserSelectingSchemaRef.current) {
             isUserSelectingSchemaRef.current = false;
             return;
         }
-        
+
         const schemaIdFromUrl = searchParams.get("schemaId");
-        const targetSchema = schemaIdFromUrl 
+        const targetSchema = schemaIdFromUrl
             ? schemaList.find(s => s.id === schemaIdFromUrl)
             : schemaList[0];
-        
+
         if (targetSchema && targetSchema.id !== selectedSchema?.id) {
+            // Clear data immediately to prevent stale data from being synced to the new schema
+            setNodesState(initialNodes);
+            setEdgesState(initialEdges);
             setSelectedSchema(targetSchema);
             if (!schemaIdFromUrl) {
                 updateUrlWithSchemaId(targetSchema.id);
             }
         }
-    }, [schemaList, searchParams, selectedSchema?.id, updateUrlWithSchemaId]);
+    }, [schemaList, searchParams, selectedSchema?.id, updateUrlWithSchemaId, setNodesState, setEdgesState]);
 
     const handleSetSelectedSchema = useCallback((schema: ProjectSchemasResponse) => {
+        if (schema.id === selectedSchema?.id) return;
+
         isUserSelectingSchemaRef.current = true;
+        // Clear data immediately to prevent stale data from being synced to the new schema
+        setNodesState(initialNodes);
+        setEdgesState(initialEdges);
         setSelectedSchema(schema);
         updateUrlWithSchemaId(schema.id);
-    }, [updateUrlWithSchemaId]);
+    }, [selectedSchema?.id, updateUrlWithSchemaId, setNodesState, setEdgesState]);
 
     // Reset nodes/edges khi schema thay đổi
     // Collaboration hook sẽ load data từ Yjs và override nodes/edges nếu có data
     useEffect(() => {
         if (!selectedSchema?.id) return;
-        
+
         // Reset ngay để tránh hiển thị data từ schema cũ
         setNodesState(initialNodes);
         setEdgesState(initialEdges);
         setIsLoadingDiagram(true);
-        
+
         // Reset history khi schema thay đổi
         resetHistory();
     }, [selectedSchema?.id, setNodesState, setEdgesState, resetHistory]);
@@ -254,7 +264,7 @@ const EditProject = (props: IPropsEditProject) => {
     // Tắt loading khi có data hoặc sau một khoảng thời gian
     useEffect(() => {
         if (!isLoadingDiagram) return;
-        
+
         // Nếu có nodes hoặc edges, tắt loading
         if (nodes.length > 0 || edges.length > 0) {
             // Delay một chút để đảm bảo data đã được render
@@ -263,12 +273,12 @@ const EditProject = (props: IPropsEditProject) => {
             }, 100);
             return () => clearTimeout(timer);
         }
-        
+
         // Nếu không có data sau 500ms, tắt loading (có thể diagram trống)
         const timeout = setTimeout(() => {
             setIsLoadingDiagram(false);
         }, 500);
-        
+
         return () => clearTimeout(timeout);
     }, [nodes, edges, isLoadingDiagram]);
 
@@ -332,8 +342,8 @@ const EditProject = (props: IPropsEditProject) => {
         [setNodes, getViewportCenter]
     );
 
-    const { 
-        updateNodeName, 
+    const {
+        updateNodeName,
         updateAttributeKey,
         addRelationTableColumn,
         removeRelationTableColumn,
@@ -367,7 +377,7 @@ const EditProject = (props: IPropsEditProject) => {
         const sourceNode = nodes.find(n => n.id === connection.source);
         const targetNode = nodes.find(n => n.id === connection.target);
         const isRelationTableEdge = sourceNode?.type === 'relation' || targetNode?.type === 'relation';
-        
+
         const edgeWithId = {
             ...connection,
             id: generateDiagramId(),
@@ -444,11 +454,13 @@ const EditProject = (props: IPropsEditProject) => {
 
     const isConceptualSchema = selectedSchema?.type === SchemaType.CONCEPTUAL;
     const isLogicalSchema = selectedSchema?.type === SchemaType.LOGICAL;
+    const isPhysicalSchema = selectedSchema?.type === SchemaType.PHYSICAL;
     const resolvedUserName = effectiveUser?.fullName ?? effectiveUser?.email ?? projectData?.owner?.name ?? "You";
     const resolvedUserAvatar = effectiveUser?.avatar ?? undefined;
 
     const { viewport, handleViewportChange } = useDiagramViewport({
         selectedSchemaId: selectedSchema?.id,
+        selectedSchema,
         nodes,
         isReactFlowReady,
         reactFlowInstanceRef,
@@ -480,7 +492,20 @@ const EditProject = (props: IPropsEditProject) => {
         diagramName,
     });
 
-    const awareness = isConceptualSchema ? conceptualAwareness : isLogicalSchema ? logicalAwareness : null;
+    const { awareness: physicalAwareness } = usePhysicalCollaboration({
+        enabled: Boolean(isPhysicalSchema),
+        projectId: projectData?.id,
+        schema: selectedSchema,
+        sessionId,
+        token,
+        nodes,
+        edges,
+        setNodes,
+        setEdges,
+        diagramName,
+    });
+
+    const awareness = isConceptualSchema ? conceptualAwareness : isLogicalSchema ? logicalAwareness : isPhysicalSchema ? physicalAwareness : null;
 
     const projectAwareness = useProjectAwareness({
         enabled: Boolean(projectData?.id && sessionId),
@@ -493,7 +518,7 @@ const EditProject = (props: IPropsEditProject) => {
         remoteCursors,
         broadcastCursorPosition,
     } = useCollaborationAwareness({
-        enabled: Boolean(isConceptualSchema || isLogicalSchema),
+        enabled: Boolean(isConceptualSchema || isLogicalSchema || isPhysicalSchema),
         awareness,
         sessionId,
         currentUserName: resolvedUserName,
@@ -541,7 +566,7 @@ const EditProject = (props: IPropsEditProject) => {
     }, [projectAwareness, viewport, broadcastViewport]);
 
     useEffect(() => {
-        if (!isConceptualSchema && !isLogicalSchema) {
+        if (!isConceptualSchema && !isLogicalSchema && !isPhysicalSchema) {
             broadcastCursorPosition(null);
             return;
         }
@@ -589,17 +614,29 @@ const EditProject = (props: IPropsEditProject) => {
             element.removeEventListener("pointerleave", handlePointerLeave);
             broadcastCursorPosition(null);
         };
-    }, [broadcastCursorPosition, isConceptualSchema, isLogicalSchema, diagramWrapperEl]);
+    }, [broadcastCursorPosition, isConceptualSchema, isLogicalSchema, isPhysicalSchema, diagramWrapperEl]);
+
+    if (!selectedSchema) return (
+        <div className="h-screen w-full flex flex-col items-center justify-center text-center px-4">
+            <div className="text-base font-semibold text-gray-800">
+                Page not found
+            </div>
+
+            <div className="mt-1 text-sm text-gray-500">
+                The page you are looking for doesn’t exist or has been moved. <span className="font-semibold text-blue-500 cursor-pointer" onClick={() => router.replace('/')}>Click here</span> to go back to home.
+            </div>
+        </div>
+    );
 
     return (
         <ReactFlowProvider>
             <div className="h-screen w-full">
-                <AddPage 
-                    open={isAddPageOpen} 
+                <AddPage
+                    open={isAddPageOpen}
                     onClose={() => setIsAddPageOpen(false)}
                     projectId={projectData?.id || null}
                 />
-        <Header
+                <Header
                     diagramName={diagramName}
                     isEditingDiagramName={isEditingDiagramName}
                     onSetDiagramName={setDiagramName}
@@ -643,7 +680,7 @@ const EditProject = (props: IPropsEditProject) => {
                         onUpdateRelationshipCardinality={(entityId, cardinality) => {
                             if (!selectedNode || selectedNode.type !== 'relationship') return;
                             const relationshipId = selectedNode.id;
-                            
+
                             setNodes((existingNodes) =>
                                 existingNodes.map((n) =>
                                     n.id === relationshipId

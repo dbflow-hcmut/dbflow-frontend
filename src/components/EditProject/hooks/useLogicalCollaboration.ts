@@ -55,6 +55,7 @@ export const useLogicalCollaboration = ({
     const pendingModelUpdateRef = useRef<(() => void) | null>(null);
     const modelDataRef = useRef<LogicalModelPayload | null>(null);
     const [awareness, setAwareness] = useState<CollaborationAwareness | null>(null);
+    const currentSchemaIdRef = useRef<string | null>(null);
 
     useEffect(() => {
         if (!enabled) {
@@ -63,6 +64,7 @@ export const useLogicalCollaboration = ({
             lastSyncedModelStringRef.current = null;
             lastAppliedModelStringRef.current = null;
             hasLoadedInitialDataRef.current = false;
+            currentSchemaIdRef.current = null;
             return;
         }
 
@@ -71,6 +73,7 @@ export const useLogicalCollaboration = ({
         lastSyncedModelStringRef.current = null;
         lastAppliedModelStringRef.current = null;
         hasLoadedInitialDataRef.current = false;
+        currentSchemaIdRef.current = schema?.id ?? null;
     }, [enabled, schema?.id]);
 
     useEffect(() => {
@@ -109,15 +112,65 @@ export const useLogicalCollaboration = ({
             },
             rawDiagramString?: string
         ) => {
+            // Only apply if this hook is handling the current schema
+            if (currentSchemaIdRef.current !== schema?.id) {
+                return;
+            }
+
             const { nodes: yjsNodes = [], edges: yjsEdges = [] } = diagramPayload;
-            const reactNodes = mapStoredNodesToReactNodes(yjsNodes as StoredLogicalNode[]);
-            const reactEdges = mapStoredEdgesToReactEdges(
-                yjsEdges as (StoredLogicalDiagramEdge | Edge)[],
-                reactNodes
+
+            console.log("[Logical Collaboration] applyDiagramFromYjs - received nodes:", yjsNodes.length, "edges:", yjsEdges.length);
+
+            // Detect if nodes are stored format or react format
+            // Stored nodes have: size: {w, h} (not style.width/height), or tableId
+            // React nodes have: data object, style: {width, height} (not size: {w, h})
+            const isStoredFormat = yjsNodes.length > 0 && (
+                (yjsNodes[0] && 'size' in yjsNodes[0] && typeof (yjsNodes[0] as { size: unknown }).size === 'object' && 'w' in ((yjsNodes[0] as { size: Record<string, unknown> }).size)) ||
+                (yjsNodes[0] && 'tableId' in yjsNodes[0])
             );
+
+            console.log("[Logical Collaboration] isStoredFormat:", isStoredFormat, "sample node:", yjsNodes[0]);
+
+            let reactNodes: Node<NodeData>[];
+            try {
+                if (isStoredFormat) {
+                    reactNodes = mapStoredNodesToReactNodes(yjsNodes as StoredLogicalNode[]);
+                } else {
+                    // Already in React format, just ensure selected is false
+                    reactNodes = (yjsNodes as Node<NodeData>[]).map(node => ({
+                        ...node,
+                        selected: false
+                    }));
+                }
+                console.log("[Logical Collaboration] mapped reactNodes:", reactNodes.length);
+            } catch (error) {
+                console.error("[Logical Collaboration] Error mapping nodes:", error);
+                return;
+            }
+
+            let reactEdges: Edge[];
+            try {
+                if (isStoredFormat) {
+                    reactEdges = mapStoredEdgesToReactEdges(
+                        yjsEdges as (StoredLogicalDiagramEdge | Edge)[],
+                        reactNodes
+                    );
+                } else {
+                    // Already in React format
+                    reactEdges = (yjsEdges as Edge[]).map(edge => ({
+                        ...edge,
+                        selected: false
+                    }));
+                }
+                console.log("[Logical Collaboration] mapped reactEdges:", reactEdges.length);
+            } catch (error) {
+                console.error("[Logical Collaboration] Error mapping edges:", error);
+                return;
+            }
 
             isSyncingFromYjsRef.current = true;
             hasLoadedInitialDataRef.current = true;
+            console.log("[Logical Collaboration] Setting nodes and edges to state");
             setNodes(reactNodes);
             setEdges(reactEdges);
 
@@ -246,11 +299,15 @@ export const useLogicalCollaboration = ({
     useEffect(() => {
         if (!enabled) return;
         if (!ydocRef.current || !schema?.id) return;
+        // Only sync if this hook is handling the current schema
+        if (currentSchemaIdRef.current !== schema?.id) {
+            return;
+        }
         if (isSyncingFromYjsRef.current) {
             console.log("[Logical Collaboration] Skipping sync - currently syncing from Yjs");
             return;
         }
-        
+
         // Prevent syncing empty data if initial data hasn't been loaded yet
         // This prevents data loss when switching schemas
         if (!hasLoadedInitialDataRef.current && nodes.length === 0 && edges.length === 0) {

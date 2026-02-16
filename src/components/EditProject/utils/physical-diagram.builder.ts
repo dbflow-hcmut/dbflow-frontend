@@ -9,7 +9,7 @@ type RelationTableEdgeData = {
 };
 
 export const getViewportStorageKey = (schemaId?: string | null) =>
-    schemaId ? `logicalDiagramViewport:${schemaId}` : null;
+    schemaId ? `physicalDiagramViewport:${schemaId}` : null;
 
 export const loadViewportFromStorage = (schemaId?: string | null) => {
     if (typeof window === "undefined") return null;
@@ -43,7 +43,7 @@ type DiagramNodeStyle = {
     [key: string]: unknown;
 };
 
-export type StoredLogicalDiagramNode = {
+export type StoredPhysicalDiagramNode = {
     id: string;
     type: "table" | "note";
     position: { x: number; y: number };
@@ -65,11 +65,11 @@ export type StoredLogicalDiagramNode = {
     text?: string;
 };
 
-type LogicalEdgeType = "fk" | "noteLink";
+type PhysicalEdgeType = "fk" | "noteLink";
 
-export type StoredLogicalDiagramEdge = {
+export type StoredPhysicalDiagramEdge = {
     id: string;
-    type: LogicalEdgeType;
+    type: PhysicalEdgeType;
     source: string;
     target: string;
     points?: Array<{ x: number; y: number }>;
@@ -90,7 +90,7 @@ type LegacyStoredNode = {
     data?: NodeData;
 };
 
-export type StoredLogicalNode = StoredLogicalDiagramNode & LegacyStoredNode;
+export type StoredPhysicalNode = StoredPhysicalDiagramNode & LegacyStoredNode;
 
 const NODE_SIZE_FALLBACKS: Record<string, { w: number; h: number }> = {
     relation: { w: 160, h: 120 },
@@ -138,12 +138,12 @@ const sanitizeStyleForStorage = (
     return Object.keys(cleanedStyle).length > 0 ? (cleanedStyle as DiagramNodeStyle) : undefined;
 };
 
-const ensurePosition = (node: StoredLogicalNode) => node.position ?? { x: 0, y: 0 };
+const ensurePosition = (node: StoredPhysicalNode) => node.position ?? { x: 0, y: 0 };
 
-const ensureStyle = (node: StoredLogicalNode) =>
+const ensureStyle = (node: StoredPhysicalNode) =>
     node.size ? { width: node.size.w, height: node.size.h } : undefined;
 
-const mapRelationNode = (node: StoredLogicalNode): Node<RelationTableData> => {
+const mapRelationNode = (node: StoredPhysicalNode): Node<RelationTableData> => {
     const dataSource = node.data as RelationTableData | undefined;
     
     // Prefer dataSource columns (full RelationColumn data), otherwise use empty array
@@ -163,7 +163,7 @@ const mapRelationNode = (node: StoredLogicalNode): Node<RelationTableData> => {
     };
 };
 
-const mapNoteNode = (node: StoredLogicalNode): Node<NodeData> => {
+const mapNoteNode = (node: StoredPhysicalNode): Node<NodeData> => {
     return {
         id: node.id,
         type: "entity",
@@ -174,7 +174,7 @@ const mapNoteNode = (node: StoredLogicalNode): Node<NodeData> => {
     };
 };
 
-const mapStoredNodeToReactNode = (node: StoredLogicalNode): Node<NodeData> => {
+const mapStoredNodeToReactNode = (node: StoredPhysicalNode): Node<NodeData> => {
     // If node has tableId but no type, it's a table
     if (!node.type && node.tableId) {
         return mapRelationNode(node);
@@ -190,19 +190,19 @@ const mapStoredNodeToReactNode = (node: StoredLogicalNode): Node<NodeData> => {
     }
 };
 
-export const mapStoredNodesToReactNodes = (storedNodes: StoredLogicalNode[] = []): Node<NodeData>[] => {
+export const mapStoredNodesToReactNodes = (storedNodes: StoredPhysicalNode[] = []): Node<NodeData>[] => {
     return storedNodes.map((node) => ({
         ...mapStoredNodeToReactNode(node),
         selected: false,
     }));
 };
 
-const mapReactRelationNode = (node: Node<RelationTableData>): StoredLogicalNode => {
+const mapReactRelationNode = (node: Node<RelationTableData>): StoredPhysicalNode => {
     const { name, columns = [] } = node.data;
 
     // Map columns to stored format
-    const storedColumns: StoredLogicalDiagramNode["columns"] = columns.map((col, idx) => ({
-        columnId: `lid_${node.id}_col_${idx}`,
+    const storedColumns: StoredPhysicalDiagramNode["columns"] = columns.map((col, idx) => ({
+        columnId: `pid_${node.id}_col_${idx}`,
         label: col.name,
         decorations: {
             pk: col.isPrimary ? true : undefined,
@@ -229,7 +229,7 @@ const mapReactRelationNode = (node: Node<RelationTableData>): StoredLogicalNode 
     };
 };
 
-const mapReactNodeToStoredNode = (node: Node<NodeData>): StoredLogicalNode => {
+const mapReactNodeToStoredNode = (node: Node<NodeData>): StoredPhysicalNode => {
     switch (node.type) {
         case "relation":
             return mapReactRelationNode(node as Node<RelationTableData>);
@@ -246,7 +246,7 @@ const mapReactNodeToStoredNode = (node: Node<NodeData>): StoredLogicalNode => {
     }
 };
 
-export const mapReactNodesToStoredNodes = (reactNodes: Node<NodeData>[] = []): StoredLogicalNode[] => {
+export const mapReactNodesToStoredNodes = (reactNodes: Node<NodeData>[] = []): StoredPhysicalNode[] => {
     return reactNodes
         .filter((node) => node.type === "relation")
         .map(mapReactNodeToStoredNode);
@@ -255,7 +255,7 @@ export const mapReactNodesToStoredNodes = (reactNodes: Node<NodeData>[] = []): S
 const mapReactEdgeToStoredEdge = (
     edge: Edge<RelationTableEdgeData>,
     nodeMap: Map<string, Node<NodeData>>
-): StoredLogicalDiagramEdge | null => {
+): StoredPhysicalDiagramEdge | null => {
     const sourceNode = nodeMap.get(edge.source);
     const targetNode = nodeMap.get(edge.target);
     if (!sourceNode || !targetNode) {
@@ -287,7 +287,7 @@ const mapReactEdgeToStoredEdge = (
     // Extract control points from edge data
     const points = edge.data?.controlPoints?.map((p: { x: number; y: number }) => ({ x: p.x, y: p.y }));
 
-    const storedEdge: StoredLogicalDiagramEdge = {
+    const storedEdge: StoredPhysicalDiagramEdge = {
         id: edge.id || generateDiagramId(),
         type: "fk",
         source: edge.source,
@@ -311,9 +311,9 @@ const mapReactEdgeToStoredEdge = (
     return storedEdge;
 };
 
-const isSchemaStoredEdge = (edge: unknown): edge is StoredLogicalDiagramEdge => {
+const isSchemaStoredEdge = (edge: unknown): edge is StoredPhysicalDiagramEdge => {
     if (!edge || typeof edge !== "object") return false;
-    const candidate = edge as StoredLogicalDiagramEdge;
+    const candidate = edge as StoredPhysicalDiagramEdge;
     return (
         typeof candidate.id === "string" &&
         typeof candidate.type === "string" &&
@@ -323,7 +323,7 @@ const isSchemaStoredEdge = (edge: unknown): edge is StoredLogicalDiagramEdge => 
 };
 
 const mapSchemaEdgeToReactEdge = (
-    edge: StoredLogicalDiagramEdge,
+    edge: StoredPhysicalDiagramEdge,
     nodeMap: Map<string, Node<NodeData>>
 ): Edge<RelationTableEdgeData> | null => {
     if (!nodeMap.has(edge.source) || !nodeMap.has(edge.target)) {
@@ -376,16 +376,16 @@ const mapSchemaEdgeToReactEdge = (
 export const mapReactEdgesToStoredEdges = (
     reactEdges: Edge<RelationTableEdgeData>[] = [],
     nodes: Node<NodeData>[] = []
-): StoredLogicalDiagramEdge[] => {
+): StoredPhysicalDiagramEdge[] => {
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
     return reactEdges
         .filter((edge) => edge.type === "relation-table-edge")
         .map((edge) => mapReactEdgeToStoredEdge(edge, nodeMap))
-        .filter((edge): edge is StoredLogicalDiagramEdge => Boolean(edge));
+        .filter((edge): edge is StoredPhysicalDiagramEdge => Boolean(edge));
 };
 
 export const mapStoredEdgesToReactEdges = (
-    storedEdges: (StoredLogicalDiagramEdge | Edge)[] = [],
+    storedEdges: (StoredPhysicalDiagramEdge | Edge)[] = [],
     nodes: Node<NodeData>[] = []
 ): Edge<RelationTableEdgeData>[] => {
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
@@ -408,4 +408,3 @@ export const mapStoredEdgesToReactEdges = (
         })
         .filter((edge): edge is Edge<RelationTableEdgeData> => Boolean(edge));
 };
-

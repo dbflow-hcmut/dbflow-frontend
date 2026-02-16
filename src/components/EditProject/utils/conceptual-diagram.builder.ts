@@ -309,6 +309,21 @@ const mapFallbackNode = (node: StoredDiagramNode): Node<NodeData> => {
 };
 
 const mapStoredNodeToReactNode = (node: StoredDiagramNode): Node<NodeData> => {
+    console.log("mapStoredNodeToReactNode", node);
+    
+    // If node has attributeId but no type, it's an attribute
+    if (!node.type && node.attributeId) {
+        return mapAttributeNode(node);
+    }
+    // If node has entityId but no type, it's an entity
+    if (!node.type && node.entityId) {
+        return mapEntityNode(node);
+    }
+    // If node has relationshipId but no type, it's a relationship
+    if (!node.type && node.relationshipId) {
+        return mapRelationshipNode(node);
+    }
+    
     switch (node.type) {
         case "entity":
             return mapEntityNode(node);
@@ -475,6 +490,7 @@ const mapReactRelationNode = (node: Node<RelationTableData>): StoredDiagramNode 
 };
 
 const mapReactNodeToStoredNode = (node: Node<NodeData>): StoredDiagramNode => {
+    console.log("mapReactNodeToStoredNode", node);
     switch (node.type) {
         case "entity":
             return mapReactEntityNode(node as Node<EntityData>);

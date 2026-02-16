@@ -53,7 +53,7 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
     const [renameModalOpen, setRenameModalOpen] = useState(false);
     const [schemaToRename, setSchemaToRename] = useState<ProjectSchemasResponse | null>(null);
 
-    const handleDeleteClick = (schema: ProjectSchemasResponse, e: any) => {
+    const handleDeleteClick = (schema: ProjectSchemasResponse, e: React.MouseEvent | React.KeyboardEvent) => {
         if (e?.stopPropagation && typeof e.stopPropagation === 'function') {
             e.stopPropagation();
         }
@@ -61,7 +61,7 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
         setDeleteModalOpen(true);
     };
 
-    const handleRenameClick = (schema: ProjectSchemasResponse, e: any) => {
+    const handleRenameClick = (schema: ProjectSchemasResponse, e: React.MouseEvent | React.KeyboardEvent) => {
         if (e?.stopPropagation && typeof e.stopPropagation === 'function') {
             e.stopPropagation();
         }
@@ -101,7 +101,7 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                     <span>Rename</span>
                 </div>
             ),
-            onClick: (e) => handleRenameClick(schema, e as any),
+            onClick: ({ domEvent }) => handleRenameClick(schema, domEvent),
         },
         {
             key: 'delete',
@@ -111,17 +111,16 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                     <span>Delete</span>
                 </div>
             ),
-            onClick: (e) => handleDeleteClick(schema, e as any),
+            onClick: ({ domEvent }) => handleDeleteClick(schema, domEvent),
             danger: true,
         },
     ];
     return (
-        <div 
-            className={`absolute h-[calc(100vh-160px)] top-1/2 -translate-y-1/2 left-4 flex flex-col items-center gap-2 bg-white z-10 rounded-lg shadow-md transition-all duration-300 ease-in-out ${
-                isOpen 
-                    ? 'opacity-100 translate-x-0 pointer-events-auto' 
-                    : 'opacity-0 -translate-x-full pointer-events-none'
-            }`}
+        <div
+            className={`absolute h-[calc(100vh-160px)] top-1/2 -translate-y-1/2 left-4 flex flex-col items-center gap-2 bg-white z-10 rounded-lg shadow-md transition-all duration-300 ease-in-out ${isOpen
+                ? 'opacity-100 translate-x-0 pointer-events-auto'
+                : 'opacity-0 -translate-x-full pointer-events-none'
+                }`}
         >
             <div className="w-64">
                 <div className="border-b border-gray-200 my-auto flex items-center justify-between py-2 px-4">
@@ -131,11 +130,11 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
 
                 <div className="border-b border-gray-200 py-2 min-h-40 flex flex-col gap-2">
                     {projectSchemasData?.map((schema) => (
-                        <div 
-                            key={schema.id} 
+                        <div
+                            key={schema.id}
                             className={classNames("text-sm mx-2 rounded-md p-2 cursor-pointer hover:bg-gray-100", {
                                 "bg-gray-100": selectedSchema?.id === schema.id,
-                            })} 
+                            })}
                             onClick={() => setSelectedSchema(schema)}
                         >
                             <div className="flex items-center justify-between gap-2">
@@ -323,7 +322,7 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                                             </div>
                                         ),
                                     },
-                                ]}  
+                                ]}
                             />
                         </div>
                     </div>
@@ -353,7 +352,7 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                                             </div>
                                         ),
                                     },
-                                ]}  
+                                ]}
                             />
                         </div>
                     </div>

@@ -35,3 +35,13 @@ export async function deleteSchema(projectId: string, schemaId: string): Promise
     await apiDelete<void>(url);
 }
 
+
+export async function checkSchemaExistence(projectId: string, schemaId: string): Promise<boolean> {
+    try {
+        const url = `${PROXY_PROJECTS}/${projectId}/schemas/${schemaId}`;
+        await apiGet(url);
+        return true;
+    } catch (error) {
+        return false;
+    }
+}

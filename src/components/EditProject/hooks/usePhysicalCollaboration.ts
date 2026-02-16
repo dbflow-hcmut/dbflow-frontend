@@ -10,15 +10,15 @@ import type { CollaborationAwareness } from "@/types/projects.type";
 import {
     mapStoredNodesToReactNodes,
     mapStoredEdgesToReactEdges,
-    type StoredDiagramNode,
-    type StoredDiagramEdge,
+    type StoredPhysicalNode,
+    type StoredPhysicalDiagramEdge,
     mapReactNodesToStoredNodes,
     mapReactEdgesToStoredEdges,
-} from "../utils/conceptual-diagram.builder";
-import { buildConceptualModel } from "../utils/conceptual-model.builder";
-import type { ConceptualModelPayload } from "../utils/conceptual-model.builder";
+} from "../utils/physical-diagram.builder";
+import { buildPhysicalModel } from "../utils/physical-model.builder";
+import type { PhysicalModelPayload } from "../utils/physical-model.builder";
 
-type UseConceptualCollaborationParams = {
+type UsePhysicalCollaborationParams = {
     enabled: boolean;
     projectId: string | null | undefined;
     schema: ProjectSchemasResponse | null;
@@ -31,7 +31,7 @@ type UseConceptualCollaborationParams = {
     diagramName: string;
 };
 
-export const useConceptualCollaboration = ({
+export const usePhysicalCollaboration = ({
     enabled,
     projectId,
     schema,
@@ -42,7 +42,7 @@ export const useConceptualCollaboration = ({
     setNodes,
     setEdges,
     diagramName,
-}: UseConceptualCollaborationParams) => {
+}: UsePhysicalCollaborationParams) => {
     const providerRef = useRef<HocuspocusProvider | null>(null);
     const ydocRef = useRef<Y.Doc | null>(null);
     const isSyncingFromYjsRef = useRef(false);
@@ -53,7 +53,7 @@ export const useConceptualCollaboration = ({
     const lastAppliedModelStringRef = useRef<string | null>(null);
     const pendingDiagramUpdateRef = useRef<(() => void) | null>(null);
     const pendingModelUpdateRef = useRef<(() => void) | null>(null);
-    const modelDataRef = useRef<ConceptualModelPayload | null>(null);
+    const modelDataRef = useRef<PhysicalModelPayload | null>(null);
     const [awareness, setAwareness] = useState<CollaborationAwareness | null>(null);
     const currentSchemaIdRef = useRef<string | null>(null);
 
@@ -81,8 +81,8 @@ export const useConceptualCollaboration = ({
         if (!sessionId || !schema?.id) return;
 
         const ydoc = new Y.Doc();
-        const diagramMap = ydoc.getMap('diagram');
-        const modelMap = ydoc.getMap('model');
+        const diagramMap = ydoc.getMap("diagram");
+        const modelMap = ydoc.getMap("model");
 
         const hocuspocusUrl = `${API_BASE}/project-collaboration?projectId=${projectId}&sessionId=${sessionId}`;
         const provider = new HocuspocusProvider({
@@ -107,8 +107,8 @@ export const useConceptualCollaboration = ({
 
         const applyDiagramFromYjs = (
             diagramPayload: {
-                nodes?: StoredDiagramNode[] | Node<NodeData>[];
-                edges?: StoredDiagramEdge[] | Edge[];
+                nodes?: StoredPhysicalNode[] | Node<NodeData>[];
+                edges?: StoredPhysicalDiagramEdge[] | Edge[];
             },
             rawDiagramString?: string
         ) => {
@@ -119,22 +119,22 @@ export const useConceptualCollaboration = ({
 
             const { nodes: yjsNodes = [], edges: yjsEdges = [] } = diagramPayload;
 
-            console.log("[Conceptual Collaboration] applyDiagramFromYjs - received nodes:", yjsNodes.length, "edges:", yjsEdges.length);
+            console.log("[Physical Collaboration] applyDiagramFromYjs - received nodes:", yjsNodes.length, "edges:", yjsEdges.length);
 
             // Detect if nodes are stored format or react format
-            // Stored nodes have: size: {w, h} (not style.width/height), or entityId/attributeId/relationshipId
+            // Stored nodes have: size: {w, h} (not style.width/height), or tableId
             // React nodes have: data object, style: {width, height} (not size: {w, h})
             const isStoredFormat = yjsNodes.length > 0 && (
                 (yjsNodes[0] && 'size' in yjsNodes[0] && typeof (yjsNodes[0] as { size: unknown }).size === 'object' && 'w' in ((yjsNodes[0] as { size: Record<string, unknown> }).size)) ||
-                (yjsNodes[0] && ('entityId' in yjsNodes[0] || 'attributeId' in yjsNodes[0] || 'relationshipId' in yjsNodes[0]))
+                (yjsNodes[0] && 'tableId' in yjsNodes[0])
             );
 
-            console.log("[Conceptual Collaboration] isStoredFormat:", isStoredFormat, "sample node:", yjsNodes[0]);
+            console.log("[Physical Collaboration] isStoredFormat:", isStoredFormat, "sample node:", yjsNodes[0]);
 
             let reactNodes: Node<NodeData>[];
             try {
                 if (isStoredFormat) {
-                    reactNodes = mapStoredNodesToReactNodes(yjsNodes as StoredDiagramNode[]);
+                    reactNodes = mapStoredNodesToReactNodes(yjsNodes as StoredPhysicalNode[]);
                 } else {
                     // Already in React format, just ensure selected is false
                     reactNodes = (yjsNodes as Node<NodeData>[]).map(node => ({
@@ -142,9 +142,9 @@ export const useConceptualCollaboration = ({
                         selected: false
                     }));
                 }
-                console.log("[Conceptual Collaboration] mapped reactNodes:", reactNodes.length);
+                console.log("[Physical Collaboration] mapped reactNodes:", reactNodes.length);
             } catch (error) {
-                console.error("[Conceptual Collaboration] Error mapping nodes:", error);
+                console.error("[Physical Collaboration] Error mapping nodes:", error);
                 return;
             }
 
@@ -152,7 +152,7 @@ export const useConceptualCollaboration = ({
             try {
                 if (isStoredFormat) {
                     reactEdges = mapStoredEdgesToReactEdges(
-                        yjsEdges as (StoredDiagramEdge | Edge)[],
+                        yjsEdges as (StoredPhysicalDiagramEdge | Edge)[],
                         reactNodes
                     );
                 } else {
@@ -162,15 +162,15 @@ export const useConceptualCollaboration = ({
                         selected: false
                     }));
                 }
-                console.log("[Conceptual Collaboration] mapped reactEdges:", reactEdges.length);
+                console.log("[Physical Collaboration] mapped reactEdges:", reactEdges.length);
             } catch (error) {
-                console.error("[Conceptual Collaboration] Error mapping edges:", error);
+                console.error("[Physical Collaboration] Error mapping edges:", error);
                 return;
             }
 
             isSyncingFromYjsRef.current = true;
             hasLoadedInitialDataRef.current = true;
-            console.log("[Conceptual Collaboration] Setting nodes and edges to state");
+            console.log("[Physical Collaboration] Setting nodes and edges to state");
             setNodes(reactNodes);
             setEdges(reactEdges);
 
@@ -184,8 +184,8 @@ export const useConceptualCollaboration = ({
         };
 
         const loadDiagramFromYjs = () => {
-            const diagramDataString = diagramMap.get('data');
-            if (!diagramDataString || typeof diagramDataString !== 'string') {
+            const diagramDataString = diagramMap.get("data");
+            if (!diagramDataString || typeof diagramDataString !== "string") {
                 return;
             }
 
@@ -202,13 +202,13 @@ export const useConceptualCollaboration = ({
                     applyDiagramFromYjs(parsedData.diagram, diagramDataString);
                 }
             } catch (error) {
-                console.error('Error parsing diagram data from Yjs:', error);
+                console.error("Error parsing diagram data from Yjs:", error);
             }
         };
 
         const loadModelFromYjs = () => {
-            const modelDataString = modelMap.get('data');
-            if (!modelDataString || typeof modelDataString !== 'string') {
+            const modelDataString = modelMap.get("data");
+            if (!modelDataString || typeof modelDataString !== "string") {
                 return;
             }
 
@@ -217,17 +217,17 @@ export const useConceptualCollaboration = ({
                 modelDataRef.current = parsedModel;
                 lastSyncedModelStringRef.current = modelDataString;
             } catch (error) {
-                console.error('Error parsing model data from Yjs:', error);
+                console.error("Error parsing model data from Yjs:", error);
             }
         };
 
         const handleDiagramChange = () => {
-            const diagramDataString = diagramMap.get('data');
+            const diagramDataString = diagramMap.get("data");
             if (diagramDataString === lastAppliedDiagramStringRef.current) {
                 return;
             }
 
-            if (!diagramDataString || typeof diagramDataString !== 'string') {
+            if (!diagramDataString || typeof diagramDataString !== "string") {
                 return;
             }
 
@@ -244,16 +244,16 @@ export const useConceptualCollaboration = ({
                     applyDiagramFromYjs(parsedData.diagram, diagramDataString);
                 }
             } catch (error) {
-                console.error('Error parsing diagram data from Yjs:', error);
+                console.error("Error parsing diagram data from Yjs:", error);
             }
         };
 
         const handleModelChange = () => {
-            const modelDataString = modelMap.get('data');
+            const modelDataString = modelMap.get("data");
             if (modelDataString === lastAppliedModelStringRef.current) {
                 return;
             }
-            if (!modelDataString || typeof modelDataString !== 'string') {
+            if (!modelDataString || typeof modelDataString !== "string") {
                 return;
             }
 
@@ -262,11 +262,11 @@ export const useConceptualCollaboration = ({
                 modelDataRef.current = parsedModel;
                 lastSyncedModelStringRef.current = modelDataString;
             } catch (error) {
-                console.error('Error parsing model data from Yjs:', error);
+                console.error("Error parsing model data from Yjs:", error);
             }
         };
 
-        provider.on('sync', (isSynced: boolean) => {
+        provider.on("sync", (isSynced: boolean) => {
             if (isSynced) {
                 loadDiagramFromYjs();
                 loadModelFromYjs();
@@ -276,12 +276,12 @@ export const useConceptualCollaboration = ({
         diagramMap.observe(handleDiagramChange);
         modelMap.observe(handleModelChange);
 
-        const initialDiagramData = diagramMap.get('data');
-        if (initialDiagramData && typeof initialDiagramData === 'string') {
+        const initialDiagramData = diagramMap.get("data");
+        if (initialDiagramData && typeof initialDiagramData === "string") {
             loadDiagramFromYjs();
         }
-        const initialModelData = modelMap.get('data');
-        if (initialModelData && typeof initialModelData === 'string') {
+        const initialModelData = modelMap.get("data");
+        if (initialModelData && typeof initialModelData === "string") {
             loadModelFromYjs();
         }
 
@@ -304,14 +304,14 @@ export const useConceptualCollaboration = ({
             return;
         }
         if (isSyncingFromYjsRef.current) {
-            console.log("[Conceptual Collaboration] Skipping sync - currently syncing from Yjs");
+            console.log("[Physical Collaboration] Skipping sync - currently syncing from Yjs");
             return;
         }
 
         // Prevent syncing empty data if initial data hasn't been loaded yet
         // This prevents data loss when switching schemas
         if (!hasLoadedInitialDataRef.current && nodes.length === 0 && edges.length === 0) {
-            console.log("[Conceptual Collaboration] Skipping sync - no initial data loaded yet and diagram is empty");
+            console.log("[Physical Collaboration] Skipping sync - no initial data loaded yet and diagram is empty");
             return;
         }
 
@@ -336,7 +336,7 @@ export const useConceptualCollaboration = ({
         }
 
         try {
-            const modelPayload = buildConceptualModel({
+            const modelPayload = buildPhysicalModel({
                 storedNodes,
                 storedEdges,
                 schemaId: schema?.id,
@@ -351,10 +351,10 @@ export const useConceptualCollaboration = ({
         const commitDiagramUpdate = () => {
             if (!ydocRef.current || !nextDiagramString) return;
             const doc = ydocRef.current;
-            const map = doc.getMap('diagram');
+            const map = doc.getMap("diagram");
             lastAppliedDiagramStringRef.current = nextDiagramString;
             doc.transact(() => {
-                map.set('data', nextDiagramString!);
+                map.set("data", nextDiagramString!);
             });
             lastSyncedDiagramStringRef.current = nextDiagramString;
         };
@@ -362,10 +362,10 @@ export const useConceptualCollaboration = ({
         const commitModelUpdate = () => {
             if (!ydocRef.current || !nextModelString) return;
             const doc = ydocRef.current;
-            const map = doc.getMap('model');
+            const map = doc.getMap("model");
             lastAppliedModelStringRef.current = nextModelString;
             doc.transact(() => {
-                map.set('data', nextModelString!);
+                map.set("data", nextModelString!);
             });
             lastSyncedModelStringRef.current = nextModelString;
         };
@@ -389,4 +389,3 @@ export const useConceptualCollaboration = ({
 
     return { awareness };
 };
-

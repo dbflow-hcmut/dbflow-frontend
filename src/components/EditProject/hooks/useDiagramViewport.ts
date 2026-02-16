@@ -2,10 +2,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import type { Node, Viewport, ReactFlowInstance } from "reactflow";
 import type { NodeData } from "../index";
-import { loadViewportFromStorage, saveViewportToStorage } from "../utils/conceptual-diagram.builder";
+import { loadViewportFromStorage as loadConceptualViewport, saveViewportToStorage as saveConceptualViewport } from "../utils/conceptual-diagram.builder";
+import { loadViewportFromStorage as loadLogicalViewport, saveViewportToStorage as saveLogicalViewport } from "../utils/logical-diagram.builder";
+import { loadViewportFromStorage as loadPhysicalViewport, saveViewportToStorage as savePhysicalViewport } from "../utils/physical-diagram.builder";
+import { SchemaType } from "@/utils/constants";
+import type { ProjectSchemasResponse } from "@/types/projects.type";
 
 type UseDiagramViewportParams = {
     selectedSchemaId?: string | null;
+    selectedSchema?: ProjectSchemasResponse | null;
     nodes: Node<NodeData>[];
     isReactFlowReady: boolean;
     reactFlowInstanceRef: RefObject<ReactFlowInstance | null>;
@@ -13,12 +18,25 @@ type UseDiagramViewportParams = {
 
 export const useDiagramViewport = ({
     selectedSchemaId,
+    selectedSchema,
     nodes,
     isReactFlowReady,
     reactFlowInstanceRef,
 }: UseDiagramViewportParams) => {
     const [viewport, setViewport] = useState<Viewport | null>(null);
     const hasAppliedInitialViewportRef = useRef(false);
+
+    const getViewportLoaders = useCallback(() => {
+        const schemaType = selectedSchema?.type;
+        if (schemaType === SchemaType.LOGICAL) {
+            return { load: loadLogicalViewport, save: saveLogicalViewport };
+        }
+        if (schemaType === SchemaType.PHYSICAL) {
+            return { load: loadPhysicalViewport, save: savePhysicalViewport };
+        }
+        // Default to conceptual
+        return { load: loadConceptualViewport, save: saveConceptualViewport };
+    }, [selectedSchema?.type]);
 
     useEffect(() => {
         hasAppliedInitialViewportRef.current = false;
@@ -30,9 +48,10 @@ export const useDiagramViewport = ({
             return;
         }
 
-        const storedViewport = loadViewportFromStorage(selectedSchemaId);
+        const { load } = getViewportLoaders();
+        const storedViewport = load(selectedSchemaId);
         setViewport(storedViewport ?? null);
-    }, [selectedSchemaId]);
+    }, [selectedSchemaId, getViewportLoaders]);
 
     useEffect(() => {
         if (!reactFlowInstanceRef.current || !isReactFlowReady || !viewport) return;
@@ -66,9 +85,10 @@ export const useDiagramViewport = ({
             if (!hasChanged) return;
 
             setViewport(nextViewport);
-            saveViewportToStorage(nextViewport, selectedSchemaId);
+            const { save } = getViewportLoaders();
+            save(nextViewport, selectedSchemaId);
         },
-        [viewport, selectedSchemaId]
+        [viewport, selectedSchemaId, getViewportLoaders]
     );
 
     return {

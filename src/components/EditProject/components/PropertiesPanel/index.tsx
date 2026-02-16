@@ -57,11 +57,11 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 }) => {
     const connectedEntities = useMemo(() => {
         if (!selectedNode || selectedNode.type !== 'relationship') return [];
-        
+
         const relationshipEdges = edges.filter(
             edge => edge.source === selectedNode.id || edge.target === selectedNode.id
         );
-        
+
         const entityIds = new Set<string>();
         relationshipEdges.forEach(edge => {
             if (edge.source === selectedNode.id) {
@@ -70,7 +70,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 entityIds.add(edge.source);
             }
         });
-        
+
         return nodes
             .filter(node => node.type === 'entity' && entityIds.has(node.id))
             .map(node => ({
@@ -79,19 +79,18 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             }));
     }, [selectedNode, nodes, edges]);
     return (
-        <div 
-            className={`absolute h-[calc(100vh-160px)] top-1/2 -translate-y-1/2 right-4 flex flex-col items-center gap-2 bg-white z-10 rounded-lg shadow-md transition-all duration-300 ease-in-out ${
-                isOpen 
-                    ? 'opacity-100 translate-x-0 pointer-events-auto' 
+        <div
+            className={`absolute h-[calc(100vh-160px)] top-1/2 -translate-y-1/2 right-4 flex flex-col items-center gap-2 bg-white z-10 rounded-lg shadow-md transition-all duration-300 ease-in-out ${isOpen
+                    ? 'opacity-100 translate-x-0 pointer-events-auto'
                     : 'opacity-0 translate-x-full pointer-events-none'
-            }`}
+                }`}
         >
             <div className="w-64 flex-1 flex flex-col min-h-0">
                 <div className="border-b border-gray-200 flex items-center justify-between py-2 px-4 flex-shrink-0">
                     <div className="text-lg font-semibold">Properties</div>
-                    <X 
-                        className="cursor-pointer" 
-                        size={18} 
+                    <X
+                        className="cursor-pointer"
+                        size={18}
                         onClick={onClose}
                     />
                 </div>
@@ -228,7 +227,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                             ))}
                                             {!(selectedNode.data as RelationTableData).columns?.length && (
                                                 <div className="text-sm text-gray-500 py-2 text-center">
-                                                    No columns. Click "Add Column" to add one.
+                                                    No columns. Click &quot;Add Column&quot; to add one.
                                                 </div>
                                             )}
                                         </div>

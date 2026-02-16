@@ -7,6 +7,7 @@ import { AntdRegistry } from "@ant-design/nextjs-registry";
 import AppShell from "@/components/AppShell";
 import NotificationRoot from "@/providers/notification";
 import SessionProvider from "@/providers/SessionProvider";
+import { AuthProvider } from "@/providers/AuthProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -42,16 +43,18 @@ export default function RootLayout({
       </head>
       <body className="antialiased min-h-screen bg-bg-light text-text-light" suppressHydrationWarning>
         <SessionProvider>
-          <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
-            <AntdRegistry>
-              <AntdThemeProvider>
-                <NotificationRoot />
-                <AppShell>
-                  {children}
-                </AppShell>
-              </AntdThemeProvider>
-            </AntdRegistry>
-          </ThemeProvider>
+          <AuthProvider>
+            <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
+              <AntdRegistry>
+                <AntdThemeProvider>
+                  <NotificationRoot />
+                  <AppShell>
+                    {children}
+                  </AppShell>
+                </AntdThemeProvider>
+              </AntdRegistry>
+            </ThemeProvider>
+          </AuthProvider>
         </SessionProvider>
       </body>
     </html>

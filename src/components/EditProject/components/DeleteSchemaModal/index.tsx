@@ -24,7 +24,7 @@ const DeleteSchemaModal: React.FC<DeleteSchemaModalProps> = ({
 
     const handleConfirmDelete = async () => {
         if (!schema || !projectId) return;
-        
+
         setIsDeleting(true);
         try {
             await deleteSchema(projectId, schema.id);
@@ -48,7 +48,7 @@ const DeleteSchemaModal: React.FC<DeleteSchemaModalProps> = ({
             cancelText="Cancel"
             okButtonProps={{ danger: true }}
         >
-            <p>Are you sure you want to delete the schema "{schema?.name}"? This action cannot be undone.</p>
+            <p>Are you sure you want to delete the schema &quot;{schema?.name}&quot;? This action cannot be undone.</p>
         </Modal>
     );
 };
