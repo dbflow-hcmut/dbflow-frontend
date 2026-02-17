@@ -96,6 +96,7 @@ const EditProject = (props: IPropsEditProject) => {
     const searchParams = useSearchParams();
     const [nodes, setNodesState, onNodesChange] = useNodesState<NodeData>(initialNodes);
     const [edges, setEdgesState, onEdgesChange] = useEdgesState(initialEdges);
+    const isDiagramReadyRef = useRef(false);
 
     // Wrapper setNodes và setEdges - chỉ cập nhật state, không lưu history ngay
     // History sẽ được lưu bởi useEffect khi state thay đổi
@@ -233,6 +234,7 @@ const EditProject = (props: IPropsEditProject) => {
             if (!schemaIdFromUrl) {
                 updateUrlWithSchemaId(targetSchema.id);
             }
+            isDiagramReadyRef.current = true;
         }
     }, [schemaList, searchParams, selectedSchema?.id, updateUrlWithSchemaId, setNodesState, setEdgesState]);
 
@@ -616,7 +618,7 @@ const EditProject = (props: IPropsEditProject) => {
         };
     }, [broadcastCursorPosition, isConceptualSchema, isLogicalSchema, isPhysicalSchema, diagramWrapperEl]);
 
-    if (!selectedSchema) return (
+    if (!selectedSchema && isDiagramReadyRef.current) return (
         <div className="h-screen w-full flex flex-col items-center justify-center text-center px-4">
             <div className="text-base font-semibold text-gray-800">
                 Page not found

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, startTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Search, Filter, Grid3x3, List, Plus, Calendar } from "lucide-react";
 import { Input, Button, Avatar, Badge, Spin, Pagination } from "antd";
@@ -88,7 +88,9 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
     }, [apiProjects]);
 
     const handleProjectClick = (projectId: string) => {
-        router.push(`/projects/${projectId}`);
+        startTransition(() => {
+            router.push(`/projects/${projectId}`);
+        });
     };
 
     return (
