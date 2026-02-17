@@ -97,6 +97,7 @@ const EditProject = (props: IPropsEditProject) => {
     const [nodes, setNodesState, onNodesChange] = useNodesState<NodeData>(initialNodes);
     const [edges, setEdgesState, onEdgesChange] = useEdgesState(initialEdges);
     const isDiagramReadyRef = useRef(false);
+    const [interactionMode, setInteractionMode] = useState<'default' | 'panning'>('default');
 
     // Wrapper setNodes và setEdges - chỉ cập nhật state, không lưu history ngay
     // History sẽ được lưu bởi useEffect khi state thay đổi
@@ -664,6 +665,21 @@ const EditProject = (props: IPropsEditProject) => {
                         selectedSchema={selectedSchema}
                         setSelectedSchema={handleSetSelectedSchema}
                         projectId={projectData?.id ?? null}
+                        nodes={nodes}
+                        onNodeClick={(nodeId) => {
+                            const node = nodes.find(n => n.id === nodeId);
+                            if (node) {
+                                setNodes((nds) => nds.map((n) => ({
+                                    ...n,
+                                    selected: n.id === nodeId
+                                })));
+                                reactFlowInstanceRef.current?.fitView({
+                                    nodes: [{ id: nodeId }],
+                                    duration: 500,
+                                    padding: 0.5,
+                                });
+                            }
+                        }}
                     />
 
                     <PropertiesPanel
@@ -800,10 +816,16 @@ const EditProject = (props: IPropsEditProject) => {
                                 }
                             }}
                             onMove={(_, viewportState) => handleViewportChange(viewportState)}
-                            selectionOnDrag
+                            selectionOnDrag={interactionMode === 'default'}
+                            panOnDrag={interactionMode === 'panning' ? true : [1, 2]}
+                            panOnScroll={true}
                             selectionMode={SelectionMode.Partial}
                             multiSelectionKeyCode={["Shift", "Meta"]}
                             autoPanOnNodeDrag
+                            
+                            elementsSelectable={interactionMode === 'default'}
+                            nodesDraggable={interactionMode === 'default'}
+                            nodesConnectable={interactionMode === 'default'}
                             fitView={false}
                             defaultViewport={viewport ? { x: viewport.x, y: viewport.y, zoom: viewport.zoom } : undefined}
                             proOptions={{ hideAttribution: true }}
@@ -842,6 +864,8 @@ const EditProject = (props: IPropsEditProject) => {
                     onRedo={handleRedo}
                     canUndo={canUndo()}
                     canRedo={canRedo()}
+                    interactionMode={interactionMode}
+                    setInteractionMode={setInteractionMode}
                 />
 
                 <SearchModal open={isSearchModalOpen} onClose={() => setIsSearchModalOpen(false)} />

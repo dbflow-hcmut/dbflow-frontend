@@ -53,8 +53,15 @@ export const useDiagramViewport = ({
         setViewport(storedViewport ?? null);
     }, [selectedSchemaId, getViewportLoaders]);
 
+    const isInternalUpdate = useRef(false);
+
     useEffect(() => {
         if (!reactFlowInstanceRef.current || !isReactFlowReady || !viewport) return;
+
+        if (isInternalUpdate.current) {
+            isInternalUpdate.current = false;
+            return;
+        }
 
         reactFlowInstanceRef.current.setViewport({
             x: viewport.x,
@@ -84,6 +91,7 @@ export const useDiagramViewport = ({
 
             if (!hasChanged) return;
 
+            isInternalUpdate.current = true;
             setViewport(nextViewport);
             const { save } = getViewportLoaders();
             save(nextViewport, selectedSchemaId);

@@ -15,6 +15,8 @@ type FooterProps = {
     onRedo?: () => void;
     canUndo?: boolean;
     canRedo?: boolean;
+    interactionMode: 'default' | 'panning';
+    setInteractionMode: (mode: 'default' | 'panning') => void;
 };
 
 const Footer: React.FC<FooterProps> = ({
@@ -27,6 +29,8 @@ const Footer: React.FC<FooterProps> = ({
     onRedo,
     canUndo = false,
     canRedo = false,
+    interactionMode,
+    setInteractionMode,
 }) => {
     return (
         <div className="pb-4 bg-transparent flex items-center justify-between px-4 fixed bottom-0 z-10 w-full">
@@ -45,14 +49,16 @@ const Footer: React.FC<FooterProps> = ({
                     </div>
                     <div className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 pl-8 py-2 h-12 ml-10">                        
                         <Button
-                            type="primary"
+                            type={interactionMode === 'default' ? 'primary' : 'text'}
                             className="!px-2"
+                            onClick={() => setInteractionMode('default')}
                         >
                             <MousePointer2 size={18} />
                         </Button>
                         <Button
-                            type="text"
+                            type={interactionMode === 'panning' ? 'primary' : 'text'}
                             className="!px-2"
+                            onClick={() => setInteractionMode('panning')}
                         >
                             <Hand size={18} />
                         </Button>

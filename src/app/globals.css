@@ -283,3 +283,11 @@ body {
 .search-modal .ant-modal-footer {
   display: none !important;
 }
+
+.notations-collapse.ant-collapse-borderless > .ant-collapse-item > .ant-collapse-content > .ant-collapse-content-box {
+  padding: 4px 8px 8px !important;
+}
+
+.notations-collapse.ant-collapse > .ant-collapse-item > .ant-collapse-header {
+  padding: 8px 12px !important;
+}

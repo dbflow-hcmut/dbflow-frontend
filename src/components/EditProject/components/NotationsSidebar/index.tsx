@@ -1,6 +1,6 @@
-import React, { useState } from "react";
-import { Button, Collapse, Dropdown } from "antd";
-import { Plus, Table2, MoreVertical, Edit, Trash2 } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { Button, Collapse, Dropdown, theme } from "antd";
+import { Plus, Table2, MoreVertical, Edit, Trash2, ChevronDown } from "lucide-react";
 import type { MenuProps } from "antd";
 import RectangleIcon from "@/components/Icons/rectangleIcon";
 import OvalIcon from "@/components/Icons/oval";
@@ -10,6 +10,9 @@ import classNames from "classnames";
 import { SchemaType } from "@/utils/constants";
 import DeleteSchemaModal from "../DeleteSchemaModal";
 import RenameSchemaModal from "../RenameSchemaModal";
+import { Node } from "reactflow";
+import { NodeData } from "../../index";
+import { useScrollIndicator } from "@/hooks/useScrollIndicator";
 
 type NotationsSidebarProps = {
     isOpen: boolean;
@@ -28,6 +31,8 @@ type NotationsSidebarProps = {
     setSelectedSchema: (schema: ProjectSchemasResponse) => void;
     projectId: string | null;
     onSchemaDeleted?: () => void;
+    nodes: Node<NodeData>[];
+    onNodeClick: (nodeId: string) => void;
 };
 
 const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
@@ -47,11 +52,26 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
     setSelectedSchema,
     projectId,
     onSchemaDeleted,
+    nodes,
+    onNodeClick,
 }) => {
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
     const [schemaToDelete, setSchemaToDelete] = useState<ProjectSchemasResponse | null>(null);
     const [renameModalOpen, setRenameModalOpen] = useState(false);
     const [schemaToRename, setSchemaToRename] = useState<ProjectSchemasResponse | null>(null);
+    
+    
+    const {
+        containerRef,
+        showScrollDown,
+        scrollToBottom
+    } = useScrollIndicator(5, [projectSchemasData]);
+
+    const {
+        containerRef: structureContainerRef,
+        showScrollDown: showStructureScrollDown,
+        scrollToBottom: scrollToStructureBottom
+    } = useScrollIndicator(5, [nodes, selectedSchema]);
 
     const handleDeleteClick = (schema: ProjectSchemasResponse, e: React.MouseEvent | React.KeyboardEvent) => {
         if (e?.stopPropagation && typeof e.stopPropagation === 'function') {
@@ -122,13 +142,13 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                 : 'opacity-0 -translate-x-full pointer-events-none'
                 }`}
         >
-            <div className="w-64">
+            <div className="w-64 h-full flex flex-col py-2">
                 <div className="border-b border-gray-200 my-auto flex items-center justify-between py-2 px-4">
-                    <div className="text-lg font-semibold">Pages</div>
+                    <div className="text-base font-semibold">Pages</div>
                     <Plus className="cursor-pointer" size={18} onClick={onAddPage} />
                 </div>
 
-                <div className="border-b border-gray-200 py-2 min-h-40 flex flex-col gap-2">
+                <div ref={containerRef} className="border-b border-gray-200 py-2 min-h-40 flex flex-col gap-2 max-h-[160px] overflow-y-auto relative">
                     {projectSchemasData?.map((schema) => (
                         <div
                             key={schema.id}
@@ -170,6 +190,16 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                             </div>
                         </div>
                     ))}
+
+                    <div
+                        onClick={scrollToBottom}
+                        className={classNames(
+                            "absolute bottom-2 left-1/2 -translate-x-1/2 bg-white/80 backdrop-blur rounded-full p-1 shadow hover:bg-gray-100 transition-all duration-300 cursor-pointer z-10",
+                            showScrollDown ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2 pointer-events-none"
+                        )}
+                    >
+                        <ChevronDown size={16} className="text-gray-600" />
+                    </div>
                 </div>
 
                 <DeleteSchemaModal
@@ -195,16 +225,16 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                 />
 
                 <div className="border-b border-gray-200 my-auto">
-                    <div className="text-lg font-semibold py-2 px-4">Notations</div>
+                    <div className="text-base font-semibold py-2 px-4">Notations</div>
                 </div>
                 <div className="py-2">
-                    <div className="border-b border-gray-200 pb-2 mb-2" hidden={selectedSchema?.type !== SchemaType.CONCEPTUAL}>
+                    <div hidden={selectedSchema?.type !== SchemaType.CONCEPTUAL}>
                         <div className="px-2">
                             <Collapse
                                 bordered={false}
                                 defaultActiveKey={['1']}
                                 expandIconPosition="end"
-                                className="!bg-transparent"
+                                className="!bg-transparent notations-collapse"
                                 items={[
                                     {
                                         key: '1',
@@ -327,13 +357,13 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                         </div>
                     </div>
 
-                    <div className="border-b border-gray-200 pb-2 mb-2" hidden={selectedSchema?.type !== SchemaType.LOGICAL && selectedSchema?.type !== SchemaType.PHYSICAL}>
+                    <div hidden={selectedSchema?.type !== SchemaType.LOGICAL && selectedSchema?.type !== SchemaType.PHYSICAL}>
                         <div className="px-2">
                             <Collapse
                                 bordered={false}
                                 defaultActiveKey={['1']}
                                 expandIconPosition="end"
-                                className="!bg-transparent"
+                                className="!bg-transparent notations-collapse"
                                 items={[
                                     {
                                         key: '1',
@@ -355,6 +385,140 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                                 ]}
                             />
                         </div>
+                    </div>
+                </div>
+
+                {/* Diagram Structure */}
+                <div className="border-y border-gray-200 my-auto">
+                    <div className="text-base font-semibold py-2 px-4">Diagram Structure</div>
+                </div>
+                <div ref={structureContainerRef} className="py-2 flex-1 overflow-y-auto min-h-0 relative">
+                    <div hidden={selectedSchema?.type !== SchemaType.CONCEPTUAL}>
+                        <div className="px-2">
+                            <Collapse
+                                bordered={false}
+                                defaultActiveKey={['1']}
+                                expandIconPosition="end"
+                                className="!bg-transparent notations-collapse"
+                                items={[
+                                    {
+                                        key: '1',
+                                        label: <div className="font-bold">Entities</div>,
+                                        children: (
+                                            <div className="flex flex-col gap-1">
+                                                {nodes.filter(node => node.type === 'entity').map(node => (
+                                                    <div
+                                                        key={node.id}
+                                                        className="flex items-center gap-2 p-2 hover:bg-gray-100 rounded cursor-pointer group"
+                                                        onClick={() => onNodeClick(node.id)}
+                                                    >
+                                                        <div className="flex flex-col items-center">
+                                                            <RectangleIcon
+                                                                width={20}
+                                                                height={14}
+                                                                strokeWidth={1.5}
+                                                                variant="single"
+                                                            />
+                                                        </div>
+                                                        <span className="text-sm truncate flex-1">{(node.data as { name: string }).name}</span>
+                                                    </div>
+                                                ))}
+                                                {nodes.filter(node => node.type === 'entity').length === 0 && (
+                                                    <div className="text-xs text-gray-400 text-center py-2">No entities</div>
+                                                )}
+                                            </div>
+                                        ),
+                                    },
+                                ]}
+                            />
+                        </div>
+                    </div>
+
+                    <div hidden={selectedSchema?.type !== SchemaType.CONCEPTUAL}>
+                        <div className="px-2">
+                            <Collapse
+                                bordered={false}
+                                defaultActiveKey={['1']}
+                                expandIconPosition="end"
+                                className="!bg-transparent notations-collapse"
+                                items={[
+                                    {
+                                        key: '1',
+                                        label: <div className="font-bold">Relationships</div>,
+                                        children: (
+                                            <div className="flex flex-col gap-1">
+                                                {nodes.filter(node => node.type === 'relationship').map(node => (
+                                                    <div
+                                                        key={node.id}
+                                                        className="flex items-center gap-2 p-2 hover:bg-gray-100 rounded cursor-pointer group"
+                                                        onClick={() => onNodeClick(node.id)}
+                                                    >
+                                                        <div className="flex flex-col items-center">
+                                                            <PolygonIcon
+                                                                width={20}
+                                                                height={14}
+                                                                strokeWidth={1.5}
+                                                                variant="single"
+                                                            />
+                                                        </div>
+                                                        <span className="text-sm truncate flex-1">{(node.data as { name: string }).name}</span>
+                                                    </div>
+                                                ))}
+                                                {nodes.filter(node => node.type === 'relationship').length === 0 && (
+                                                    <div className="text-xs text-gray-400 text-center py-2">No relationships</div>
+                                                )}
+                                            </div>
+                                        ),
+                                    },
+                                ]}
+                            />
+                        </div>
+                    </div>
+
+                    <div hidden={selectedSchema?.type !== SchemaType.LOGICAL && selectedSchema?.type !== SchemaType.PHYSICAL}>
+                        <div className="px-2">
+                            <Collapse
+                                bordered={false}
+                                defaultActiveKey={['1']}
+                                expandIconPosition="end"
+                                className="!bg-transparent notations-collapse"
+                                items={[
+                                    {
+                                        key: '1',
+                                        label: <div className="font-bold">Tables</div>,
+                                        children: (
+                                            <div className="flex flex-col gap-1">
+                                                {nodes.filter(node => node.type === 'relation').map(node => (
+                                                    <div
+                                                        key={node.id}
+                                                        className="flex items-center gap-2 p-2 hover:bg-gray-100 rounded cursor-pointer group"
+                                                        onClick={() => onNodeClick(node.id)}
+                                                    >
+                                                        <div className="flex flex-col items-center">
+                                                            <Table2 size={16} strokeWidth={1.5} />
+                                                        </div>
+                                                        <span className="text-sm truncate flex-1">{(node.data as { name: string }).name}</span>
+                                                    </div>
+                                                ))}
+                                                {nodes.filter(node => node.type === 'relation').length === 0 && (
+                                                    <div className="text-xs text-gray-400 text-center py-2">No tables</div>
+                                                )}
+                                            </div>
+                                        ),
+                                    },
+                                ]}
+                            />
+                        </div>
+                    </div>
+
+                    <div
+                        onClick={scrollToStructureBottom}
+                        className={classNames(
+                            "absolute bottom-2 left-1/2 -translate-x-1/2 bg-white/80 backdrop-blur rounded-full p-1 shadow hover:bg-gray-100 transition-all duration-300 cursor-pointer z-10",
+                            showStructureScrollDown ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2 pointer-events-none"
+                        )}
+                    >
+                        <ChevronDown size={16} className="text-gray-600" />
                     </div>
                 </div>
             </div>
