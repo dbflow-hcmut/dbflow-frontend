@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-export const useScrollIndicator = (threshold = 5, dependency: any[] = []) => {
+export const useScrollIndicator = (threshold = 5, dependency: unknown[] = []) => {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const [showScrollDown, setShowScrollDown] = useState(false);
 
