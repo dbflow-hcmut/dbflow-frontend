@@ -1,9 +1,10 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { Input, Checkbox, Select, Button } from "antd";
-import { X, Plus, Trash2 } from "lucide-react";
+import { X, Plus, Trash2, GripVertical } from "lucide-react";
 import { Node, Edge } from "reactflow";
 import type { AttributeData, NodeData, RelationshipData, EntityData } from "../../index";
 import type { RelationTableData } from "@/components/erds-notations/relation-table";
+import type { LogicalTableData } from "@/components/erds-notations/logical-table";
 
 export type ErdEdgeData = {
     label?: string;
@@ -34,6 +35,13 @@ type PropertiesPanelProps = {
         columnIndex: number,
         updates: Partial<{ name: string; type: string; isPrimary: boolean; isNullable: boolean }>
     ) => void;
+    onAddLogicalTableAttribute?: () => void;
+    onRemoveLogicalTableAttribute?: (attributeIndex: number) => void;
+    onUpdateLogicalTableAttribute?: (
+        attributeIndex: number,
+        updates: Partial<{ name: string; isKey: boolean }>
+    ) => void;
+    onReorderLogicalTableAttributes?: (fromIndex: number, toIndex: number) => void;
 };
 
 const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
@@ -54,7 +62,12 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     onAddRelationTableColumn,
     onRemoveRelationTableColumn,
     onUpdateRelationTableColumn,
+    onAddLogicalTableAttribute,
+    onRemoveLogicalTableAttribute,
+    onUpdateLogicalTableAttribute,
+    onReorderLogicalTableAttributes,
 }) => {
+    const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
     const connectedEntities = useMemo(() => {
         if (!selectedNode || selectedNode.type !== 'relationship') return [];
 
@@ -127,6 +140,99 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                         placeholder="Entity name"
                                     />
                                 </div>
+                            )}
+                            {selectedNode.type === 'logical-table' && (
+                                <>
+                                    <div>
+                                        <label className="block text-sm font-medium mb-2">Table Name</label>
+                                        <Input
+                                            value={propertiesName}
+                                            onChange={(e) => onUpdateName(e.target.value)}
+                                            placeholder="Table name"
+                                        />
+                                    </div>
+                                    <div>
+                                        <div className="flex items-center justify-between mb-2">
+                                            <label className="block text-sm font-medium">Columns</label>
+                                            {onAddLogicalTableAttribute && (
+                                                <Button
+                                                    type="primary"
+                                                    size="small"
+                                                    icon={<Plus size={14} />}
+                                                    onClick={onAddLogicalTableAttribute}
+                                                    className="h-8!"
+                                                >
+                                                    Add Column
+                                                </Button>
+                                            )}
+                                        </div>
+                                        <div className="flex flex-col gap-2">
+                                            {(selectedNode.data as LogicalTableData).columns?.map((col, idx) => (
+                                                <div 
+                                                    key={idx} 
+                                                    className="border border-gray-200 rounded p-2 space-y-2 cursor-move hover:border-blue-300 transition-colors"
+                                                    draggable
+                                                    onDragStart={(e) => {
+                                                        setDraggedIndex(idx);
+                                                        e.dataTransfer.effectAllowed = 'move';
+                                                    }}
+                                                    onDragOver={(e) => {
+                                                        e.preventDefault();
+                                                        e.dataTransfer.dropEffect = 'move';
+                                                    }}
+                                                    onDrop={(e) => {
+                                                        e.preventDefault();
+                                                        if (draggedIndex !== null && draggedIndex !== idx) {
+                                                            onReorderLogicalTableAttributes?.(draggedIndex, idx);
+                                                        }
+                                                        setDraggedIndex(null);
+                                                    }}
+                                                    onDragEnd={() => setDraggedIndex(null)}
+                                                    style={{
+                                                        opacity: draggedIndex === idx ? 0.5 : 1,
+                                                    }}
+                                                >
+                                                    <div className="flex items-center gap-2">
+                                                        <GripVertical size={16} className="text-gray-400 flex-shrink-0" />
+                                                        <Input
+                                                            value={col.name}
+                                                            onChange={(e) =>
+                                                                onUpdateLogicalTableAttribute?.(idx, { name: e.target.value })
+                                                            }
+                                                            placeholder="Column name"
+                                                            style={{ flex: 1 }}
+                                                            onMouseDown={(e) => e.stopPropagation()}
+                                                        />
+                                                        {onRemoveLogicalTableAttribute && (
+                                                            <Button
+                                                                type="text"
+                                                                danger
+                                                                size="small"
+                                                                icon={<Trash2 size={14} />}
+                                                                onClick={() => onRemoveLogicalTableAttribute(idx)}
+                                                            />
+                                                        )}
+                                                    </div>
+                                                    <div className="flex items-center gap-2 pl-6">
+                                                        <Checkbox
+                                                            checked={col.isKey || false}
+                                                            onChange={(e) =>
+                                                                onUpdateLogicalTableAttribute?.(idx, { isKey: e.target.checked })
+                                                            }
+                                                        >
+                                                            Is Key
+                                                        </Checkbox>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            {!(selectedNode.data as LogicalTableData).columns?.length && (
+                                                <div className="text-sm text-gray-500 py-2 text-center">
+                                                    No columns. Click &quot;Add Column&quot; to add one.
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </>
                             )}
                             {selectedNode.type === 'relation' && (
                                 <>
@@ -270,7 +376,23 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                             )}
                         </div>
                     ) : selectedEdge ? (
-                        selectedEdge.type === 'relation-table-edge' ? (
+                        selectedEdge.type === 'logical-table-edge' ? (
+                            <div className="flex flex-col gap-4">
+                                <div className="text-sm text-gray-600">
+                                    This is a logical table edge. You can adjust the path by dragging control points when the edge is selected.
+                                </div>
+                                {selectedEdge.data?.label && (
+                                    <div>
+                                        <label className="block text-sm font-medium mb-2">Label</label>
+                                        <Input
+                                            value={selectedEdge.data.label}
+                                            placeholder="Edge label"
+                                            disabled
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                        ) : selectedEdge.type === 'relation-table-edge' ? (
                             <div className="flex flex-col gap-4">
                                 <div className="text-sm text-gray-600">
                                     This is a relation table edge. You can adjust the path by dragging control points when the edge is selected.

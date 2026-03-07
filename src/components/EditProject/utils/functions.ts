@@ -2,6 +2,7 @@ import React from "react";
 import { Node } from "reactflow";
 import type { EntityData, RelationshipData, AttributeData, NodeData } from "../index";
 import type { RelationTableData } from "@/components/erds-notations/relation-table";
+import type { LogicalTableData } from "@/components/erds-notations/logical-table";
 
 export type ConstraintData = { symbol: 'd' | 'o' | 'u' };
 export type ErdEdgeData = {
@@ -221,6 +222,33 @@ export const createNodeCreators = (
         });
     };
 
+    const addLogicalTable = () => {
+        setNodes((existingNodes) => {
+            const id = generateDiagramId();
+            const tableCount = existingNodes.filter(n => n.type === 'logical-table').length;
+            const tableName = `table_${tableCount + 1}`;
+            
+            const tableNameWidth = tableName.length * 8 + 40;
+            const defaultColNameWidth = 'column_1'.length * 7 + 40;
+            const estimatedWidth = Math.max(200, Math.max(tableNameWidth, defaultColNameWidth));
+            
+            const newNode: Node<LogicalTableData> = {
+                id,
+                type: "logical-table",
+                position: resolvePosition(existingNodes),
+                data: { 
+                    name: tableName, 
+                    columns: [
+                        { name: 'column_1', isKey: false }
+                    ]
+                },
+                style: { width: estimatedWidth, height: 120 },
+                selected: true,
+            };
+            return [...deselectAllNodes(existingNodes), newNode];
+        });
+    };
+
     return {
         addRelationship,
         addDoubleRelationship,
@@ -231,6 +259,7 @@ export const createNodeCreators = (
         addDashedAttribute,
         addConstraint,
         addRelationTable,
+        addLogicalTable,
     };
 };
 
@@ -325,11 +354,100 @@ export const createUpdateFunctions = (
         );
     };
 
+    const addLogicalTableAttribute = () => {
+        if (!selectedNode || selectedNode.type !== 'logical-table') return;
+        const tableData = selectedNode.data as LogicalTableData;
+        const newColumn = {
+            name: `column_${(tableData.columns?.length || 0) + 1}`,
+            isKey: false,
+        };
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            columns: [...(tableData.columns || []), newColumn],
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
+    const removeLogicalTableAttribute = (columnIndex: number) => {
+        if (!selectedNode || selectedNode.type !== 'logical-table') return;
+        const tableData = selectedNode.data as LogicalTableData;
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            columns: tableData.columns?.filter((_, idx) => idx !== columnIndex) || [],
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
+    const updateLogicalTableAttribute = (
+        columnIndex: number,
+        updates: Partial<{ name: string; isKey: boolean }>
+    ) => {
+        if (!selectedNode || selectedNode.type !== 'logical-table') return;
+        const tableData = selectedNode.data as LogicalTableData;
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            columns: tableData.columns?.map((col, idx) =>
+                                idx === columnIndex ? { ...col, ...updates } : col
+                            ) || [],
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
+    const reorderLogicalTableAttributes = (fromIndex: number, toIndex: number) => {
+        if (!selectedNode || selectedNode.type !== 'logical-table') return;
+        const tableData = selectedNode.data as LogicalTableData;
+        const columns = [...(tableData.columns || [])];
+        const [movedColumn] = columns.splice(fromIndex, 1);
+        columns.splice(toIndex, 0, movedColumn);
+        
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            columns,
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
     return {
         updateNodeName,
         updateAttributeKey,
         addRelationTableColumn,
         removeRelationTableColumn,
         updateRelationTableColumn,
+        addLogicalTableAttribute,
+        removeLogicalTableAttribute,
+        updateLogicalTableAttribute,
+        reorderLogicalTableAttributes,
     };
 };

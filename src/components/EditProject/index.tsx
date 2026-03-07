@@ -17,21 +17,28 @@ import ReactFlow, {
     SelectionMode,
     ReactFlowInstance,
     ConnectionMode,
+    getNodesBounds,
+    getViewportForBounds,
 } from "reactflow";
+import { toPng, toSvg } from 'html-to-image';
+import { message } from 'antd';
 import "reactflow/dist/style.css";
 import RelationshipNode from "@/components/erds-notations/relationship";
 import AttributeNode from "@/components/erds-notations/attribute";
 import EntityNode from "@/components/erds-notations/entity";
 import ConstraintNode from "@/components/erds-notations/constraint";
 import RelationTableNode, { type RelationTableData } from "@/components/erds-notations/relation-table";
+import LogicalTableNode, { type LogicalTableData } from "@/components/erds-notations/logical-table";
 import ErdEdge from "@/components/erd-edge";
 import RelationTableEdge from "@/components/relation-table-edge";
+import LogicalTableEdge from "@/components/logical-table-edge";
 import SearchModal from "./components/SearchModal";
 import NotationsSidebar from "./components/NotationsSidebar";
 import PropertiesPanel from "./components/PropertiesPanel";
 import Header from "./components/Header";
 import Footer from "./components/Footer";
 import ChatBox from "./components/ChatBox";
+import ExportModal, { ExportSettings, ExportFormat, ExportScope } from "./components/ExportModal";
 import { generateDiagramId, createNodeCreators, createUpdateFunctions } from "./utils/functions";
 import { ProjectResponse, ProjectSchemasResponse } from "@/types/projects.type";
 import type { UserResponse } from "@/types/user.type";
@@ -48,7 +55,7 @@ import type { RemoteCollaborator } from "./hooks/useCollaborationAwareness";
 import { useProjectAwareness } from "./hooks/useProjectAwareness";
 import { RemoteCursorsOverlay } from "./components/RemoteCursorsOverlay";
 import { useAuth } from "@/providers/AuthProvider";
-import { checkSchemaExistence } from "@/api/projects/client";
+import { checkSchemaExistence, getProjectPermissions } from "@/api/projects/client";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 
 export type EntityField = {
@@ -137,6 +144,26 @@ const EditProject = (props: IPropsEditProject) => {
         schemaId: selectedSchema?.id || null,
     });
 
+    const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+
+    useEffect(() => {
+        if (!projectData?.id) {
+            setHasPermission(false);
+            return;
+        }
+
+        const checkPerms = async () => {
+            const perm = await getProjectPermissions(projectData.id);
+            if (perm) {
+                setHasPermission(true);
+            } else {
+                setHasPermission(false);
+            }
+        };
+
+        checkPerms();
+    }, [projectData?.id]);
+
     const isUndoRedoActiveRef = useRef(false);
 
     // Handle undo/redo
@@ -191,6 +218,8 @@ const EditProject = (props: IPropsEditProject) => {
     const effectiveUser = currentUserClient ?? currentUser;
     const [sessionId, setSessionId] = useState<string | null>(null);
     const [isAddPageOpen, setIsAddPageOpen] = useState(false);
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+    const [exportInitialConfig, setExportInitialConfig] = useState<{ format: ExportFormat; scope: ExportScope }>({ format: 'png', scope: 'all' });
 
     const isUserSelectingSchemaRef = useRef(false);
 
@@ -340,6 +369,7 @@ const EditProject = (props: IPropsEditProject) => {
         addDashedAttribute,
         addConstraint,
         addRelationTable,
+        addLogicalTable,
     } = useMemo(
         () => createNodeCreators(setNodes, { getViewportCenter }),
         [setNodes, getViewportCenter]
@@ -351,6 +381,10 @@ const EditProject = (props: IPropsEditProject) => {
         addRelationTableColumn,
         removeRelationTableColumn,
         updateRelationTableColumn,
+        addLogicalTableAttribute,
+        removeLogicalTableAttribute,
+        updateLogicalTableAttribute,
+        reorderLogicalTableAttributes,
     } = useMemo(
         () => createUpdateFunctions(setNodes, selectedNode),
         [setNodes, selectedNode]
@@ -363,6 +397,7 @@ const EditProject = (props: IPropsEditProject) => {
             entity: EntityNode,
             constraint: ConstraintNode,
             relation: RelationTableNode,
+            "logical-table": LogicalTableNode,
         }),
         []
     );
@@ -371,21 +406,32 @@ const EditProject = (props: IPropsEditProject) => {
         () => ({
             "erd-edge": ErdEdge,
             "relation-table-edge": RelationTableEdge,
+            "logical-table-edge": LogicalTableEdge,
         }),
         []
     );
 
     const onConnect = useCallback<OnConnect>((connection: Connection) => {
-        // Check if connection involves relation table nodes
+        // Check if connection involves relation table nodes or logical table nodes
         const sourceNode = nodes.find(n => n.id === connection.source);
         const targetNode = nodes.find(n => n.id === connection.target);
         const isRelationTableEdge = sourceNode?.type === 'relation' || targetNode?.type === 'relation';
+        const isLogicalTableEdge = sourceNode?.type === 'logical-table' || targetNode?.type === 'logical-table';
+
+        let edgeType = "erd-edge";
+        if (isLogicalTableEdge) {
+            edgeType = "logical-table-edge";
+        } else if (isRelationTableEdge) {
+            edgeType = "relation-table-edge";
+        }
 
         const edgeWithId = {
             ...connection,
             id: generateDiagramId(),
-            type: isRelationTableEdge ? "relation-table-edge" : "erd-edge",
+            type: edgeType,
             animated: false,
+            // Add arrow marker for logical table edges
+            ...(isLogicalTableEdge ? { markerEnd: { type: 'arrowclosed' } } : {}),
         };
         setEdges((eds) => addEdge(edgeWithId, eds));
     }, [setEdges, nodes]);
@@ -470,7 +516,7 @@ const EditProject = (props: IPropsEditProject) => {
     });
 
     const { awareness: conceptualAwareness } = useConceptualCollaboration({
-        enabled: Boolean(isConceptualSchema),
+        enabled: Boolean(isConceptualSchema && hasPermission),
         projectId: projectData?.id,
         schema: selectedSchema,
         sessionId,
@@ -483,7 +529,7 @@ const EditProject = (props: IPropsEditProject) => {
     });
 
     const { awareness: logicalAwareness } = useLogicalCollaboration({
-        enabled: Boolean(isLogicalSchema),
+        enabled: Boolean(isLogicalSchema && hasPermission),
         projectId: projectData?.id,
         schema: selectedSchema,
         sessionId,
@@ -496,7 +542,7 @@ const EditProject = (props: IPropsEditProject) => {
     });
 
     const { awareness: physicalAwareness } = usePhysicalCollaboration({
-        enabled: Boolean(isPhysicalSchema),
+        enabled: Boolean(isPhysicalSchema && hasPermission),
         projectId: projectData?.id,
         schema: selectedSchema,
         sessionId,
@@ -511,7 +557,7 @@ const EditProject = (props: IPropsEditProject) => {
     const awareness = isConceptualSchema ? conceptualAwareness : isLogicalSchema ? logicalAwareness : isPhysicalSchema ? physicalAwareness : null;
 
     const projectAwareness = useProjectAwareness({
-        enabled: Boolean(projectData?.id && sessionId),
+        enabled: Boolean(projectData?.id && sessionId && hasPermission),
         projectId: projectData?.id,
         sessionId,
         token,
@@ -521,7 +567,7 @@ const EditProject = (props: IPropsEditProject) => {
         remoteCursors,
         broadcastCursorPosition,
     } = useCollaborationAwareness({
-        enabled: Boolean(isConceptualSchema || isLogicalSchema || isPhysicalSchema),
+        enabled: Boolean((isConceptualSchema || isLogicalSchema || isPhysicalSchema) && hasPermission),
         awareness,
         sessionId,
         currentUserName: resolvedUserName,
@@ -533,7 +579,7 @@ const EditProject = (props: IPropsEditProject) => {
         remoteUsers,
         broadcastViewport,
     } = useCollaborationAwareness({
-        enabled: Boolean(projectAwareness),
+        enabled: Boolean(projectAwareness && hasPermission),
         awareness: projectAwareness,
         sessionId,
         currentUserName: resolvedUserName,
@@ -619,7 +665,120 @@ const EditProject = (props: IPropsEditProject) => {
         };
     }, [broadcastCursorPosition, isConceptualSchema, isLogicalSchema, isPhysicalSchema, diagramWrapperEl]);
 
-    if (!selectedSchema && isDiagramReadyRef.current) return (
+    const handleDownload = useCallback(() => {
+        // Defaults for opening the modal
+        const nodesToExport = nodes.filter(n => n.selected);
+        const hasSelection = nodesToExport.length > 0;
+        
+        setExportInitialConfig({ 
+            format: 'png', 
+            scope: hasSelection ? 'selected' : 'all' 
+        });
+        setIsExportModalOpen(true);
+    }, [nodes]);
+
+    const executeExport = useCallback((settings: ExportSettings) => {
+        const { format, scope, transparent, backgroundColor, quality } = settings;
+        const instance = reactFlowInstanceRef.current;
+        if (!instance) return;
+
+        const nodesToExport = scope === 'selected' ? nodes.filter(n => n.selected) : nodes;
+        const nodesBounds = getNodesBounds(nodesToExport);
+        
+        // Add padding
+        const padding = 20;
+        const imageWidth = nodesBounds.width + (padding * 2);
+        const imageHeight = nodesBounds.height + (padding * 2);
+        
+        const transform = getViewportForBounds(
+            nodesBounds, 
+            imageWidth, 
+            imageHeight, 
+            0.5, 
+            2
+        );
+
+        const viewport = document.querySelector('.react-flow__viewport') as HTMLElement;
+        if (!viewport) return;
+
+        const options = {
+            backgroundColor: transparent ? undefined : backgroundColor,
+            width: imageWidth,
+            height: imageHeight,
+            style: {
+                width: String(imageWidth),
+                height: String(imageHeight),
+                transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.zoom})`,
+            },
+            pixelRatio: format === 'png' ? quality : 1,
+            filter: (node: HTMLElement) => {
+                // Ensure node is an HTMLElement to avoid getAttribute error
+                if (!(node instanceof HTMLElement)) return true;
+
+                if (scope === 'all') return true;
+                
+                // Simple filter: if node has data-id, check if it's in nodesToExport
+                const id = node.getAttribute('data-id');
+                if (id) {
+                    return nodesToExport.some(n => n.id === id);
+                }
+                
+                // Check for edges
+                if (node.classList?.contains('react-flow__edge')) {
+                     const edgeId = node.getAttribute('data-id');
+                     if (!edgeId) return true;
+                     
+                     // Find edge in edges state
+                     const edge = edges.find(e => e.id === edgeId);
+                     if (edge) {
+                        return nodesToExport.some(n => n.id === edge.source) && nodesToExport.some(n => n.id === edge.target);
+                     }
+                }
+                return true;
+            }
+        };
+
+        const downloadImage = (dataUrl: string) => {
+            const a = document.createElement('a');
+            a.setAttribute('download', `${diagramName}.${format}`);
+            a.setAttribute('href', dataUrl);
+            a.click();
+        };
+
+        if (format === 'png') {
+            toPng(viewport, options)
+                .then(downloadImage)
+                .catch((err) => {
+                    console.error('Export failed:', err);
+                    message.error('Failed to export diagram.');
+                });
+        } else {
+            toSvg(viewport, options)
+                .then(downloadImage)
+                .catch((err) => {
+                    console.error('Export failed:', err);
+                    message.error('Failed to export diagram.');
+                });
+        }
+    }, [nodes, edges, diagramName]);
+
+    const handleExportJson = useCallback(() => {
+        const data = {
+            nodes,
+            edges,
+            viewport: reactFlowInstanceRef.current?.getViewport(),
+        };
+        const jsonString = JSON.stringify(data, null, 2);
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${diagramName}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }, [nodes, edges, diagramName]);
+
+    if (hasPermission === false || (!selectedSchema && isDiagramReadyRef.current)) return (
         <div className="h-screen w-full flex flex-col items-center justify-center text-center px-4">
             <div className="text-base font-semibold text-gray-800">
                 Page not found
@@ -628,6 +787,13 @@ const EditProject = (props: IPropsEditProject) => {
             <div className="mt-1 text-sm text-gray-500">
                 The page you are looking for doesn’t exist or has been moved. <span className="font-semibold text-blue-500 cursor-pointer" onClick={() => router.replace('/')}>Click here</span> to go back to home.
             </div>
+        </div>
+    );
+
+    if (hasPermission === null) return (
+        <div className="h-screen w-full flex items-center justify-center">
+            {/* Loading spinner */}
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
         </div>
     );
 
@@ -647,6 +813,15 @@ const EditProject = (props: IPropsEditProject) => {
                     onOpenSearchModal={() => setIsSearchModalOpen(true)}
                     collaborators={remoteUsers}
                     onFollowUser={handleFollowUserViewport}
+                    onDownload={handleDownload}
+                    onExportJson={handleExportJson}
+                />
+                <ExportModal
+                    isOpen={isExportModalOpen}
+                    onClose={() => setIsExportModalOpen(false)}
+                    onExport={executeExport}
+                    initialValues={exportInitialConfig}
+                    hasSelection={nodes.some(n => n.selected)}
                 />
                 <div className="flex h-full">
                     <NotationsSidebar
@@ -660,7 +835,7 @@ const EditProject = (props: IPropsEditProject) => {
                         onAddRelationship={addRelationship}
                         onAddDoubleRelationship={addDoubleRelationship}
                         onAddConstraint={addConstraint}
-                        onAddRelationTable={addRelationTable}
+                        onAddRelationTable={selectedSchema?.type === SchemaType.LOGICAL ? addLogicalTable : addRelationTable}
                         projectSchemasData={schemaList}
                         selectedSchema={selectedSchema}
                         setSelectedSchema={handleSetSelectedSchema}
@@ -780,6 +955,10 @@ const EditProject = (props: IPropsEditProject) => {
                         onAddRelationTableColumn={addRelationTableColumn}
                         onRemoveRelationTableColumn={removeRelationTableColumn}
                         onUpdateRelationTableColumn={updateRelationTableColumn}
+                        onAddLogicalTableAttribute={addLogicalTableAttribute}
+                        onRemoveLogicalTableAttribute={removeLogicalTableAttribute}
+                        onUpdateLogicalTableAttribute={updateLogicalTableAttribute}
+                        onReorderLogicalTableAttributes={reorderLogicalTableAttributes}
                     />
                     <div
                         className="flex-1 h-full relative"

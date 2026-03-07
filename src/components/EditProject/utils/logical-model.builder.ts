@@ -104,28 +104,28 @@ const buildLogicalModel = ({
             const targetTableNode = tableNodeMap.get(edge.target);
             if (!targetTableNode) return;
 
-            // Find primary key column in target table
+            // Find key column in target table (pk decoration)
             const targetColumns = targetTableNode.columns || [];
-            const pkColumn = targetColumns.find((col) => col.decorations?.pk);
-            if (!pkColumn) return;
+            const keyColumn = targetColumns.find((col) => col.decorations?.pk);
+            if (!keyColumn) return;
 
             if (!fkMap.has(sourceTableId)) {
                 fkMap.set(sourceTableId, new Map());
             }
             fkMap.get(sourceTableId)!.set(columnIndex, {
                 refTableId: targetTableNode.tableId!,
-                refColumnId: pkColumn.columnId,
+                refColumnId: keyColumn.columnId,
             });
         });
 
     // Build tables with columns
-    // Get column data from stored node data (RelationTableData)
-    const tableDataMap = new Map<string, { name: string; columns: Array<{ name: string; type?: string; isPrimary?: boolean; isNullable?: boolean }> }>();
+    // Get column data from stored node data (LogicalTableData)
+    const tableDataMap = new Map<string, { name: string; columns: Array<{ name: string; isKey?: boolean }> }>();
     
     tableNodes.forEach((tableNode) => {
         if (tableNode.tableId) {
-            // Get column data from node data (RelationTableData)
-            const nodeData = tableNode.data as { name?: string; columns?: Array<{ name: string; type?: string; isPrimary?: boolean; isNullable?: boolean }> } | undefined;
+            // Get column data from node data (LogicalTableData)
+            const nodeData = tableNode.data as { name?: string; columns?: Array<{ name: string; isKey?: boolean }> } | undefined;
             if (nodeData && nodeData.columns) {
                 tableDataMap.set(tableNode.tableId, {
                     name: nodeData.name || tableNode.name || tableNode.tableId,
@@ -152,12 +152,12 @@ const buildLogicalModel = ({
 
                   // Check if this column is a foreign key
                   const fkInfo = fkMap.get(tableId)?.get(idx);
-                  const isPrimaryKey = actualCol.isPrimary ?? false;
+                  const isPrimaryKey = actualCol.isKey ?? false;
 
                   const column: ModelColumn = {
                       id: columnId,
                       name: columnName,
-                      nullable: actualCol.isNullable ?? true,
+                      nullable: true, // Default to nullable for logical schema
                       unique: false,
                       roles: {
                           primaryKey: isPrimaryKey,

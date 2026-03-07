@@ -1,6 +1,6 @@
 import useSWR from "swr";
 import { apiGet, apiDelete } from "@/lib/clientFetch";
-import { PROXY_PROJECTS, PROXY_DELETE_SCHEMA } from "@/api";
+import { PROXY_PROJECTS, PROXY_DELETE_SCHEMA, PROXY_PROJECT_DETAIL } from "@/api";
 import { ProjectsResponse } from "@/types/projects.type";
 
 export async function getProjects(page: number = 1, limit: number = 9, keyword?: string) {
@@ -45,3 +45,14 @@ export async function checkSchemaExistence(projectId: string, schemaId: string):
         return false;
     }
 }
+
+export async function getProjectPermissions(projectId: string): Promise<string | null> {
+    try {
+        const url = `${PROXY_PROJECT_DETAIL(projectId)}/permissions`;
+        const res = await apiGet<string>(url);
+        return res;
+    } catch (error) {
+        return null;
+    }
+}
+

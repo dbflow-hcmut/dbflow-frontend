@@ -9,7 +9,7 @@ export const DatabaseSchemaNode = memo(({
   className?: string;
 }) => {
   return (
-    <div className={classNames("bg-white border border-gray-300 rounded-md", className)} style={{ overflow: 'visible' }}>
+    <div className={classNames("bg-white border border-gray-300", className)} style={{ overflow: 'visible' }}>
       {children}
     </div>
   );

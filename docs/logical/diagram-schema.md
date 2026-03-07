@@ -37,8 +37,10 @@
 
 - `id`: định danh cạnh (prefix `lid_`).
 - `type`: `"fk"` hoặc `"noteLink"`.
-- `source`: id node nguồn.
-- `target`: id node đích.
+- `source`: columnId nguồn (format: `lid_nodeId_col_index`). Từ đây có thể extract được nodeId và column index.
+- `target`: columnId đích (format: `lid_nodeId_col_index`). Từ đây có thể extract được nodeId và column index.
+- `sourceSide`: phía của handle nguồn (`"left"` hoặc `"right"`).
+- `targetSide`: phía của handle đích (`"left"` hoặc `"right"`).
 - `points`: polyline (một danh sách điểm) để vẽ đường đi uốn lượn.
 - `style`: style đường (stroke, fill, class…).
 - `fkRef`: tham chiếu tới foreign key cụ thể trong `model.json` (bắt buộc nếu type=fk).

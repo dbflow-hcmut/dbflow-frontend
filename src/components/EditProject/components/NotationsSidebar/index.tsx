@@ -357,7 +357,7 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                         </div>
                     </div>
 
-                    <div hidden={selectedSchema?.type !== SchemaType.LOGICAL && selectedSchema?.type !== SchemaType.PHYSICAL}>
+                    <div hidden={selectedSchema?.type !== SchemaType.LOGICAL}>
                         <div className="px-2">
                             <Collapse
                                 bordered={false}
@@ -367,7 +367,37 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                                 items={[
                                     {
                                         key: '1',
-                                        label: <div className="font-bold">Logical & Physical Schema</div>,
+                                        label: <div className="font-bold">Logical Schema</div>,
+                                        children: (
+                                            <div className="grid grid-cols-5 gap-2">
+                                                <Button
+                                                    type="text"
+                                                    icon={
+                                                        <div className="flex flex-col items-center">
+                                                            <Table2 strokeWidth={1} />
+                                                        </div>
+                                                    }
+                                                    onClick={onAddRelationTable}
+                                                />
+                                            </div>
+                                        ),
+                                    },
+                                ]}
+                            />
+                        </div>
+                    </div>
+
+                    <div hidden={selectedSchema?.type !== SchemaType.PHYSICAL}>
+                        <div className="px-2">
+                            <Collapse
+                                bordered={false}
+                                defaultActiveKey={['1']}
+                                expandIconPosition="end"
+                                className="!bg-transparent notations-collapse"
+                                items={[
+                                    {
+                                        key: '1',
+                                        label: <div className="font-bold">Physical Schema</div>,
                                         children: (
                                             <div className="grid grid-cols-5 gap-2">
                                                 <Button
@@ -475,7 +505,43 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                         </div>
                     </div>
 
-                    <div hidden={selectedSchema?.type !== SchemaType.LOGICAL && selectedSchema?.type !== SchemaType.PHYSICAL}>
+                    <div hidden={selectedSchema?.type !== SchemaType.LOGICAL}>
+                        <div className="px-2">
+                            <Collapse
+                                bordered={false}
+                                defaultActiveKey={['1']}
+                                expandIconPosition="end"
+                                className="!bg-transparent notations-collapse"
+                                items={[
+                                    {
+                                        key: '1',
+                                        label: <div className="font-bold">Tables</div>,
+                                        children: (
+                                            <div className="flex flex-col gap-1">
+                                                {nodes.filter(node => node.type === 'logical-table').map(node => (
+                                                    <div
+                                                        key={node.id}
+                                                        className="flex items-center gap-2 p-2 hover:bg-gray-100 rounded cursor-pointer group"
+                                                        onClick={() => onNodeClick(node.id)}
+                                                    >
+                                                        <div className="flex flex-col items-center">
+                                                            <Table2 size={16} strokeWidth={1.5} />
+                                                        </div>
+                                                        <span className="text-sm truncate flex-1">{(node.data as { name: string }).name}</span>
+                                                    </div>
+                                                ))}
+                                                {nodes.filter(node => node.type === 'logical-table').length === 0 && (
+                                                    <div className="text-xs text-gray-400 text-center py-2">No tables</div>
+                                                )}
+                                            </div>
+                                        ),
+                                    },
+                                ]}
+                            />
+                        </div>
+                    </div>
+
+                    <div hidden={selectedSchema?.type !== SchemaType.PHYSICAL}>
                         <div className="px-2">
                             <Collapse
                                 bordered={false}

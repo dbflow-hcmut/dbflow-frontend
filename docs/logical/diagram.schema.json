@@ -127,6 +127,9 @@
 
         "source": { "type": "string", "pattern": "^lid_" },
         "target": { "type": "string", "pattern": "^lid_" },
+        
+        "sourceSide": { "type": "string", "enum": ["left", "right"] },
+        "targetSide": { "type": "string", "enum": ["left", "right"] },
 
         "points": {
           "type": "array",

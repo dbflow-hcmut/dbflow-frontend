@@ -1,9 +1,9 @@
-import { Node, Viewport, Edge } from "reactflow";
+import { Node, Viewport, Edge, MarkerType } from "reactflow";
 import type { NodeData } from "../index";
-import type { RelationTableData } from "@/components/erds-notations/relation-table";
+import type { LogicalTableData } from "@/components/erds-notations/logical-table";
 import { generateDiagramId } from "./functions";
 
-type RelationTableEdgeData = {
+type LogicalTableEdgeData = {
     label?: string;
     controlPoints?: Array<{ x: number; y: number }>;
 };
@@ -70,15 +70,15 @@ type LogicalEdgeType = "fk" | "noteLink";
 export type StoredLogicalDiagramEdge = {
     id: string;
     type: LogicalEdgeType;
-    source: string;
-    target: string;
+    source: string; // columnId (format: lid_nodeId_col_index)
+    target: string; // columnId (format: lid_nodeId_col_index)
+    sourceSide?: "left" | "right"; // Which side of the column (left or right handle)
+    targetSide?: "left" | "right"; // Which side of the column (left or right handle)
     points?: Array<{ x: number; y: number }>;
     style?: DiagramNodeStyle;
     fkRef?: {
         tableId: string;
         foreignKeyIndex: number;
-        sourceColumnName?: string; // Lưu column name để map lại handle
-        targetColumnName?: string; // Lưu column name để map lại handle
     };
     labels?: {
         text?: string;
@@ -93,8 +93,8 @@ type LegacyStoredNode = {
 export type StoredLogicalNode = StoredLogicalDiagramNode & LegacyStoredNode;
 
 const NODE_SIZE_FALLBACKS: Record<string, { w: number; h: number }> = {
-    relation: { w: 160, h: 120 },
-    table: { w: 160, h: 120 },
+    "logical-table": { w: 200, h: 120 },
+    table: { w: 200, h: 120 },
     note: { w: 140, h: 90 },
     default: { w: 100, h: 50 },
 };
@@ -143,16 +143,18 @@ const ensurePosition = (node: StoredLogicalNode) => node.position ?? { x: 0, y: 
 const ensureStyle = (node: StoredLogicalNode) =>
     node.size ? { width: node.size.w, height: node.size.h } : undefined;
 
-const mapRelationNode = (node: StoredLogicalNode): Node<RelationTableData> => {
-    const dataSource = node.data as RelationTableData | undefined;
+const mapLogicalTableNode = (node: StoredLogicalNode): Node<LogicalTableData> => {
+    const dataSource = node.data as LogicalTableData | undefined;
     
-    // Prefer dataSource columns (full RelationColumn data), otherwise use empty array
-    // node.columns is stored format and doesn't have full column info
-    const columns = dataSource?.columns ?? [];
+    // Prefer dataSource columns (full LogicalColumn data), otherwise use stored columns
+    const columns = dataSource?.columns ?? (node.columns?.map(col => ({
+        name: col.label || col.columnId,
+        isKey: col.decorations?.pk || false,
+    })) || []);
     
     return {
         id: node.tableId ?? node.id,
-        type: "relation",
+        type: "logical-table",
         position: ensurePosition(node),
         data: {
             name: node.name ?? dataSource?.name ?? node.tableId ?? node.id,
@@ -177,16 +179,16 @@ const mapNoteNode = (node: StoredLogicalNode): Node<NodeData> => {
 const mapStoredNodeToReactNode = (node: StoredLogicalNode): Node<NodeData> => {
     // If node has tableId but no type, it's a table
     if (!node.type && node.tableId) {
-        return mapRelationNode(node);
+        return mapLogicalTableNode(node);
     }
     
     switch (node.type) {
         case "table":
-            return mapRelationNode(node);
+            return mapLogicalTableNode(node);
         case "note":
             return mapNoteNode(node);
         default:
-            return mapRelationNode(node);
+            return mapLogicalTableNode(node);
     }
 };
 
@@ -197,17 +199,16 @@ export const mapStoredNodesToReactNodes = (storedNodes: StoredLogicalNode[] = []
     }));
 };
 
-const mapReactRelationNode = (node: Node<RelationTableData>): StoredLogicalNode => {
+const mapReactLogicalTableNode = (node: Node<LogicalTableData>): StoredLogicalNode => {
     const { name, columns = [] } = node.data;
 
-    // Map columns to stored format
+    // Map columns to stored format (following docs schema)
     const storedColumns: StoredLogicalDiagramNode["columns"] = columns.map((col, idx) => ({
         columnId: `lid_${node.id}_col_${idx}`,
         label: col.name,
         decorations: {
-            pk: col.isPrimary ? true : undefined,
-            fk: false, // Will be determined from edges
-            underline: col.isPrimary ? true : undefined,
+            pk: col.isKey ? true : undefined,
+            underline: col.isKey ? true : undefined,
         },
     }));
 
@@ -225,14 +226,14 @@ const mapReactRelationNode = (node: Node<RelationTableData>): StoredLogicalNode 
         data: {
             name,
             columns,
-        } as RelationTableData,
+        } as LogicalTableData,
     };
 };
 
 const mapReactNodeToStoredNode = (node: Node<NodeData>): StoredLogicalNode => {
     switch (node.type) {
-        case "relation":
-            return mapReactRelationNode(node as Node<RelationTableData>);
+        case "logical-table":
+            return mapReactLogicalTableNode(node as Node<LogicalTableData>);
         default:
             return {
                 id: node.id,
@@ -248,12 +249,12 @@ const mapReactNodeToStoredNode = (node: Node<NodeData>): StoredLogicalNode => {
 
 export const mapReactNodesToStoredNodes = (reactNodes: Node<NodeData>[] = []): StoredLogicalNode[] => {
     return reactNodes
-        .filter((node) => node.type === "relation")
+        .filter((node) => node.type === "logical-table")
         .map(mapReactNodeToStoredNode);
 };
 
 const mapReactEdgeToStoredEdge = (
-    edge: Edge<RelationTableEdgeData>,
+    edge: Edge<LogicalTableEdgeData>,
     nodeMap: Map<string, Node<NodeData>>
 ): StoredLogicalDiagramEdge | null => {
     const sourceNode = nodeMap.get(edge.source);
@@ -262,27 +263,43 @@ const mapReactEdgeToStoredEdge = (
         return null;
     }
 
-    // Both nodes should be relation tables for FK edges
-    if (sourceNode.type !== "relation" || targetNode.type !== "relation") {
+    // Both nodes should be logical tables for FK edges
+    if (sourceNode.type !== "logical-table" || targetNode.type !== "logical-table") {
         return null;
     }
 
-    const sourceData = sourceNode.data as RelationTableData;
-    const targetData = targetNode.data as RelationTableData;
+    // Extract columnId and side from edge handles
+    // Handle format: "{columnId}-{side}"
+    // Example: "lid_cid_3b6a8e47-8ab9-44ec-9278-475dbbff890a_col_0-left"
+    const extractHandleInfo = (handle: string | null | undefined): { columnId: string; side: "left" | "right" } | null => {
+        if (!handle) return null;
+        // Match pattern: (columnId)-(left|right) where columnId is lid_..._col_\d+
+        const match = handle.match(/^(lid_.+_col_\d+)-(left|right)$/);
+        if (!match) return null;
+        return { 
+            columnId: match[1], 
+            side: match[2] as "left" | "right" 
+        };
+    };
 
-    // Extract FK information from edge handles
-    // The source handle should be a column name from source table
-    // The target handle should be a column name from target table
-    const sourceColumnName = edge.sourceHandle?.replace("-source", "") || "";
-    const targetColumnName = edge.targetHandle?.replace("-target", "") || "";
+    const sourceHandleInfo = extractHandleInfo(edge.sourceHandle);
+    const targetHandleInfo = extractHandleInfo(edge.targetHandle);
 
-    // Find the column indices
-    const sourceColumnIndex = sourceData.columns?.findIndex((col) => col.name === sourceColumnName) ?? -1;
-    const targetColumnIndex = targetData.columns?.findIndex((col) => col.name === targetColumnName) ?? -1;
-
-    if (sourceColumnIndex === -1 || targetColumnIndex === -1) {
+    if (!sourceHandleInfo || !targetHandleInfo) {
+        console.warn('[Logical] Invalid handle format:', {
+            sourceHandle: edge.sourceHandle,
+            targetHandle: edge.targetHandle
+        });
         return null;
     }
+
+    // Extract column index from columnId for fkRef
+    const extractColumnIndex = (columnId: string): number => {
+        const match = columnId.match(/_col_(\d+)$/);
+        return match ? parseInt(match[1], 10) : 0;
+    };
+
+    const sourceColumnIndex = extractColumnIndex(sourceHandleInfo.columnId);
 
     // Extract control points from edge data
     const points = edge.data?.controlPoints?.map((p: { x: number; y: number }) => ({ x: p.x, y: p.y }));
@@ -290,15 +307,15 @@ const mapReactEdgeToStoredEdge = (
     const storedEdge: StoredLogicalDiagramEdge = {
         id: edge.id || generateDiagramId(),
         type: "fk",
-        source: edge.source,
-        target: edge.target,
+        source: sourceHandleInfo.columnId, // columnId from handle
+        target: targetHandleInfo.columnId, // columnId from handle
+        sourceSide: sourceHandleInfo.side, // Store which side (left/right)
+        targetSide: targetHandleInfo.side, // Store which side (left/right)
         points,
         style: sanitizeStyleForStorage(edge.style),
         fkRef: {
             tableId: sourceNode.id,
             foreignKeyIndex: sourceColumnIndex,
-            sourceColumnName, // Lưu column name để map lại handle (giống conceptual lưu portId)
-            targetColumnName, // Lưu column name để map lại handle
         },
         labels: edge.data?.label
             ? {
@@ -325,61 +342,87 @@ const isSchemaStoredEdge = (edge: unknown): edge is StoredLogicalDiagramEdge => 
 const mapSchemaEdgeToReactEdge = (
     edge: StoredLogicalDiagramEdge,
     nodeMap: Map<string, Node<NodeData>>
-): Edge<RelationTableEdgeData> | null => {
-    if (!nodeMap.has(edge.source) || !nodeMap.has(edge.target)) {
+): Edge<LogicalTableEdgeData> | null => {
+    // Extract nodeId from columnId
+    // Format: lid_nodeId_col_index where nodeId can be cid_uuid or lid_uuid
+    // Example: lid_cid_3b6a8e47-8ab9-44ec-9278-475dbbff890a_col_0
+    // Need to extract: nodeId = cid_3b6a8e47-8ab9-44ec-9278-475dbbff890a
+    const extractNodeIdFromColumnId = (columnId: string): string | null => {
+        // Pattern: lid_(nodeId)_col_\d+
+        const match = columnId.match(/^lid_(.+)_col_\d+$/);
+        return match ? match[1] : null;
+    };
+
+    const sourceNodeId = extractNodeIdFromColumnId(edge.source);
+    const targetNodeId = extractNodeIdFromColumnId(edge.target);
+
+    if (!sourceNodeId || !targetNodeId) {
+        console.warn('[Logical] Failed to extract nodeIds from columnIds:', { 
+            source: edge.source, 
+            target: edge.target
+        });
         return null;
     }
 
-    const sourceNode = nodeMap.get(edge.source);
-    const targetNode = nodeMap.get(edge.target);
-    if (!sourceNode || !targetNode || sourceNode.type !== "relation" || targetNode.type !== "relation") {
+    if (!nodeMap.has(sourceNodeId) || !nodeMap.has(targetNodeId)) {
+        console.warn('[Logical] Nodes not found in nodeMap:', { 
+            sourceNodeId, 
+            targetNodeId,
+            availableNodes: Array.from(nodeMap.keys())
+        });
         return null;
     }
 
-    const sourceData = sourceNode.data as RelationTableData;
-    const targetData = targetNode.data as RelationTableData;
-
-    // Determine source and target handles from FK reference
-    let sourceHandle: string | undefined;
-    let targetHandle: string | undefined;
-
-    if (edge.fkRef) {
-        const fkColumn = sourceData.columns?.[edge.fkRef.foreignKeyIndex];
-        if (fkColumn) {
-            sourceHandle = `${fkColumn.name}-source`;
-        }
-        // For target, we need to find the primary key column
-        const pkColumn = targetData.columns?.find((col) => col.isPrimary);
-        if (pkColumn) {
-            targetHandle = `${pkColumn.name}-target`;
-        }
+    const sourceNode = nodeMap.get(sourceNodeId);
+    const targetNode = nodeMap.get(targetNodeId);
+    if (!sourceNode || !targetNode || sourceNode.type !== "logical-table" || targetNode.type !== "logical-table") {
+        console.warn('[Logical] Invalid node types:', { 
+            sourceType: sourceNode?.type, 
+            targetType: targetNode?.type 
+        });
+        return null;
     }
 
-    const data: RelationTableEdgeData = {
+    // Build handles using columnId and side
+    // Handle format: {columnId}-{side}
+    // Example: lid_cid_3b6a8e47-8ab9-44ec-9278-475dbbff890a_col_0-left
+    const sourceHandle = edge.sourceSide ? `${edge.source}-${edge.sourceSide}` : undefined;
+    const targetHandle = edge.targetSide ? `${edge.target}-${edge.targetSide}` : undefined;
+
+    const data: LogicalTableEdgeData = {
         label: edge.labels?.text,
         controlPoints: edge.points?.map((p) => ({ x: p.x, y: p.y })),
     };
 
-    const reactEdge: Edge<RelationTableEdgeData> = {
+    const reactEdge: Edge<LogicalTableEdgeData> = {
         id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        type: "relation-table-edge",
+        source: sourceNodeId, // Use nodeId for ReactFlow
+        target: targetNodeId, // Use nodeId for ReactFlow
+        type: "logical-table-edge",
         data,
+        markerEnd: { type: MarkerType.ArrowClosed },
         ...(sourceHandle ? { sourceHandle } : {}),
         ...(targetHandle ? { targetHandle } : {}),
     };
+
+    console.log('[Logical] Created reactEdge:', {
+        id: reactEdge.id,
+        source: reactEdge.source,
+        target: reactEdge.target,
+        sourceHandle: reactEdge.sourceHandle,
+        targetHandle: reactEdge.targetHandle,
+    });
 
     return reactEdge;
 };
 
 export const mapReactEdgesToStoredEdges = (
-    reactEdges: Edge<RelationTableEdgeData>[] = [],
+    reactEdges: Edge<LogicalTableEdgeData>[] = [],
     nodes: Node<NodeData>[] = []
 ): StoredLogicalDiagramEdge[] => {
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
     return reactEdges
-        .filter((edge) => edge.type === "relation-table-edge")
+        .filter((edge) => edge.type === "logical-table-edge")
         .map((edge) => mapReactEdgeToStoredEdge(edge, nodeMap))
         .filter((edge): edge is StoredLogicalDiagramEdge => Boolean(edge));
 };
@@ -387,7 +430,7 @@ export const mapReactEdgesToStoredEdges = (
 export const mapStoredEdgesToReactEdges = (
     storedEdges: (StoredLogicalDiagramEdge | Edge)[] = [],
     nodes: Node<NodeData>[] = []
-): Edge<RelationTableEdgeData>[] => {
+): Edge<LogicalTableEdgeData>[] => {
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
 
     return storedEdges
@@ -402,10 +445,10 @@ export const mapStoredEdgesToReactEdges = (
 
             return {
                 ...legacyEdge,
-                type: "relation-table-edge",
+                type: "logical-table-edge",
                 data: legacyEdge.data || {},
             };
         })
-        .filter((edge): edge is Edge<RelationTableEdgeData> => Boolean(edge));
+        .filter((edge): edge is Edge<LogicalTableEdgeData> => Boolean(edge));
 };
 

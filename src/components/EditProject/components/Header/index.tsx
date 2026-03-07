@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
-import { Avatar, Button, Tooltip } from "antd";
+import { Avatar, Button, Tooltip, Dropdown } from "antd";
 import { Download, EllipsisVertical, MessageCircle, History, Search, Send, TvMinimal, Smile, ThumbsUp, PartyPopper } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -15,6 +15,8 @@ type HeaderProps = {
     onOpenSearchModal: () => void;
     collaborators: RemoteCollaborator[];
     onFollowUser: (user: RemoteCollaborator) => void;
+    onDownload: () => void;
+    onExportJson: () => void;
 };
 
 const Header: React.FC<HeaderProps> = ({
@@ -25,6 +27,8 @@ const Header: React.FC<HeaderProps> = ({
     onOpenSearchModal,
     collaborators,
     onFollowUser,
+    onDownload,
+    onExportJson,
 }) => {
     const inputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
@@ -48,6 +52,19 @@ const Header: React.FC<HeaderProps> = ({
     }, []);
 
     const avatarItems = useMemo(() => collaborators.slice(0, 4), [collaborators]);
+
+    const downloadItems = useMemo(() => [
+        {
+            key: 'export',
+            label: 'Export Diagram to PNG/SVG',
+            onClick: () => onDownload(),
+        },
+        {
+            key: 'export-json',
+            label: 'Export Diagram to JSON',
+            onClick: () => onExportJson(),
+        },
+    ], [onDownload, onExportJson]);
 
     return (
         <div className="pt-4 bg-transparent flex items-center justify-between px-4 fixed top-0 z-10 w-full">
@@ -82,18 +99,19 @@ const Header: React.FC<HeaderProps> = ({
                 >
                     <Search size={18} />
                 </Button>
-                <Button
-                    type="text"
-                    className="!px-2"
+                <Dropdown 
+                    menu={{ items: downloadItems }} 
+                    trigger={['click']} 
+                    placement="bottom"
+                    align={{ offset: [0, 10] }}
                 >
-                    <EllipsisVertical size={18} />
-                </Button>
-                <Button
-                    type="text"
-                    className="!px-2"
-                >
-                    <Download size={18} />
-                </Button>
+                    <Button
+                        type="text"
+                        className="!px-2"
+                    >
+                        <Download size={18} />
+                    </Button>
+                </Dropdown>
                 <Button
                     type="primary"
                     className="!px-3 gap-2 flex items-center"
