@@ -38,9 +38,10 @@ const LogicalTableEdge: React.FC<EdgeProps<LogicalTableEdgeData>> = (props) => {
         sourceY,
         targetX,
         targetY,
-        nodes: nodes.filter((node) => node.id !== source && node.id !== target).map(node => {
-            const measuredWidth = (node as any).measured?.width;
-            const measuredHeight = (node as any).measured?.height;
+        nodes: nodes.filter((node) => node.id !== source && node.id !== target).map((node) => {
+            const nodeWithMeasured = node as unknown as { width?: number; height?: number; measured?: { width?: number; height?: number } };
+            const measuredWidth = nodeWithMeasured.measured?.width;
+            const measuredHeight = nodeWithMeasured.measured?.height;
             return {
                 ...node,
                 width: node.width ?? measuredWidth ?? 200,

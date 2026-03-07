@@ -58,7 +58,7 @@ const RenameSchemaModal: React.FC<RenameSchemaModalProps> = ({
             });
             onSuccess();
             onClose();
-        } catch (error) {  
+        } catch {  
             notificationProvider.open({
                 type: "error",
                 message: "Failed to rename schema. Please try again.",

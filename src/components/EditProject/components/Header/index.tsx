@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { Avatar, Button, Tooltip, Dropdown } from "antd";
-import { Download, EllipsisVertical, MessageCircle, History, Search, Send, TvMinimal, Smile, ThumbsUp, PartyPopper } from "lucide-react";
+import { Download, MessageCircle, History, Search, Send, TvMinimal, Smile, ThumbsUp, PartyPopper } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { RemoteCollaborator } from "../../hooks/useCollaborationAwareness";

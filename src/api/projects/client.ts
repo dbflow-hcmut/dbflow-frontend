@@ -41,7 +41,7 @@ export async function checkSchemaExistence(projectId: string, schemaId: string):
         const url = `${PROXY_PROJECTS}/${projectId}/schemas/${schemaId}`;
         await apiGet(url);
         return true;
-    } catch (error) {
+    } catch {
         return false;
     }
 }
@@ -51,7 +51,7 @@ export async function getProjectPermissions(projectId: string): Promise<string |
         const url = `${PROXY_PROJECT_DETAIL(projectId)}/permissions`;
         const res = await apiGet<string>(url);
         return res;
-    } catch (error) {
+    } catch {
         return null;
     }
 }

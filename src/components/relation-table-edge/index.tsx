@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useRef } from "react";
-import { BaseEdge, EdgeLabelRenderer, EdgeProps, getSmoothStepPath, useReactFlow } from "reactflow";
+import { BaseEdge, EdgeLabelRenderer, EdgeProps, useReactFlow } from "reactflow";
 
 type RelationTableEdgeData = {
     label?: string;
@@ -26,7 +26,7 @@ const RelationTableEdge: React.FC<EdgeProps<RelationTableEdgeData>> = (props) =>
     const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
     // Initialize control points if not exists
-    const controlPoints = data?.controlPoints || [];
+    const controlPoints = React.useMemo(() => data?.controlPoints || [], [data?.controlPoints]);
     const hasControlPoints = controlPoints.length > 0;
     const controlPointsRef = useRef(controlPoints);
     
@@ -164,7 +164,7 @@ const RelationTableEdge: React.FC<EdgeProps<RelationTableEdgeData>> = (props) =>
             displayControlPointsWithIndex.push({ point, actualIndex: index });
         }
     });
-    const displayControlPoints = displayControlPointsWithIndex.map(item => item.point);
+    
     
     // Calculate label position (middle of path)
     const labelX = hasControlPoints && controlPoints.length > 0
@@ -188,11 +188,8 @@ const RelationTableEdge: React.FC<EdgeProps<RelationTableEdgeData>> = (props) =>
         // Ensure controlPoints array has enough elements
         // If not, initialize it with all corners
         const currentControlPoints = controlPointsRef.current;
-        let pointsToUse = currentControlPoints;
-        
         if (currentControlPoints.length !== allCorners.length) {
             // Sync controlPoints with allCorners
-            pointsToUse = allCorners;
             setEdges((edges) =>
                 edges.map((edge) =>
                     edge.id === id
@@ -302,7 +299,7 @@ const RelationTableEdge: React.FC<EdgeProps<RelationTableEdgeData>> = (props) =>
             {/* Control points - show at all corners except endpoints */}
             {selected && displayControlPointsWithIndex.length > 0 && (
                 <EdgeLabelRenderer>
-                    {displayControlPointsWithIndex.map(({ point, actualIndex }, displayIndex) => {
+                    {displayControlPointsWithIndex.map(({ point, actualIndex }) => {
                         const isDragging = draggingPoint === actualIndex;
                         
                         return (

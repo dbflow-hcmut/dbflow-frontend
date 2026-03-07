@@ -19,6 +19,7 @@ export const useScrollIndicator = (threshold = 5, dependency: unknown[] = []) =>
         el.addEventListener("scroll", handleScroll);
 
         return () => el.removeEventListener("scroll", handleScroll);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [threshold, ...dependency]);
 
     const scrollToBottom = () => {

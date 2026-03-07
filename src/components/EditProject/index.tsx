@@ -28,7 +28,7 @@ import AttributeNode from "@/components/erds-notations/attribute";
 import EntityNode from "@/components/erds-notations/entity";
 import ConstraintNode from "@/components/erds-notations/constraint";
 import RelationTableNode, { type RelationTableData } from "@/components/erds-notations/relation-table";
-import LogicalTableNode, { type LogicalTableData } from "@/components/erds-notations/logical-table";
+import LogicalTableNode from "@/components/erds-notations/logical-table";
 import ErdEdge from "@/components/erd-edge";
 import RelationTableEdge from "@/components/relation-table-edge";
 import LogicalTableEdge from "@/components/logical-table-edge";
@@ -55,7 +55,7 @@ import type { RemoteCollaborator } from "./hooks/useCollaborationAwareness";
 import { useProjectAwareness } from "./hooks/useProjectAwareness";
 import { RemoteCursorsOverlay } from "./components/RemoteCursorsOverlay";
 import { useAuth } from "@/providers/AuthProvider";
-import { checkSchemaExistence, getProjectPermissions } from "@/api/projects/client";
+import { getProjectPermissions } from "@/api/projects/client";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 
 export type EntityField = {
@@ -979,7 +979,7 @@ const EditProject = (props: IPropsEditProject) => {
                             onConnect={onConnect}
                             onPaneClick={handlePaneClick}
                             connectionMode={ConnectionMode.Loose}
-                            isValidConnection={(connection) => {
+                            isValidConnection={() => {
                                 // Allow multiple connections to the same handle
                                 return true;
                             }}

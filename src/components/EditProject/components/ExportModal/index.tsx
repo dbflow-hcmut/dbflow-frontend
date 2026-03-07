@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Modal, Radio, Form, Segmented, Checkbox, Slider, ColorPicker, Button } from 'antd';
+import { Modal, Radio, Form, Segmented, Checkbox, Slider, ColorPicker } from 'antd';
 import { Download } from 'lucide-react';
 import { Color } from 'antd/es/color-picker';
 

@@ -1,4 +1,3 @@
-import useSWR from "swr";
 import { apiGet } from "@/lib/clientFetch";
 import { PROXY_USERS_ME } from "@/api";
 import { UserResponse } from "@/types/user.type";

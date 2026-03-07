@@ -17,7 +17,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-    const { data: session, status } = useSession();
+    const { status } = useSession();
     const isAuthenticated = status === "authenticated";
 
     const { data: user, error, isLoading } = useSWR<UserResponse>(
