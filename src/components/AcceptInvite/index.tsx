@@ -32,20 +32,20 @@ export default function AcceptInvite() {
     
     try {
       setStatus("loading");
-      const res: any = await acceptInvite({ token });
+      const res = await acceptInvite({ token }) as { projectId?: string } | undefined;
       
-      if (res.projectId) {
+      if (res?.projectId) {
         setProjectId(res.projectId);
         setStatus("success");
       } else {
         setStatus("success");
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       setStatus("error");
       notificationProvider.open({
         type: "error",
         message: "Failed to accept invitation",
-        description: error?.message || "Something went wrong while accepting the invitation.",
+        description: error instanceof Error ? error.message : "Something went wrong while accepting the invitation.",
       });
     }
   };
