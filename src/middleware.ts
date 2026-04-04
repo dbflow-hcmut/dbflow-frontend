@@ -23,7 +23,8 @@ export default auth((req) => {
 
   if (!isLoggedIn && !isAuthRoute && !isApiRoute && !isNotFoundRoute && !isPublicRoute) {
     const signInUrl = new URL("/auth/signin", req.url);
-    signInUrl.searchParams.set("callbackUrl", pathname);
+    const callbackUrl = pathname + req.nextUrl.search;
+    signInUrl.searchParams.set("callbackUrl", callbackUrl);
     return NextResponse.redirect(signInUrl);
   }
 

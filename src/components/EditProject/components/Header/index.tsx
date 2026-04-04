@@ -10,6 +10,7 @@ import type { RemoteCollaborator } from "../../hooks/useCollaborationAwareness";
 type HeaderProps = {
     diagramName: string;
     isEditingDiagramName: boolean;
+    canEdit?: boolean;
     onSetDiagramName: (name: string) => void;
     onSetIsEditingDiagramName: (isEditing: boolean) => void;
     onOpenSearchModal: () => void;
@@ -17,11 +18,13 @@ type HeaderProps = {
     onFollowUser: (user: RemoteCollaborator) => void;
     onDownload: () => void;
     onExportJson: () => void;
+    onShareClick: () => void;
 };
 
 const Header: React.FC<HeaderProps> = ({
     diagramName,
     isEditingDiagramName,
+    canEdit = true,
     onSetDiagramName,
     onSetIsEditingDiagramName,
     onOpenSearchModal,
@@ -29,6 +32,7 @@ const Header: React.FC<HeaderProps> = ({
     onFollowUser,
     onDownload,
     onExportJson,
+    onShareClick,
 }) => {
     const inputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
@@ -74,9 +78,11 @@ const Header: React.FC<HeaderProps> = ({
                 </div>
                 {!isEditingDiagramName ? (
                     <div
-                        className="text-md leading-none font-semibold px-2 py-1 bg-transparent hover:bg-gray-100 rounded-md cursor-pointer max-w-[300px] truncate"
-                        onClick={() => onSetIsEditingDiagramName(true)}
-                        title={diagramName}
+                        className={`text-md leading-none font-semibold px-2 py-1 bg-transparent rounded-md max-w-[300px] truncate ${
+                            canEdit ? 'hover:bg-gray-100 cursor-pointer' : 'cursor-default'
+                        }`}
+                        onClick={canEdit ? () => onSetIsEditingDiagramName(true) : undefined}
+                        title={canEdit ? diagramName : `${diagramName} (Read-only)`}
                     >
                         {diagramName}
                     </div>
@@ -115,6 +121,7 @@ const Header: React.FC<HeaderProps> = ({
                 <Button
                     type="primary"
                     className="!px-3 gap-2 flex items-center"
+                    onClick={onShareClick}
                 >
                     <Send className="text-white" size={18} />
                     <span className="font-semibold">Share</span>

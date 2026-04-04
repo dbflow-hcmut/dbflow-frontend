@@ -16,6 +16,7 @@ export type ErdEdgeData = {
 
 type PropertiesPanelProps = {
     isOpen: boolean;
+    canEdit?: boolean;
     selectedNode: Node<NodeData> | undefined;
     selectedEdge: Edge<ErdEdgeData> | undefined;
     propertiesName: string;
@@ -46,6 +47,7 @@ type PropertiesPanelProps = {
 
 const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     isOpen,
+    canEdit = true,
     selectedNode,
     selectedEdge,
     propertiesName,
@@ -108,7 +110,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                     />
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 min-h-0">
+                <div className="flex-1 overflow-y-auto p-4 min-h-0" style={{ pointerEvents: canEdit ? 'auto' : 'none', opacity: canEdit ? 1 : 0.6 }}>
                     {selectedNode ? (
                         <div className="flex flex-col gap-4">
                             {selectedNode.type === 'attribute' && (

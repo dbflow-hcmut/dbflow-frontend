@@ -8,6 +8,7 @@ import ZoomControls from "../ZoomControls";
 type FooterProps = {
     isSidebarModalOpen: boolean;
     isRightPanelOpen: boolean;
+    canEdit?: boolean;
     onToggleSidebar: () => void;
     onToggleRightPanel: () => void;
     onToggleChatBox: () => void;
@@ -22,6 +23,7 @@ type FooterProps = {
 const Footer: React.FC<FooterProps> = ({
     isSidebarModalOpen,
     isRightPanelOpen,
+    canEdit = true,
     onToggleSidebar,
     onToggleRightPanel,
     onToggleChatBox,
@@ -47,7 +49,7 @@ const Footer: React.FC<FooterProps> = ({
                             <Plus size={24} className="text-white" />
                         )}
                     </div>
-                    <div className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 pl-8 py-2 h-12 ml-10">                        
+                    <div className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 pl-8 py-2 h-12 ml-10" style={{ pointerEvents: canEdit ? 'auto' : 'none', opacity: canEdit ? 1 : 0.5 }}>                        
                         <Button
                             type={interactionMode === 'default' ? 'primary' : 'text'}
                             className="!px-2"
@@ -127,20 +129,20 @@ const Footer: React.FC<FooterProps> = ({
             </div>
             <div className="flex items-center gap-2">
                 <div 
-                    onClick={onUndo}
-                    className={`flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12 w-12 justify-center cursor-pointer transition-opacity ${
-                        canUndo ? 'hover:bg-gray-50 opacity-100' : 'opacity-40 cursor-not-allowed'
+                    onClick={canEdit ? onUndo : undefined}
+                    className={`flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12 w-12 justify-center transition-opacity ${
+                        canEdit && canUndo ? 'hover:bg-gray-50 opacity-100 cursor-pointer' : 'opacity-40 cursor-not-allowed'
                     }`}
-                    title="Undo (Ctrl+Z)"
+                    title={canEdit ? "Undo (Ctrl+Z)" : "Read-only mode"}
                 >                        
                     <Undo size={24} />
                 </div>
                 <div 
-                    onClick={onRedo}
-                    className={`flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12 w-12 justify-center cursor-pointer transition-opacity ${
-                        canRedo ? 'hover:bg-gray-50 opacity-100' : 'opacity-40 cursor-not-allowed'
+                    onClick={canEdit ? onRedo : undefined}
+                    className={`flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12 w-12 justify-center transition-opacity ${
+                        canEdit && canRedo ? 'hover:bg-gray-50 opacity-100 cursor-pointer' : 'opacity-40 cursor-not-allowed'
                     }`}
-                    title="Redo (Ctrl+Y or Ctrl+Shift+Z)"
+                    title={canEdit ? "Redo (Ctrl+Y or Ctrl+Shift+Z)" : "Read-only mode"}
                 >                        
                     <Redo size={24} />
                 </div>

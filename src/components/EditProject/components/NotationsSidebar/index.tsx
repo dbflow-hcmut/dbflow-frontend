@@ -16,6 +16,7 @@ import { useScrollIndicator } from "@/hooks/useScrollIndicator";
 
 type NotationsSidebarProps = {
     isOpen: boolean;
+    canEdit?: boolean;
     onAddPage: () => void;
     onAddEntity: () => void;
     onAddDoubleEntity: () => void;
@@ -37,6 +38,7 @@ type NotationsSidebarProps = {
 
 const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
     isOpen,
+    canEdit = true,
     onAddPage,
     onAddEntity,
     onAddDoubleEntity,
@@ -145,7 +147,9 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
             <div className="w-64 h-full flex flex-col py-2">
                 <div className="border-b border-gray-200 my-auto flex items-center justify-between py-2 px-4">
                     <div className="text-base font-semibold">Pages</div>
-                    <Plus className="cursor-pointer" size={18} onClick={onAddPage} />
+                    {canEdit && (
+                        <Plus className="cursor-pointer" size={18} onClick={onAddPage} />
+                    )}
                 </div>
 
                 <div ref={containerRef} className="border-b border-gray-200 py-2 min-h-40 flex flex-col gap-2 max-h-[160px] overflow-y-auto relative">
@@ -172,9 +176,10 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                                     )}>
                                         {schema.type}
                                     </span>
-                                    <Dropdown
-                                        menu={{ items: getMenuItems(schema) }}
-                                        trigger={['click']}
+                                    {canEdit && (
+                                        <Dropdown
+                                            menu={{ items: getMenuItems(schema) }}
+                                            trigger={['click']}
                                         placement="bottomRight"
                                     >
                                         <button
@@ -186,6 +191,7 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                                             <MoreVertical size={14} className="text-gray-600" />
                                         </button>
                                     </Dropdown>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -227,7 +233,7 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                 <div className="border-b border-gray-200 my-auto">
                     <div className="text-base font-semibold py-2 px-4">Notations</div>
                 </div>
-                <div className="py-2">
+                <div className="py-2" style={{ pointerEvents: canEdit ? 'auto' : 'none', opacity: canEdit ? 1 : 0.5 }}>
                     <div hidden={selectedSchema?.type !== SchemaType.CONCEPTUAL}>
                         <div className="px-2">
                             <Collapse

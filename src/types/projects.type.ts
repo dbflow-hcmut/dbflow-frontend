@@ -93,3 +93,19 @@ export type CollaborationAwareness = {
     off(event: "change", handler: () => void): void;
 };
 
+export interface IUserSharedProject {
+    userId: string;
+    fullName: string;
+    email: string;
+    avatar: string;
+    permission: string;
+    isVerified: boolean;
+    invitePermission: string | null;
+    inviteStatus: string | null;
+}
+
+export interface ISharedPermissionResponse {
+    project_mode: string;
+    list_users: IUserSharedProject[];
+}
+

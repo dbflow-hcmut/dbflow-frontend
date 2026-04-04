@@ -55,8 +55,9 @@ import type { RemoteCollaborator } from "./hooks/useCollaborationAwareness";
 import { useProjectAwareness } from "./hooks/useProjectAwareness";
 import { RemoteCursorsOverlay } from "./components/RemoteCursorsOverlay";
 import { useAuth } from "@/providers/AuthProvider";
-import { getProjectPermissions } from "@/api/projects/client";
+import { checkSchemaExistence, getProjectPermissions } from "@/api/projects/client";
 import { useUndoRedo } from "./hooks/useUndoRedo";
+import ShareProject from "@/components/ShareProject";
 
 export type EntityField = {
     id: string;
@@ -145,6 +146,9 @@ const EditProject = (props: IPropsEditProject) => {
     });
 
     const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+    const [userPermission, setUserPermission] = useState<string | null>(null);
+    const [isValidSchema, setIsValidSchema] = useState<boolean | null>(null);
+    const [isRedirecting, setIsRedirecting] = useState(false);
 
     useEffect(() => {
         if (!projectData?.id) {
@@ -154,15 +158,66 @@ const EditProject = (props: IPropsEditProject) => {
 
         const checkPerms = async () => {
             const perm = await getProjectPermissions(projectData.id);
+            
             if (perm) {
+                // Check if user has pending invitation
+                if (perm.permission === 'invited' && perm.invitationId) {
+                    // Redirect to accept invite page
+                    setIsRedirecting(true);
+                    router.push(`/accept-invite?token=${perm.invitationId}`);
+                    return;
+                }
                 setHasPermission(true);
+                setUserPermission(perm.permission);
             } else {
                 setHasPermission(false);
+                setUserPermission(null);
             }
         };
 
         checkPerms();
-    }, [projectData?.id]);
+    }, [projectData?.id, router]);
+
+    // Check if user can edit (owner or editor)
+    const canEdit = userPermission === 'owner' || userPermission === 'editor';
+
+    // Prevent delete/backspace when user is viewer
+    useEffect(() => {
+        if (canEdit) return;
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Block Delete, Backspace and other editing keys for viewers
+            if (e.key === 'Delete' || e.key === 'Backspace') {
+                const target = e.target as HTMLElement;
+                // Only prevent if not in an input/textarea
+                if (!target.matches('input, textarea, [contenteditable="true"]')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            }
+        };
+
+        document.addEventListener('keydown', handleKeyDown, true);
+        return () => {
+            document.removeEventListener('keydown', handleKeyDown, true);
+        };
+    }, [canEdit]);
+
+    useEffect(() => {
+        if (!projectData?.id || !selectedSchema?.id) {
+            return;
+        }
+
+        let isMounted = true;
+        const checkSchema = async () => {
+            setIsValidSchema(null);
+            const exists = await checkSchemaExistence(projectData.id, selectedSchema.id);
+            if (isMounted) setIsValidSchema(exists);
+        };
+
+        checkSchema();
+        return () => { isMounted = false; };
+    }, [projectData?.id, selectedSchema?.id]);
 
     const isUndoRedoActiveRef = useRef(false);
 
@@ -219,6 +274,7 @@ const EditProject = (props: IPropsEditProject) => {
     const [sessionId, setSessionId] = useState<string | null>(null);
     const [isAddPageOpen, setIsAddPageOpen] = useState(false);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+    const [isShareProjectOpen, setIsShareProjectOpen] = useState(false);
     const [exportInitialConfig, setExportInitialConfig] = useState<{ format: ExportFormat; scope: ExportScope }>({ format: 'png', scope: 'all' });
 
     const isUserSelectingSchemaRef = useRef(false);
@@ -264,6 +320,9 @@ const EditProject = (props: IPropsEditProject) => {
             if (!schemaIdFromUrl) {
                 updateUrlWithSchemaId(targetSchema.id);
             }
+            isDiagramReadyRef.current = true;
+        } else if (schemaIdFromUrl && !targetSchema) {
+            setIsValidSchema(false);
             isDiagramReadyRef.current = true;
         }
     }, [schemaList, searchParams, selectedSchema?.id, updateUrlWithSchemaId, setNodesState, setEdgesState]);
@@ -516,7 +575,7 @@ const EditProject = (props: IPropsEditProject) => {
     });
 
     const { awareness: conceptualAwareness } = useConceptualCollaboration({
-        enabled: Boolean(isConceptualSchema && hasPermission),
+        enabled: Boolean(isConceptualSchema && hasPermission && isValidSchema === true && !!token),
         projectId: projectData?.id,
         schema: selectedSchema,
         sessionId,
@@ -529,7 +588,7 @@ const EditProject = (props: IPropsEditProject) => {
     });
 
     const { awareness: logicalAwareness } = useLogicalCollaboration({
-        enabled: Boolean(isLogicalSchema && hasPermission),
+        enabled: Boolean(isLogicalSchema && hasPermission && isValidSchema === true && !!token),
         projectId: projectData?.id,
         schema: selectedSchema,
         sessionId,
@@ -542,7 +601,7 @@ const EditProject = (props: IPropsEditProject) => {
     });
 
     const { awareness: physicalAwareness } = usePhysicalCollaboration({
-        enabled: Boolean(isPhysicalSchema && hasPermission),
+        enabled: Boolean(isPhysicalSchema && hasPermission && isValidSchema === true && !!token),
         projectId: projectData?.id,
         schema: selectedSchema,
         sessionId,
@@ -557,7 +616,7 @@ const EditProject = (props: IPropsEditProject) => {
     const awareness = isConceptualSchema ? conceptualAwareness : isLogicalSchema ? logicalAwareness : isPhysicalSchema ? physicalAwareness : null;
 
     const projectAwareness = useProjectAwareness({
-        enabled: Boolean(projectData?.id && sessionId && hasPermission),
+        enabled: Boolean(projectData?.id && sessionId && hasPermission && isValidSchema === true && !!token),
         projectId: projectData?.id,
         sessionId,
         token,
@@ -778,7 +837,16 @@ const EditProject = (props: IPropsEditProject) => {
         URL.revokeObjectURL(url);
     }, [nodes, edges, diagramName]);
 
-    if (hasPermission === false || (!selectedSchema && isDiagramReadyRef.current)) return (
+    // Show loading state when redirecting to accept invite page
+    if (isRedirecting) {
+        return (
+            <div className="h-screen w-full flex items-center justify-center">
+                <div className="text-gray-500">Redirecting to accept invitation...</div>
+            </div>
+        );
+    }
+
+    if (hasPermission === false || isValidSchema === false || (!selectedSchema && isDiagramReadyRef.current && isValidSchema !== null)) return (
         <div className="h-screen w-full flex flex-col items-center justify-center text-center px-4">
             <div className="text-base font-semibold text-gray-800">
                 Page not found
@@ -790,12 +858,6 @@ const EditProject = (props: IPropsEditProject) => {
         </div>
     );
 
-    if (hasPermission === null) return (
-        <div className="h-screen w-full flex items-center justify-center">
-            {/* Loading spinner */}
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-        </div>
-    );
 
     return (
         <ReactFlowProvider>
@@ -808,6 +870,7 @@ const EditProject = (props: IPropsEditProject) => {
                 <Header
                     diagramName={diagramName}
                     isEditingDiagramName={isEditingDiagramName}
+                    canEdit={canEdit}
                     onSetDiagramName={setDiagramName}
                     onSetIsEditingDiagramName={setIsEditingDiagramName}
                     onOpenSearchModal={() => setIsSearchModalOpen(true)}
@@ -815,6 +878,13 @@ const EditProject = (props: IPropsEditProject) => {
                     onFollowUser={handleFollowUserViewport}
                     onDownload={handleDownload}
                     onExportJson={handleExportJson}
+                    onShareClick={() => setIsShareProjectOpen(true)}
+                />
+                <ShareProject
+                    projectId={projectData?.id}
+                    projectName={projectData?.name}
+                    openShareProject={isShareProjectOpen}
+                    setOpenShareProject={setIsShareProjectOpen}
                 />
                 <ExportModal
                     isOpen={isExportModalOpen}
@@ -826,6 +896,7 @@ const EditProject = (props: IPropsEditProject) => {
                 <div className="flex h-full">
                     <NotationsSidebar
                         isOpen={isSidebarModalOpen}
+                        canEdit={canEdit}
                         onAddPage={() => setIsAddPageOpen(true)}
                         onAddEntity={addEntity}
                         onAddDoubleEntity={addDoubleEntity}
@@ -859,6 +930,7 @@ const EditProject = (props: IPropsEditProject) => {
 
                     <PropertiesPanel
                         isOpen={isRightPanelOpen}
+                        canEdit={canEdit}
                         selectedNode={selectedNode}
                         selectedEdge={selectedEdge}
                         propertiesName={propertiesName}
@@ -974,14 +1046,14 @@ const EditProject = (props: IPropsEditProject) => {
                             edgeTypes={edgeTypes}
                             connectionLineType={ConnectionLineType.Straight}
                             connectionLineStyle={{ stroke: 'var(--color-gray-700)', strokeWidth: 1 }}
-                            onNodesChange={onNodesChange}
-                            onEdgesChange={onEdgesChange}
-                            onConnect={onConnect}
+                            onNodesChange={canEdit ? onNodesChange : undefined}
+                            onEdgesChange={canEdit ? onEdgesChange : undefined}
+                            onConnect={canEdit ? onConnect : undefined}
                             onPaneClick={handlePaneClick}
                             connectionMode={ConnectionMode.Loose}
                             isValidConnection={() => {
                                 // Allow multiple connections to the same handle
-                                return true;
+                                return canEdit;
                             }}
                             onInit={(instance) => {
                                 reactFlowInstanceRef.current = instance;
@@ -1003,8 +1075,8 @@ const EditProject = (props: IPropsEditProject) => {
                             autoPanOnNodeDrag
                             
                             elementsSelectable={interactionMode === 'default'}
-                            nodesDraggable={interactionMode === 'default'}
-                            nodesConnectable={interactionMode === 'default'}
+                            nodesDraggable={canEdit && interactionMode === 'default'}
+                            nodesConnectable={canEdit && interactionMode === 'default'}
                             fitView={false}
                             defaultViewport={viewport ? { x: viewport.x, y: viewport.y, zoom: viewport.zoom } : undefined}
                             proOptions={{ hideAttribution: true }}
@@ -1036,6 +1108,7 @@ const EditProject = (props: IPropsEditProject) => {
                 <Footer
                     isSidebarModalOpen={isSidebarModalOpen}
                     isRightPanelOpen={isRightPanelOpen}
+                    canEdit={canEdit}
                     onToggleSidebar={() => setIsSidebarModalOpen(!isSidebarModalOpen)}
                     onToggleRightPanel={() => setIsRightPanelOpen(!isRightPanelOpen)}
                     onToggleChatBox={() => setIsChatBoxOpen(!isChatBoxOpen)}

@@ -14,3 +14,24 @@ export enum SchemaType {
     LOGICAL = 'logical',
     PHYSICAL = 'physical',
 }
+
+export enum ProjectPermission {
+    OWNER = 'owner',
+    EDITOR = 'editor',
+    VIEWER = 'viewer',
+    INVITED = 'invited',
+}
+
+export enum ProjectVisible {
+    OWNER_INVITED = 'owner_and_invited',
+    ANYONE_VIEW = 'anyone_can_view',
+    ANYONE_EDIT = 'anyone_can_edit',
+}
+
+export enum ProjectInvitePermission {
+    EDITOR = 'editor',
+    VIEWER = 'viewer',
+    REJECTED = 'rejected',
+}
+
+export const RESTRICTED = 'restricted';

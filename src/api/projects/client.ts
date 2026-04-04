@@ -46,10 +46,18 @@ export async function checkSchemaExistence(projectId: string, schemaId: string):
     }
 }
 
-export async function getProjectPermissions(projectId: string): Promise<string | null> {
+export async function getProjectPermissions(projectId: string): Promise<{
+    permission: string;
+    invitationId?: string;
+    invitePermission?: string;
+} | null> {
     try {
-        const url = `${PROXY_PROJECT_DETAIL(projectId)}/permissions`;
-        const res = await apiGet<string>(url);
+        const url = `${PROXY_PROJECT_DETAIL(projectId)}/me/permissions`;
+        const res = await apiGet<{
+            permission: string;
+            invitationId?: string;
+            invitePermission?: string;
+        }>(url);
         return res;
     } catch {
         return null;
