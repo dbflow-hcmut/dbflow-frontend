@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAcceptInvite } from "./api";
 import { notificationProvider } from "@/providers/notification";
-import { Button, Result, Spin } from "antd";
+import { Button, Result } from "antd";
 
 export default function AcceptInvite() {
   const searchParams = useSearchParams();
