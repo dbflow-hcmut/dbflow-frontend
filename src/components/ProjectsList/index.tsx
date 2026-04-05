@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useEffect, startTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Search, Filter, Grid3x3, List, Plus, Calendar } from "lucide-react";
-import { Input, Button, Avatar, Badge, Spin, Pagination } from "antd";
+import { Input, Button, Avatar, Badge, Pagination, Skeleton } from "antd";
 import { formatDateTimeVN } from "@/utils/functions";
 import { useProjects } from "@/api/projects/client";
 import { Project, ProjectsListProps } from "@/types/projects.type";
@@ -146,9 +146,65 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
             </div>
 
             {isLoading ? (
-                <div className="text-center py-12 text-gray-500">
-                    <Spin />
-                </div>
+                viewMode === "grid" ? (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+                        {[1, 2, 3, 4, 5, 6].map((i) => (
+                            <div key={i} className="bg-white rounded-lg border border-gray-200 p-6">
+                                <Skeleton active paragraph={{ rows: 3 }} />
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                        <div className="overflow-x-auto">
+                            <table className="min-w-max w-full">
+                                <thead className="bg-gray-50 border-b border-gray-200">
+                                    <tr>
+                                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                                            PROJECT
+                                        </th>
+                                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                                            STATUS
+                                        </th>
+                                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                                            OWNER
+                                        </th>
+                                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                                            UPDATED
+                                        </th>
+                                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                                            CREATED
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-gray-200">
+                                    {[1, 2, 3, 4, 5, 6].map((i) => (
+                                        <tr key={i}>
+                                            <td className="px-6 py-4">
+                                                <div className="h-4 bg-gray-200 rounded animate-pulse" style={{ width: 150 }} />
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <div className="h-6 bg-gray-200 rounded-full animate-pulse" style={{ width: 80 }} />
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-6 h-6 bg-gray-200 rounded-full animate-pulse" />
+                                                    <div className="h-4 bg-gray-200 rounded animate-pulse" style={{ width: 100 }} />
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <div className="h-4 bg-gray-200 rounded animate-pulse" style={{ width: 120 }} />
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <div className="h-4 bg-gray-200 rounded animate-pulse" style={{ width: 120 }} />
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )
             ) : viewMode === "grid" ? (
                 <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
                     {projects.map((project) => (

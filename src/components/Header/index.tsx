@@ -1,14 +1,47 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { ChevronDown, Search, User, LayoutGrid, ChartArea, Settings, LogOut } from "lucide-react";
-import { Input, Dropdown, Avatar } from "antd";
+import React, { useState, useEffect, useRef } from "react";
+import { ChevronDown, Search, User, LayoutGrid, ChartArea, Settings, LogOut, FolderKanban } from "lucide-react";
+import { Input, Dropdown, Avatar, InputRef } from "antd";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import classNames from "classnames";
 import { getUserMe } from "@/api/users/client";
 import { UserResponse } from "@/types/user.type";
+
+interface SearchRoute {
+    key: string;
+    title: string;
+    description: string;
+    href: string;
+    icon: React.ReactNode;
+}
+
+const searchableRoutes: SearchRoute[] = [
+    {
+        key: 'projects',
+        title: 'Projects',
+        description: 'View all your projects',
+        href: '/projects',
+        icon: <LayoutGrid className="w-4 h-4" />
+    },
+    {
+        key: 'new-project',
+        title: 'Create New Project',
+        description: 'Start a new database project',
+        href: '/projects/new',
+        icon: <FolderKanban className="w-4 h-4" />
+    },
+    {
+        key: 'settings',
+        title: 'Settings',
+        description: 'Manage your account settings',
+        href: '/settings',
+        icon: <Settings className="w-4 h-4" />
+    },
+];
+
 
 export const getMenuItems = (pathname: string) => {
     const items = [
@@ -69,10 +102,22 @@ export const getMenuItems = (pathname: string) => {
 
 export default function Header() {
     const [searchValue, setSearchValue] = useState("");
+    const [showSearchResults, setShowSearchResults] = useState(false);
+    const [selectedIndex, setSelectedIndex] = useState(0);
     const [userData, setUserData] = useState<UserResponse | null>(null);
     const [isLoadingUser, setIsLoadingUser] = useState(false);
     const pathname = usePathname();
+    const router = useRouter();
+    const searchInputRef = useRef<InputRef>(null);
     const menuItems = getMenuItems(pathname || "");
+
+    // Filter routes based on search value
+    const filteredRoutes = searchValue.trim()
+        ? searchableRoutes.filter(route =>
+            route.title.toLowerCase().includes(searchValue.toLowerCase()) ||
+            route.description.toLowerCase().includes(searchValue.toLowerCase())
+        )
+        : searchableRoutes;
 
     useEffect(() => {
         // Try to get cached user data first
@@ -88,6 +133,32 @@ export default function Header() {
         // Fetch user data on mount
         loadUserData();
         // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Reset selected index when search results change
+    useEffect(() => {
+        setSelectedIndex(0);
+    }, [searchValue]);
+
+    // Handle keyboard shortcuts
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Cmd+K or Ctrl+K to focus search
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault();
+                searchInputRef.current?.focus();
+                setShowSearchResults(true);
+            }
+            
+            // Escape to close search
+            if (e.key === 'Escape') {
+                setShowSearchResults(false);
+                searchInputRef.current?.blur();
+            }
+        };
+
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
     }, []);
 
     const loadUserData = async () => {
@@ -106,6 +177,101 @@ export default function Header() {
         } finally {
             setIsLoadingUser(false);
         }
+    };
+
+    const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setSearchValue(e.target.value);
+        setShowSearchResults(true);
+    };
+
+    const handleSearchKeyDown = (e: React.KeyboardEvent) => {
+        if (!showSearchResults || filteredRoutes.length === 0) return;
+
+        switch (e.key) {
+            case 'ArrowDown':
+                e.preventDefault();
+                setSelectedIndex(prev => 
+                    prev < filteredRoutes.length - 1 ? prev + 1 : prev
+                );
+                break;
+            case 'ArrowUp':
+                e.preventDefault();
+                setSelectedIndex(prev => prev > 0 ? prev - 1 : 0);
+                break;
+            case 'Enter':
+                e.preventDefault();
+                if (filteredRoutes[selectedIndex]) {
+                    navigateToRoute(filteredRoutes[selectedIndex].href);
+                }
+                break;
+        }
+    };
+
+    const navigateToRoute = (href: string) => {
+        setShowSearchResults(false);
+        setSearchValue('');
+        searchInputRef.current?.blur();
+        router.push(href);
+    };
+
+    const renderSearchResults = () => {
+        if (!showSearchResults) return null;
+
+        return (
+            <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-lg shadow-xl border border-gray-200 z-50 max-h-96 overflow-y-auto">
+                {filteredRoutes.length === 0 ? (
+                    <div className="p-4 text-center text-gray-500">
+                        No routes found
+                    </div>
+                ) : (
+                    <div className="py-2">
+                        {filteredRoutes.map((route, index) => (
+                            <div
+                                key={route.key}
+                                onClick={() => navigateToRoute(route.href)}
+                                className={classNames(
+                                    "px-4 py-3 cursor-pointer transition-colors",
+                                    index === selectedIndex
+                                        ? "bg-blue-50"
+                                        : "hover:bg-gray-50"
+                                )}
+                            >
+                                <div className="flex items-center gap-3">
+                                    <div className={classNames(
+                                        "flex-shrink-0",
+                                        index === selectedIndex ? "text-blue-600" : "text-gray-600"
+                                    )}>
+                                        {route.icon}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <div className={classNames(
+                                            "font-medium text-xs truncate",
+                                            index === selectedIndex ? "text-blue-900" : "text-gray-900"
+                                        )}>
+                                            {route.title}
+                                        </div>
+                                        <div className="text-sm text-gray-500 truncate text-xs">
+                                            {route.description}
+                                        </div>
+                                    </div>
+                                    {index === selectedIndex && (
+                                        <div className="text-xs text-gray-400 font-mono">
+                                            ↵
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+                <div className="border-t border-gray-200 px-4 py-2 bg-gray-50 text-xs text-gray-500">
+                    <div className="flex items-center justify-between">
+                        <span>Navigate with ↑↓ keys, select with ↵</span>
+                        <span>ESC to close</span>
+                    </div>
+                </div>
+            </div>
+        );
     };
 
     const dropdownRender = () => (
@@ -187,15 +353,20 @@ export default function Header() {
             <div className="flex items-center gap-4">
                 <div className="relative hidden lg:block">
                     <Input
+                        ref={searchInputRef}
                         placeholder="Search..."
                         prefix={<Search className="w-4 h-4 text-gray-400" />}
                         value={searchValue}
-                        onChange={(e) => setSearchValue(e.target.value)}
-                        className="w-64"
+                        onChange={handleSearchChange}
+                        onKeyDown={handleSearchKeyDown}
+                        onFocus={() => setShowSearchResults(true)}
+                        onBlur={() => setTimeout(() => setShowSearchResults(false), 200)}
+                        className="w-[350px]!"
                         suffix={
                             <span className="text-xs text-gray-400 font-mono">⌘K</span>
                         }
                     />
+                    {renderSearchResults()}
                 </div>
 
                 <Dropdown 

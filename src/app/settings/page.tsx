@@ -67,7 +67,13 @@ export default function SettingsPage() {
   const handleSaveProfile = async (values: ProfileFormValues) => {
     try {
       // Remove email field before sending to API
-      const { email, ...updateData } = values;
+      const updateData = {
+        firstName: values.firstName,
+        lastName: values.lastName,
+        phone: values.phone,
+        bio: values.bio,
+      };
+      
       const updatedUser = await updateUserProfile(updateData);
       
       // Update userData directly from response without reloading
