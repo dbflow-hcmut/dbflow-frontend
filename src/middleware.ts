@@ -12,13 +12,13 @@ export default auth((req) => {
 
   if (pathname === "/") {
     if (isLoggedIn) {
-      return NextResponse.redirect(new URL("/projects", req.url));
+      return NextResponse.redirect(new URL("/ai-chat", req.url));
     }
     return NextResponse.redirect(new URL("/auth/signin", req.url));
   }
 
   if (isAuthRoute && isLoggedIn) {
-    return NextResponse.redirect(new URL("/projects", req.url));
+    return NextResponse.redirect(new URL("/ai-chat", req.url));
   }
 
   if (!isLoggedIn && !isAuthRoute && !isApiRoute && !isNotFoundRoute && !isPublicRoute) {

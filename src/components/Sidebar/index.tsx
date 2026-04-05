@@ -6,7 +6,8 @@ import { usePathname } from "next/navigation";
 import {
   LayoutGrid,
   Settings,
-  PanelLeftDashed
+  PanelLeftDashed,
+  Sparkles
 } from "lucide-react";
 import { Radio, RadioChangeEvent, Popover } from "antd";
 import classNames from "classnames";
@@ -18,6 +19,11 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
+  {
+    label: "AI Chat",
+    icon: <Sparkles className="w-5 h-5" />,
+    path: "/ai-chat",
+  },
   {
     label: "Projects",
     icon: <LayoutGrid className="w-5 h-5" />,

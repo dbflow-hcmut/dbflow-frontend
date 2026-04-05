@@ -42,7 +42,7 @@ export default function CreateProject() {
     };
 
     const handleCancel = () => {
-        router.push("/projects");
+        router.push("/ai-chat");
     };
 
     return (

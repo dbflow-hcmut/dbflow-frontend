@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { ChevronDown, Search, User, LayoutGrid, ChartArea, Settings, LogOut, FolderKanban } from "lucide-react";
+import { ChevronDown, Search, User, LayoutGrid, ChartArea, Settings, LogOut, FolderKanban, Sparkles } from "lucide-react";
 import { Input, Dropdown, Avatar, InputRef } from "antd";
 import Image from "next/image";
 import Link from "next/link";
@@ -19,6 +19,13 @@ interface SearchRoute {
 }
 
 const searchableRoutes: SearchRoute[] = [
+    {
+        key: 'ai-chat',
+        title: 'AI Chat',
+        description: 'AI assistant for databases',
+        href: '/ai-chat',
+        icon: <Sparkles className="w-4 h-4" />
+    },
     {
         key: 'projects',
         title: 'Projects',
@@ -250,7 +257,7 @@ export default function Header() {
                                         )}>
                                             {route.title}
                                         </div>
-                                        <div className="text-sm text-gray-500 truncate text-xs">
+                                        <div className="text-xs text-gray-500 truncate">
                                             {route.description}
                                         </div>
                                     </div>
@@ -331,7 +338,7 @@ export default function Header() {
     return (
         <header className="h-16 border-b border-gray-200 bg-white flex items-center justify-between px-6">
             <div className="flex items-center gap-2">
-                <Link href="/projects" className="cursor-pointer flex items-center gap-2" prefetch={true}>
+                <Link href="/ai-chat" className="cursor-pointer flex items-center gap-2" prefetch={true}>
                     <Image src="/favicon.ico" alt="Logo" width={20} height={20} priority />
                     <span className="text-gray-900 font-bold">DB Flow</span>
                 </Link>

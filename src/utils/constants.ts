@@ -4,6 +4,7 @@ export const PAGE_HEIGHT = 1120;
 export const API_AVATAR = 'https://ui-avatars.com/api';
 
 export const ROUTES_WITH_LAYOUT = [
+    "/ai-chat",
     "/projects",
     "/usage",
     "/settings",

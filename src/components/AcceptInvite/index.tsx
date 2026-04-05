@@ -46,7 +46,7 @@ export default function AcceptInvite() {
           type: "success",
           message: "Successfully joined project!",
         });
-        router.push("/projects");
+        router.push("/ai-chat");
       }
     } catch (error: unknown) {
       setStatus("error");
@@ -84,7 +84,7 @@ export default function AcceptInvite() {
               type="default" 
               size="large" 
               className="w-full h-12 text-sm!"
-              onClick={() => router.push("/projects")}
+              onClick={() => router.push("/ai-chat")}
             >
               Back to Dashboard
             </Button>
