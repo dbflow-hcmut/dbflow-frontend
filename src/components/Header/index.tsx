@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { ChevronDown, Search, HelpCircle, Lightbulb, User, LayoutGrid, ChartArea, Settings, LogOut } from "lucide-react";
+import { ChevronDown, Search, User, LayoutGrid, ChartArea, Settings, LogOut } from "lucide-react";
 import { Input, Dropdown, Avatar } from "antd";
 import Image from "next/image";
 import Link from "next/link";
@@ -9,7 +9,6 @@ import { usePathname } from "next/navigation";
 import classNames from "classnames";
 import { getUserMe } from "@/api/users/client";
 import { UserResponse } from "@/types/user.type";
-import type { MenuProps } from "antd";
 
 export const getMenuItems = (pathname: string) => {
     const items = [
@@ -48,6 +47,7 @@ export const getMenuItems = (pathname: string) => {
             label: (
                 <Link
                     href={item.href}
+                    prefetch={true}
                     className={classNames(
                         "flex items-center gap-2",
                         item.isActive ? "font-medium" : "text-gray-700",
@@ -70,19 +70,41 @@ export const getMenuItems = (pathname: string) => {
 export default function Header() {
     const [searchValue, setSearchValue] = useState("");
     const [userData, setUserData] = useState<UserResponse | null>(null);
+    const [isLoadingUser, setIsLoadingUser] = useState(false);
     const pathname = usePathname();
     const menuItems = getMenuItems(pathname || "");
 
     useEffect(() => {
+        // Try to get cached user data first
+        const cachedUser = localStorage.getItem('user_data');
+        if (cachedUser) {
+            try {
+                setUserData(JSON.parse(cachedUser));
+            } catch {
+                // Invalid cache, will fetch
+            }
+        }
+        
+        // Fetch user data on mount
         loadUserData();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const loadUserData = async () => {
+        if (isLoadingUser) return;
+        
         try {
+            setIsLoadingUser(true);
             const data = await getUserMe();
             setUserData(data);
+            // Cache for faster subsequent loads
+            localStorage.setItem('user_data', JSON.stringify(data));
         } catch (error) {
             console.error('Failed to load user data', error);
+            // Clear invalid cache
+            localStorage.removeItem('user_data');
+        } finally {
+            setIsLoadingUser(false);
         }
     };
 
@@ -116,6 +138,7 @@ export default function Header() {
             <div className="py-1 px-1">
                 <Link 
                     href="/settings" 
+                    prefetch={true}
                     className="flex items-center gap-2 px-4 py-2 hover:bg-gray-100! transition-colors text-gray-700! rounded-lg cursor-pointer"
                 >
                     <Settings className="w-4 h-4" />
@@ -125,7 +148,11 @@ export default function Header() {
                 <div className="border-t border-gray-200 my-1"></div>
                 
                 <div 
-                    onClick={() => window.location.href = '/api/auth/logout'}
+                    onClick={() => {
+                        // Clear user cache on logout
+                        localStorage.removeItem('user_data');
+                        window.location.href = '/api/auth/logout';
+                    }}
                     className="flex items-center gap-2 px-4 py-2 hover:bg-gray-100! transition-colors text-gray-700! rounded-lg cursor-pointer"
                 >
                     <LogOut className="w-4 h-4" />
@@ -138,7 +165,7 @@ export default function Header() {
     return (
         <header className="h-16 border-b border-gray-200 bg-white flex items-center justify-between px-6">
             <div className="flex items-center gap-2">
-                <Link href="/" className="cursor-pointer flex items-center gap-2">
+                <Link href="/projects" className="cursor-pointer flex items-center gap-2" prefetch={true}>
                     <Image src="/favicon.ico" alt="Logo" width={20} height={20} priority />
                     <span className="text-gray-900 font-bold">DB Flow</span>
                 </Link>
@@ -172,7 +199,7 @@ export default function Header() {
                 </div>
 
                 <Dropdown 
-                    dropdownRender={dropdownRender}
+                    popupRender={dropdownRender}
                     trigger={["click"]}
                     placement="bottomRight"
                 >

@@ -8,7 +8,6 @@ import ButtonAnt from '@/components/ButtonAnt';
 import { ShieldCheck, User } from 'lucide-react';
 import { getUserMe, updateUserProfile, changeUserPassword } from '@/api/users/client';
 import { UserResponse } from '@/types/user.type';
-import { useRouter } from 'next/navigation';
 import { notificationProvider } from '@/providers/notification';
 
 const { TextArea } = Input;
@@ -45,7 +44,6 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<TabType>('profile');
   const [loading, setLoading] = useState(true);
   const [userData, setUserData] = useState<UserResponse | null>(null);
-  const router = useRouter();
 
   useEffect(() => {
     loadUserData();
@@ -56,7 +54,7 @@ export default function SettingsPage() {
       setLoading(true);
       const data = await getUserMe();
       setUserData(data);
-    } catch (error) {
+    } catch {
       notificationProvider.open({
         type: 'error',
         message: 'Failed to load user data'
@@ -75,14 +73,17 @@ export default function SettingsPage() {
       // Update userData directly from response without reloading
       setUserData(updatedUser);
       
+      // Update cached user data
+      localStorage.setItem('user_data', JSON.stringify(updatedUser));
+      
       notificationProvider.open({
         type: 'success',
         message: 'Profile updated successfully'
       });
-    } catch (error: any) {
+    } catch (error) {
       notificationProvider.open({
         type: 'error',
-        message: error?.message || 'Failed to update profile'
+        message: error instanceof Error ? error.message : 'Failed to update profile'
       });
     }
   };
@@ -97,10 +98,10 @@ export default function SettingsPage() {
         type: 'success',
         message: 'Password changed successfully'
       });
-    } catch (error: any) {
+    } catch (error) {
       notificationProvider.open({
         type: 'error',
-        message: error?.message || 'Failed to change password'
+        message: error instanceof Error ? error.message : 'Failed to change password'
       });
       // Re-throw error so SecurityTab knows it failed
       throw error;
@@ -320,7 +321,7 @@ function SecurityTab({ onSave }: { onSave: (values: SecurityFormValues) => Promi
       await onSave(values);
       // Only reset form if save was successful (no error thrown)
       form.resetFields();
-    } catch (error) {
+    } catch {
       // Error is already handled in onSave, form stays unchanged
     }
   };

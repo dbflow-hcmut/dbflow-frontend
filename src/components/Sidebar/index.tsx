@@ -6,8 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   LayoutGrid,
   Settings,
-  PanelLeftDashed,
-  ChartArea
+  PanelLeftDashed
 } from "lucide-react";
 import { Radio, RadioChangeEvent, Popover } from "antd";
 import classNames from "classnames";
