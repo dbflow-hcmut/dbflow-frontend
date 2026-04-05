@@ -7,6 +7,8 @@ export const PROXY_BASE = `${FE_BASE}/api/proxy`;
 
 export const PROXY_USERS = `${PROXY_BASE}/users`;
 export const PROXY_USERS_ME = `${PROXY_USERS}/me`;
+export const PROXY_USERS_PROFILE = `${PROXY_USERS}/profile`;
+export const PROXY_USERS_CHANGE_PASSWORD = `${PROXY_USERS}/change-password`;
 
 export const PROXY_PROJECTS = `${PROXY_BASE}/projects`;
 export const PROXY_PROJECT_DETAIL = (id: string) => `${PROXY_PROJECTS}/${id}`;

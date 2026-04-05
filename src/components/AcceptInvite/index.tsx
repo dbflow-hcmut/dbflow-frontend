@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAcceptInvite } from "./api";
 import { notificationProvider } from "@/providers/notification";
-import { Button, Result } from "antd";
+import { Button } from "antd";
 
 export default function AcceptInvite() {
   const searchParams = useSearchParams();
@@ -13,7 +13,6 @@ export default function AcceptInvite() {
   
   const { acceptInvite, isLoading } = useAcceptInvite();
   const [status, setStatus] = useState<"loading" | "success" | "error" | "idle">("idle");
-  const [projectId, setProjectId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) {
@@ -35,10 +34,19 @@ export default function AcceptInvite() {
       const res = await acceptInvite({ token }) as { projectId?: string } | undefined;
       
       if (res?.projectId) {
-        setProjectId(res.projectId);
-        setStatus("success");
+        // Show success notification and redirect to project
+        notificationProvider.open({
+          type: "success",
+          message: "Successfully joined project!",
+        });
+        router.push(`/projects/${res.projectId}`);
       } else {
-        setStatus("success");
+        // Fallback to projects list if no projectId
+        notificationProvider.open({
+          type: "success",
+          message: "Successfully joined project!",
+        });
+        router.push("/projects");
       }
     } catch (error: unknown) {
       setStatus("error");
@@ -50,37 +58,13 @@ export default function AcceptInvite() {
     }
   };
 
-  if (status === "success") {
-    return (
-      <div className="flex h-screen items-center justify-center bg-gray-50">
-        <Result
-          status="success"
-          title="Successfully Joined Project!"
-          subTitle="You have accepted the invitation and are now a member of the project."
-          extra={[
-            <Button 
-              type="primary" 
-              key="project" 
-              onClick={() => router.push(projectId ? `/projects/${projectId}` : "/projects")}
-            >
-              Go to Project
-            </Button>,
-            <Button key="dashboard" onClick={() => router.push("/projects")}>
-              Go to Dashboard
-            </Button>,
-          ]}
-        />
-      </div>
-    );
-  }
-
   return (
     <div className="flex h-screen items-center justify-center bg-gray-50">
-      <div className="max-w-lg w-full p-8 bg-white shadow-xl rounded-lg text-center">
+      <div className="max-w-lg w-full p-8 bg-white shadow-lg rounded-lg text-center">
         <h1 className="text-xl font-bold text-gray-800 mb-10">Project Collaboration Invite</h1>
         
         <div className="pt-2">
-          <p className="text-gray-600 mb-10">
+          <p className="text-gray-600 mb-10 text-sm">
             You have been invited to collaborate on a DBFlow project. 
             Click the button below to accept the invitation and join the project.
           </p>
@@ -89,7 +73,7 @@ export default function AcceptInvite() {
             <Button 
               type="primary" 
               size="large" 
-              className="w-full bg-indigo-600 hover:bg-indigo-700 h-12 text-lg"
+              className="w-full bg-indigo-600 hover:bg-indigo-700 h-12 text-sm!"
               loading={isLoading || status === "loading"}
               onClick={handleAccept}
               disabled={!token}
@@ -99,7 +83,7 @@ export default function AcceptInvite() {
             <Button 
               type="default" 
               size="large" 
-              className="w-full h-12 text-lg"
+              className="w-full h-12 text-sm!"
               onClick={() => router.push("/projects")}
             >
               Back to Dashboard

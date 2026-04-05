@@ -1,12 +1,15 @@
 "use client";
 
-import React, { useState } from "react";
-import { ChevronDown, Search, HelpCircle, Lightbulb, User, LayoutGrid, ChartArea, Settings } from "lucide-react";
-import { Input, Dropdown } from "antd";
+import React, { useState, useEffect } from "react";
+import { ChevronDown, Search, HelpCircle, Lightbulb, User, LayoutGrid, ChartArea, Settings, LogOut } from "lucide-react";
+import { Input, Dropdown, Avatar } from "antd";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import classNames from "classnames";
+import { getUserMe } from "@/api/users/client";
+import { UserResponse } from "@/types/user.type";
+import type { MenuProps } from "antd";
 
 export const getMenuItems = (pathname: string) => {
     const items = [
@@ -66,8 +69,71 @@ export const getMenuItems = (pathname: string) => {
 
 export default function Header() {
     const [searchValue, setSearchValue] = useState("");
+    const [userData, setUserData] = useState<UserResponse | null>(null);
     const pathname = usePathname();
     const menuItems = getMenuItems(pathname || "");
+
+    useEffect(() => {
+        loadUserData();
+    }, []);
+
+    const loadUserData = async () => {
+        try {
+            const data = await getUserMe();
+            setUserData(data);
+        } catch (error) {
+            console.error('Failed to load user data', error);
+        }
+    };
+
+    const dropdownRender = () => (
+        <div className="bg-white rounded-lg shadow-lg border border-gray-200 min-w-[280px]">
+            {/* User Info Header */}
+            <div className="p-4 border-b border-gray-200">
+                <div className="flex items-center gap-3">
+                    {userData?.avatar ? (
+                        <Avatar 
+                            src={userData.avatar} 
+                            size={48}
+                        />
+                    ) : (
+                        <div className="w-12 h-12 rounded-full bg-gray-300 flex items-center justify-center">
+                            <User className="w-6 h-6 text-gray-600" />
+                        </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-gray-900 truncate">
+                            {userData?.fullName || 'User'}
+                        </div>
+                        <div className="text-sm text-gray-500 truncate">
+                            {userData?.email || ''}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Menu Items */}
+            <div className="py-1 px-1">
+                <Link 
+                    href="/settings" 
+                    className="flex items-center gap-2 px-4 py-2 hover:bg-gray-100! transition-colors text-gray-700! rounded-lg cursor-pointer"
+                >
+                    <Settings className="w-4 h-4" />
+                    <span>Settings</span>
+                </Link>
+                
+                <div className="border-t border-gray-200 my-1"></div>
+                
+                <div 
+                    onClick={() => window.location.href = '/api/auth/logout'}
+                    className="flex items-center gap-2 px-4 py-2 hover:bg-gray-100! transition-colors text-gray-700! rounded-lg cursor-pointer"
+                >
+                    <LogOut className="w-4 h-4" />
+                    <span>Logout</span>
+                </div>
+            </div>
+        </div>
+    );
 
     return (
         <header className="h-16 border-b border-gray-200 bg-white flex items-center justify-between px-6">
@@ -84,6 +150,7 @@ export default function Header() {
                         menu={{ items: menuItems }}
                         trigger={["click"]}
                         placement="bottomLeft"
+                        className="lg:hidden block"
                     >
                         <ChevronDown className="w-4 h-4 text-gray-500 cursor-pointer hover:text-gray-700 transition-colors" />
                     </Dropdown>
@@ -104,12 +171,25 @@ export default function Header() {
                     />
                 </div>
 
-                <HelpCircle className="w-5 h-5 text-gray-500 cursor-pointer hover:text-gray-700" />
-                <Lightbulb className="w-5 h-5 text-gray-500 cursor-pointer hover:text-gray-700" />
-
-                <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center cursor-pointer hover:bg-gray-400">
-                    <User className="w-5 h-5 text-gray-600" />
-                </div>
+                <Dropdown 
+                    dropdownRender={dropdownRender}
+                    trigger={["click"]}
+                    placement="bottomRight"
+                >
+                    <div className="cursor-pointer">
+                        {userData?.avatar ? (
+                            <Avatar 
+                                src={userData.avatar} 
+                                size={32}
+                                className="hover:opacity-80 transition-opacity"
+                            />
+                        ) : (
+                            <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center hover:bg-gray-400 transition-colors">
+                                <User className="w-5 h-5 text-gray-600" />
+                            </div>
+                        )}
+                    </div>
+                </Dropdown>
             </div>
         </header>
     );

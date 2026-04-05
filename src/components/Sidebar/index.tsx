@@ -24,11 +24,11 @@ const navItems: NavItem[] = [
     icon: <LayoutGrid className="w-5 h-5" />,
     path: "/projects",
   },
-  {
-    label: "Usage",
-    icon: <ChartArea className="w-5 h-5" />,
-    path: "/usage",
-  },
+  // {
+  //   label: "Usage",
+  //   icon: <ChartArea className="w-5 h-5" />,
+  //   path: "/usage",
+  // },
   {
     label: "Settings",
     icon: <Settings className="w-5 h-5" />,

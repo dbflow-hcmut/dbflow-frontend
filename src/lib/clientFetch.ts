@@ -18,6 +18,17 @@ export async function apiFetch<TData>(
     }
     
     const json = (await res.json().catch(() => (null)));
+    
+    // Check if response is not OK and throw error
+    if (!res.ok) {
+        // Try to get error message from different possible locations
+        const rawMessage = json?.meta?.message || json?.message;
+        const errorMessage = Array.isArray(rawMessage) 
+            ? rawMessage.join(', ') 
+            : (rawMessage || 'Request failed');
+        throw new Error(errorMessage);
+    }
+    
     const payload = (json?.data ?? null) as TData | null;
     return { data: payload, response: res };
 }
