@@ -2,11 +2,14 @@
 
 import React, { useState, useMemo, useEffect, startTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Filter, Grid3x3, List, Plus, Calendar } from "lucide-react";
-import { Input, Button, Avatar, Badge, Pagination, Skeleton } from "antd";
+import { Search, Filter, Grid3x3, List, Plus, Calendar, Trash2 } from "lucide-react";
+import { Input, Button, Avatar, Badge, Pagination, Skeleton, Modal } from "antd";
 import { formatDateTimeVN } from "@/utils/functions";
-import { useProjects } from "@/api/projects/client";
+import { useProjects, deleteProject } from "@/api/projects/client";
+import { getUserMe } from "@/api/users/client";
 import { Project, ProjectsListProps } from "@/types/projects.type";
+import { UserResponse } from "@/types/user.type";
+import { notificationProvider } from "@/providers/notification";
 
 
 export default function ProjectsList({ initialProjects = [], initialPagination }: ProjectsListProps) {
@@ -15,6 +18,8 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
     const [searchValue, setSearchValue] = useState(searchParams.get("keyword") || "");
     const [debouncedSearch, setDebouncedSearch] = useState(searchValue);
     const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+    const [currentUser, setCurrentUser] = useState<UserResponse | null>(null);
+    const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
 
     const currentPage = parseInt(searchParams.get("page") || "1", 10);
     const currentLimit = parseInt(searchParams.get("limit") || "9", 10);
@@ -27,6 +32,18 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
 
         return () => clearTimeout(timer);
     }, [searchValue]);
+
+    useEffect(() => {
+        const fetchUser = async () => {
+            try {
+                const user = await getUserMe();
+                setCurrentUser(user);
+            } catch (error) {
+                console.error("Failed to fetch user:", error);
+            }
+        };
+        fetchUser();
+    }, []);
 
     const searchKeyword = useMemo(() => {
         return debouncedSearch.trim() || undefined;
@@ -91,6 +108,44 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
         startTransition(() => {
             router.push(`/projects/${projectId}`);
         });
+    };
+
+    const handleDeleteClick = (e: React.MouseEvent, projectId: string, projectName: string) => {
+        e.stopPropagation();
+        const userIsOwner = isOwner(projects.find(p => p.id === projectId)!);
+        
+        Modal.confirm({
+            title: userIsOwner ? 'Delete Project' : 'Leave Project',
+            content: userIsOwner 
+                ? `Are you sure you want to delete "${projectName}"? This action cannot be undone and will remove all data, schemas, and collaborators.`
+                : `Are you sure you want to leave "${projectName}"? You will lose access to this project.`,
+            okText: userIsOwner ? 'Delete' : 'Leave',
+            okType: 'danger',
+            cancelText: 'Cancel',
+            onOk: async () => {
+                try {
+                    setDeletingProjectId(projectId);
+                    await deleteProject(projectId);
+                    notificationProvider.open({
+                        type: "success",
+                        message: userIsOwner ? 'Project deleted successfully' : 'You have left the project successfully',
+                    });
+                    router.refresh();
+                } catch (error) {
+                    console.error('Failed to delete/leave project:', error);
+                    notificationProvider.open({
+                        type: "error",
+                        message: userIsOwner ? 'Failed to delete project' : 'Failed to leave project',
+                    });
+                } finally {
+                    setDeletingProjectId(null);
+                }
+            },
+        });
+    };
+
+    const isOwner = (project: Project) => {
+        return currentUser?.id === project.owner.id;
     };
 
     return (
@@ -198,6 +253,9 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                                             <td className="px-6 py-4">
                                                 <div className="h-4 bg-gray-200 rounded animate-pulse" style={{ width: 120 }} />
                                             </td>
+                                            <td className="px-6 py-4">
+                                                <div className="h-4 bg-gray-200 rounded animate-pulse" style={{ width: 40 }} />
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -217,11 +275,23 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                                 <h3 className="text-lg font-semibold text-gray-900 flex-1 pr-2">
                                     {project.name}
                                 </h3>
-                                <Badge
-                                    status={project.status === "active" ? "success" : "default"}
-                                    text={project.status === "active" ? "Active" : "Archived"}
-                                    className="text-xs"
-                                />
+                                <div className="flex items-center gap-2">
+                                    <Badge
+                                        status={project.status === "active" ? "success" : "default"}
+                                        text={project.status === "active" ? "Active" : "Archived"}
+                                        className="text-xs"
+                                    />
+                                    <Button
+                                        type="text"
+                                        size="small"
+                                        danger
+                                        icon={<Trash2 className="w-4 h-4" />}
+                                        loading={deletingProjectId === project.id}
+                                        onClick={(e) => handleDeleteClick(e, project.id, project.name)}
+                                        className="flex items-center justify-center"
+                                        title={isOwner(project) ? "Delete project" : "Leave project"}
+                                    />
+                                </div>
                             </div>
 
                             <div className="flex items-center gap-3 mb-4">
@@ -264,6 +334,9 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
                                         CREATED
                                     </th>
+                                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                                        ACTIONS
+                                    </th>
                                 </tr>
                             </thead>
 
@@ -304,6 +377,19 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
 
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                             {formatDateTimeVN(project.createdAt)}
+                                        </td>
+
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            <Button
+                                                type="text"
+                                                size="small"
+                                                danger
+                                                icon={<Trash2 className="w-4 h-4" />}
+                                                loading={deletingProjectId === project.id}
+                                                onClick={(e) => handleDeleteClick(e, project.id, project.name)}
+                                                className="flex items-center justify-center"
+                                                title={isOwner(project) ? "Delete project" : "Leave project"}
+                                            />
                                         </td>
                                     </tr>
                                 ))}
