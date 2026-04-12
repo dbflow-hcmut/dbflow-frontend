@@ -7,7 +7,8 @@ import {
   LayoutGrid,
   Settings,
   PanelLeftDashed,
-  Sparkles
+  Sparkles,
+  History,
 } from "lucide-react";
 import { Radio, RadioChangeEvent, Popover } from "antd";
 import classNames from "classnames";
@@ -23,6 +24,11 @@ const navItems: NavItem[] = [
     label: "AI Chat",
     icon: <Sparkles className="w-5 h-5" />,
     path: "/ai-chat",
+  },
+  {
+    label: "History",
+    icon: <History className="w-5 h-5" />,
+    path: "/history",
   },
   {
     label: "Projects",
@@ -67,7 +73,7 @@ export default function Sidebar() {
   };
 
   const isActive = (path: string) => {
-    return pathname === path;
+    return pathname === path || pathname.startsWith(path + "/");
   };
 
   const getSidebarWidth = () => {

@@ -773,6 +773,10 @@ export const mapStoredEdgesToReactEdges = (
 ): Edge<ErdEdgeData>[] => {
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
 
+    // Dedup by edge ID — stale Yjs data from before the recursive-
+    // relationship fix may contain two entries with the same id.
+    const seen = new Set<string>();
+
     return storedEdges
         .map((edge) => {
             if (isSchemaStoredEdge(edge)) {
@@ -793,5 +797,10 @@ export const mapStoredEdgesToReactEdges = (
                 data: legacyData,
             };
         })
-        .filter((edge): edge is Edge<ErdEdgeData> => Boolean(edge));
+        .filter((edge): edge is Edge<ErdEdgeData> => {
+            if (!edge) return false;
+            if (seen.has(edge.id)) return false;
+            seen.add(edge.id);
+            return true;
+        });
 };

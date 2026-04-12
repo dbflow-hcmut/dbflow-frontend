@@ -5,9 +5,15 @@ export const API_AVATAR = 'https://ui-avatars.com/api';
 
 export const ROUTES_WITH_LAYOUT = [
     "/ai-chat",
+    "/history",
     "/projects",
     "/usage",
     "/settings",
+];
+
+// Routes that should only match exactly (no sub-route matching)
+export const EXACT_MATCH_ROUTES = [
+    "/projects",
 ];
 
 export enum SchemaType {

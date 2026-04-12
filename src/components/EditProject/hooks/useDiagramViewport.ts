@@ -77,8 +77,24 @@ export const useDiagramViewport = ({
         if (hasAppliedInitialViewportRef.current) return;
         if (nodes.length === 0) return;
 
-        reactFlowInstanceRef.current.fitView({ padding: 0.2 });
-        hasAppliedInitialViewportRef.current = true;
+        // Delay fitView so ReactFlow has time to measure newly-added nodes.
+        // Without this, fitView fires before internal node dimensions are
+        // available (e.g. when a diagram is generated from a model on first
+        // load) and the viewport ends up empty.
+        // Use both rAF + a short timeout as a safety net.
+        let cancelled = false;
+        const apply = () => {
+            if (cancelled || hasAppliedInitialViewportRef.current) return;
+            reactFlowInstanceRef.current?.fitView({ padding: 0.2 });
+            hasAppliedInitialViewportRef.current = true;
+        };
+        const raf = requestAnimationFrame(apply);
+        const timer = setTimeout(apply, 200);
+        return () => {
+            cancelled = true;
+            cancelAnimationFrame(raf);
+            clearTimeout(timer);
+        };
     }, [nodes, viewport, isReactFlowReady, reactFlowInstanceRef]);
 
     const handleViewportChange = useCallback(

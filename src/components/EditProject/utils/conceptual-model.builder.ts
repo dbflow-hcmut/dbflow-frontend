@@ -1,4 +1,5 @@
 import type { StoredDiagramEdge, StoredDiagramNode } from "./conceptual-diagram.builder";
+import { computeELKLayout, type LayoutItem, type LayoutEdge } from "./conceptual-elk-layout";
 
 const generateCid = () => {
     if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -297,6 +298,10 @@ const buildRelationshipEnds = (
             edge.relationshipId === relationshipId
     );
 
+    // Track how many times each entity appears so we can generate
+    // distinct role names for recursive (self-referencing) ends.
+    const entityEndCounts = new Map<string, number>();
+
     relevantEdges.forEach((edge) => {
         const fromNode = storedNodes.get(edge.from.nodeId);
         const toNode = storedNodes.get(edge.to.nodeId);
@@ -317,8 +322,14 @@ const buildRelationshipEnds = (
 
         const doubleLine = entityIsFrom ? endStyle.from?.doubleLine : endStyle.to?.doubleLine;
 
+        // Generate role hint for recursive relationships
+        const count = entityEndCounts.get(entityId) ?? 0;
+        entityEndCounts.set(entityId, count + 1);
+        const role = count > 0 ? `role_${count}` : undefined;
+
         ends.push({
             entityId,
+            role,
             cardinality,
             optional: doubleLine ? false : true,
         });
@@ -528,3 +539,569 @@ export const buildConceptualModel = ({
     };
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Reverse builder: ConceptualModelPayload → StoredDiagramNode[] + StoredDiagramEdge[]
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Layout constants ─────────────────────────────────────────────────────────
+
+const LAYOUT = {
+    // Node sizes
+    entitySize:       { w: 120, h: 50 },
+    relationshipSize: { w: 110, h: 50 },
+    attributeSize:    { w: 90,  h: 36 },
+    constraintSize:   { w: 32,  h: 32 },
+
+    // Attribute fan layout (fallback when ELK doesn't place attrs)
+    attrRadius:        120,   // from owner center
+    attrMinGap:        50,    // minimum gap between attribute nodes
+    compRadius:        80,    // composite child radius from parent attr
+    compMinGap:        45,
+
+    // Attribute base angle (fallback fan direction)
+    attrBaseAngle:     -Math.PI / 2,   // top-center
+
+    // ISA / Category
+    isaGapY:           180,
+    categoryGapY:      180,
+} as const;
+
+type PositionMap = Map<string, { x: number; y: number }>;
+
+const buildPositionLookup = (nodes?: StoredDiagramNode[]): PositionMap => {
+    const lookup: PositionMap = new Map();
+    if (!nodes) return lookup;
+    for (const n of nodes) {
+        if (!n.position) continue;
+        lookup.set(n.id, n.position);
+        if (n.entityId && n.entityId !== n.id) lookup.set(n.entityId, n.position);
+        if (n.attributeId && n.attributeId !== n.id) lookup.set(n.attributeId, n.position);
+        if (n.relationshipId && n.relationshipId !== n.id) lookup.set(n.relationshipId, n.position);
+    }
+    return lookup;
+};
+
+/**
+ * Spread `count` items evenly around an arc.
+ * Returns the angle for item at index `i`.
+ */
+const arcAngle = (i: number, count: number, baseAngle: number, arcSpan: number): number => {
+    if (count <= 1) return baseAngle;
+    return baseAngle - arcSpan / 2 + (i / (count - 1)) * arcSpan;
+};
+
+/**
+ * Compute a good arc span so that nodes of `nodeWidth` at `radius`
+ * don't overlap each other.  The arc is at least `minSpan` and at most
+ * `maxSpan` radians.
+ */
+const autoArcSpan = (
+    count: number,
+    radius: number,
+    nodeWidth: number,
+    minGap: number,
+    minSpan = Math.PI * 0.3,
+    maxSpan = Math.PI * 1.6,
+): number => {
+    if (count <= 1) return 0;
+    // chord length needed between adjacent items
+    const chordNeeded = nodeWidth + minGap;
+    // angle between adjacent = 2 * arcsin(chord / (2 * radius))
+    const angleStep = 2 * Math.asin(Math.min(1, chordNeeded / (2 * radius)));
+    const needed = angleStep * (count - 1);
+    return Math.max(minSpan, Math.min(maxSpan, needed));
+};
+
+const polarPos = (
+    cx: number, cy: number,
+    angle: number, radius: number,
+): { x: number; y: number } => ({
+    x: Math.round(cx + Math.cos(angle) * radius),
+    y: Math.round(cy + Math.sin(angle) * radius),
+});
+
+const toAttrRender = (
+    attr: ModelAttribute,
+): StoredDiagramNode["attributeRender"] | undefined => {
+    const r: NonNullable<StoredDiagramNode["attributeRender"]> = {};
+    if (attr.kind === "multi_valued") r.doubleEllipse = true;
+    if (attr.kind === "derived" || attr.derivation) r.dashed = true;
+    if (attr.isKey) {
+        r.underline = true;
+        r.underlineStyle = "solid";
+    }
+    return Object.keys(r).length ? r : undefined;
+};
+
+// ── Public API ───────────────────────────────────────────────────────────────
+
+export type BuildDiagramFromModelParams = {
+    model: ConceptualModelPayload;
+    existingNodes?: StoredDiagramNode[];
+    existingEdges?: StoredDiagramEdge[];
+    /** When true, nodes present in the existing diagram but absent from the
+     *  model (e.g. floating attributes not yet connected) are kept. */
+    preserveUnmodeledNodes?: boolean;
+};
+
+/**
+ * Converts a `ConceptualModelPayload` back into stored diagram nodes & edges.
+ *
+ * When `existingNodes` is provided the function reuses positions of nodes
+ * whose IDs match, so incremental AI edits preserve the user's layout.
+ *
+ * Uses **ELK (Eclipse Layout Kernel)** — a production-grade graph layout
+ * library — to compute optimal positions for skeleton nodes (entities,
+ * relationships, ISA/union circles).  Attributes are placed compactly
+ * around their parent using a fan-arc layout AFTER ELK positions the
+ * skeleton, keeping the diagram tight and readable.
+ *
+ * The function is **async** because ELK's layout engine returns a Promise.
+ */
+export const buildDiagramFromModel = async ({
+    model,
+    existingNodes,
+    existingEdges,
+    preserveUnmodeledNodes = false,
+}: BuildDiagramFromModelParams): Promise<{
+    nodes: StoredDiagramNode[];
+    edges: StoredDiagramEdge[];
+}> => {
+    const nodes: StoredDiagramNode[] = [];
+    const edges: StoredDiagramEdge[] = [];
+    const lookup = buildPositionLookup(existingNodes);
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  PHASE 1 — Collect SKELETON layout items & edges for ELK
+    //  (entities, relationships, ISA/union circles — NOT attributes)
+    // ══════════════════════════════════════════════════════════════════════
+
+    const layoutItems: LayoutItem[] = [];
+    const layoutEdges: LayoutEdge[] = [];
+
+    // Track which node IDs need new positions (not in lookup)
+    const needsLayout = new Set<string>();
+
+    // ── 1a. Entity items ────────────────────────────────────────────────
+
+    for (const entity of model.entities ?? []) {
+        const fixed = lookup.get(entity.id);
+        layoutItems.push({
+            id: entity.id,
+            width: LAYOUT.entitySize.w,
+            height: LAYOUT.entitySize.h,
+            fixed,
+        });
+        if (!fixed) needsLayout.add(entity.id);
+    }
+
+    // ── 1b. Relationship items ──────────────────────────────────────────
+
+    for (const rel of model.relationships ?? []) {
+        const fixed = lookup.get(rel.id);
+        layoutItems.push({
+            id: rel.id,
+            width: LAYOUT.relationshipSize.w,
+            height: LAYOUT.relationshipSize.h,
+            fixed,
+        });
+        if (!fixed) needsLayout.add(rel.id);
+
+        // Edges: relationship → connected entities
+        for (const end of rel.ends) {
+            layoutEdges.push({
+                id: `le_${rel.id}_${end.entityId}`,
+                sourceId: rel.id,
+                targetId: end.entityId,
+            });
+        }
+    }
+
+    // ── 1c. ISA circle items ────────────────────────────────────────────
+
+    for (const gen of model.generalizations ?? []) {
+        const fixed = lookup.get(gen.id);
+        layoutItems.push({
+            id: gen.id,
+            width: LAYOUT.constraintSize.w,
+            height: LAYOUT.constraintSize.h,
+            fixed,
+        });
+        if (!fixed) needsLayout.add(gen.id);
+
+        // parent → ISA circle
+        layoutEdges.push({
+            id: `le_isa_p_${gen.id}`,
+            sourceId: gen.parentEntityId,
+            targetId: gen.id,
+        });
+        // ISA circle → children
+        for (const childId of gen.childEntityIds) {
+            layoutEdges.push({
+                id: `le_isa_c_${gen.id}_${childId}`,
+                sourceId: gen.id,
+                targetId: childId,
+            });
+        }
+    }
+
+    // ── 1d. Category (union) circle items ───────────────────────────────
+
+    for (const cat of model.categories ?? []) {
+        const fixed = lookup.get(cat.id);
+        layoutItems.push({
+            id: cat.id,
+            width: LAYOUT.constraintSize.w,
+            height: LAYOUT.constraintSize.h,
+            fixed,
+        });
+        if (!fixed) needsLayout.add(cat.id);
+
+        // category entity → union circle
+        layoutEdges.push({
+            id: `le_catl_${cat.id}`,
+            sourceId: cat.categoryEntityId,
+            targetId: cat.id,
+        });
+        // union circle → superclass entities
+        for (const sid of cat.superclassEntityIds) {
+            layoutEdges.push({
+                id: `le_catm_${cat.id}_${sid}`,
+                sourceId: cat.id,
+                targetId: sid,
+            });
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  PHASE 2 — Run ELK layout on skeleton only
+    // ══════════════════════════════════════════════════════════════════════
+
+    let elkPositions: Map<string, { x: number; y: number }> = new Map();
+
+    if (needsLayout.size > 0 && layoutItems.length > 0) {
+        elkPositions = await computeELKLayout(layoutItems, layoutEdges);
+    }
+
+    // Helper to get the best position for a skeleton node:
+    // 1. User-placed (lookup) takes priority
+    // 2. ELK-computed position
+    // 3. Fallback
+    const getPos = (id: string, fallback: { x: number; y: number } = { x: 0, y: 0 }) =>
+        lookup.get(id) ?? elkPositions.get(id) ?? fallback;
+
+    // Build a map of skeleton positions for smart attribute angle selection
+    const skeletonPositions: Map<string, { x: number; y: number }> = new Map();
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  PHASE 3 — Emit stored nodes & edges; fan-arc attributes around parents
+    // ══════════════════════════════════════════════════════════════════════
+
+    const entityPos: PositionMap = new Map();
+
+    // ── 3a. Entities ────────────────────────────────────────────────────
+
+    for (const entity of model.entities ?? []) {
+        const pos = getPos(entity.id);
+        entityPos.set(entity.id, pos);
+        skeletonPositions.set(entity.id, pos);
+
+        nodes.push({
+            id: entity.id,
+            type: "entity",
+            position: pos,
+            size: LAYOUT.entitySize,
+            name: entity.name,
+            entityId: entity.id,
+            entityRender: entity.kind === "weak" ? { doubleStroke: true } : undefined,
+        });
+    }
+
+    // ── 3b. Relationships ───────────────────────────────────────────────
+
+    for (const rel of model.relationships ?? []) {
+        const pos = getPos(rel.id);
+        skeletonPositions.set(rel.id, pos);
+
+        nodes.push({
+            id: rel.id,
+            type: "relationship",
+            position: pos,
+            size: LAYOUT.relationshipSize,
+            name: rel.name,
+            relationshipId: rel.id,
+            relationshipRender: rel.type === "identifying" ? { doubleStroke: true } : undefined,
+        });
+
+        // Participation edges
+        const isRecursive =
+            rel.ends.length >= 2 &&
+            rel.ends[0].entityId === rel.ends[1].entityId;
+
+        const recursiveEntityPorts: (string | undefined)[] = isRecursive
+            ? ['left', 'right']
+            : [];
+
+        rel.ends.forEach((end, endIdx) => {
+            const isTotalParticipation = end.optional === false;
+            edges.push({
+                id: `e_${rel.id}_${end.entityId}_${endIdx}`,
+                type: "participation",
+                from: { nodeId: rel.id },
+                to: {
+                    nodeId: end.entityId,
+                    ...(recursiveEntityPorts[endIdx]
+                        ? { portId: recursiveEntityPorts[endIdx] }
+                        : {}),
+                },
+                relationshipId: rel.id,
+                labels: end.cardinality ? { nearTo: end.cardinality } : undefined,
+                endStyle: isTotalParticipation ? { to: { doubleLine: true } } : undefined,
+            });
+        });
+    }
+
+    // ── 3c. Attribute fan-arc placement (AFTER skeleton is positioned) ──
+    //
+    // For each entity / relationship, compute a smart base angle that
+    // points AWAY from neighbouring skeleton nodes, then fan attributes
+    // around that angle.  This keeps attributes compact and prevents them
+    // from overlapping edges to other skeleton nodes.
+
+    // Build neighbour map: id → set of connected skeleton ids
+    const neighborMap = new Map<string, Set<string>>();
+    for (const edge of layoutEdges) {
+        if (!neighborMap.has(edge.sourceId)) neighborMap.set(edge.sourceId, new Set());
+        if (!neighborMap.has(edge.targetId)) neighborMap.set(edge.targetId, new Set());
+        neighborMap.get(edge.sourceId)!.add(edge.targetId);
+        neighborMap.get(edge.targetId)!.add(edge.sourceId);
+    }
+
+    const emitAttrsForOwner = (
+        attrs: ModelAttribute[] | undefined,
+        ownerPos: { x: number; y: number },
+        ownerId: string,
+        defaultAngle: number,
+    ) => {
+        if (!attrs?.length) return;
+
+        // Compute smart base angle — point AWAY from skeleton neighbours
+        const neighbours = neighborMap.get(ownerId);
+        let baseAngle = defaultAngle;
+        if (neighbours && neighbours.size > 0) {
+            let sumDx = 0;
+            let sumDy = 0;
+            for (const nid of neighbours) {
+                const nPos = skeletonPositions.get(nid);
+                if (!nPos) continue;
+                const dx = nPos.x - ownerPos.x;
+                const dy = nPos.y - ownerPos.y;
+                const d = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
+                sumDx += dx / d;
+                sumDy += dy / d;
+            }
+            if (Math.abs(sumDx) > 0.001 || Math.abs(sumDy) > 0.001) {
+                // Point AWAY from average neighbour direction
+                baseAngle = Math.atan2(-sumDy, -sumDx);
+            }
+        }
+
+        emitAttributeNodes(attrs, ownerPos, ownerId, lookup, nodes, edges, baseAngle);
+    };
+
+    // Entity attributes
+    for (const entity of model.entities ?? []) {
+        const pos = entityPos.get(entity.id)!;
+        emitAttrsForOwner(entity.attributes, pos, entity.id, LAYOUT.attrBaseAngle);
+    }
+
+    // Relationship attributes
+    for (const rel of model.relationships ?? []) {
+        const pos = skeletonPositions.get(rel.id)!;
+        emitAttrsForOwner(rel.attributes, pos, rel.id, Math.PI / 2);
+    }
+
+    // ── 3d. Generalizations (ISA) ───────────────────────────────────────
+
+    for (const gen of model.generalizations ?? []) {
+        const pPos = entityPos.get(gen.parentEntityId);
+        if (!pPos) continue;
+
+        const cPos = getPos(gen.id, {
+            x: pPos.x + LAYOUT.entitySize.w / 2 - LAYOUT.constraintSize.w / 2,
+            y: pPos.y + LAYOUT.entitySize.h + LAYOUT.isaGapY,
+        });
+
+        nodes.push({
+            id: gen.id,
+            type: "isaCircle",
+            position: cPos,
+            size: LAYOUT.constraintSize,
+            isaCircle: {
+                symbol: gen.constraints.disjointness === "overlap" ? "o" : "d",
+            },
+        });
+
+        const isTotal = gen.constraints.completeness === "total";
+        edges.push({
+            id: `e_isa_p_${gen.id}`,
+            type: "isaParent",
+            from: { nodeId: gen.parentEntityId },
+            to: { nodeId: gen.id },
+            generalizationId: gen.id,
+            endStyle: isTotal ? { from: { doubleLine: true } } : undefined,
+        });
+
+        gen.childEntityIds.forEach((childId) => {
+            edges.push({
+                id: `e_isa_c_${gen.id}_${childId}`,
+                type: "isaChild",
+                from: { nodeId: gen.id },
+                to: { nodeId: childId },
+                generalizationId: gen.id,
+            });
+        });
+    }
+
+    // ── 3e. Categories (Union) ──────────────────────────────────────────
+
+    for (const cat of model.categories ?? []) {
+        const cePos = entityPos.get(cat.categoryEntityId);
+        if (!cePos) continue;
+
+        const cPos = getPos(cat.id, {
+            x: cePos.x + LAYOUT.entitySize.w / 2 - LAYOUT.constraintSize.w / 2,
+            y: cePos.y - LAYOUT.categoryGapY,
+        });
+
+        nodes.push({
+            id: cat.id,
+            type: "unionCircle",
+            position: cPos,
+            size: LAYOUT.constraintSize,
+            unionCircle: { symbol: "U", categoryId: cat.id },
+        });
+
+        const isTotal = cat.completeness === "total";
+        edges.push({
+            id: `e_catl_${cat.id}`,
+            type: "categoryLink",
+            from: { nodeId: cat.categoryEntityId },
+            to: { nodeId: cat.id },
+            categoryId: cat.id,
+            endStyle: isTotal ? { from: { doubleLine: true } } : undefined,
+        });
+
+        cat.superclassEntityIds.forEach((sid) => {
+            edges.push({
+                id: `e_catm_${cat.id}_${sid}`,
+                type: "categoryMember",
+                from: { nodeId: cat.id },
+                to: { nodeId: sid },
+                categoryId: cat.id,
+            });
+        });
+    }
+
+    // ── 3f. Preserve unmodeled diagram nodes (e.g. floating attributes) ─
+
+    if (preserveUnmodeledNodes && existingNodes) {
+        const modelNodeIds = new Set(nodes.map((n) => n.id));
+        const unmodeledNodes = existingNodes.filter((n) => !modelNodeIds.has(n.id));
+        nodes.push(...unmodeledNodes);
+
+        if (existingEdges) {
+            const unmodeledNodeIds = new Set(unmodeledNodes.map((n) => n.id));
+            const modelEdgeIds = new Set(edges.map((e) => e.id));
+            const preservedEdges = existingEdges.filter(
+                (e) =>
+                    !modelEdgeIds.has(e.id) &&
+                    (unmodeledNodeIds.has(e.from.nodeId) || unmodeledNodeIds.has(e.to.nodeId)),
+            );
+            edges.push(...preservedEdges);
+        }
+    }
+
+    return { nodes, edges };
+};
+
+/**
+ * Emit attribute nodes arranged in a compact fan-arc around their owner.
+ *
+ * @param baseAngle  The pre-computed angle pointing AWAY from neighbouring
+ *                   skeleton nodes — attributes will be centred on this
+ *                   direction so they don't overlap edges.
+ */
+const emitAttributeNodes = (
+    attrs: ModelAttribute[],
+    ownerPos: { x: number; y: number },
+    ownerId: string,
+    lookup: PositionMap,
+    nodes: StoredDiagramNode[],
+    edges: StoredDiagramEdge[],
+    baseAngle: number,
+) => {
+    const arcSpan = autoArcSpan(
+        attrs.length,
+        LAYOUT.attrRadius,
+        LAYOUT.attributeSize.w,
+        LAYOUT.attrMinGap,
+    );
+
+    attrs.forEach((attr, i) => {
+        const angle = arcAngle(i, attrs.length, baseAngle, arcSpan);
+        const fanPos = polarPos(ownerPos.x, ownerPos.y, angle, LAYOUT.attrRadius);
+
+        // User-placed position takes priority, then fan layout
+        const pos = lookup.get(attr.id) ?? fanPos;
+
+        nodes.push({
+            id: attr.id,
+            type: "attribute",
+            position: pos,
+            size: LAYOUT.attributeSize,
+            name: attr.name,
+            attributeId: attr.id,
+            attributeRender: toAttrRender(attr),
+        });
+
+        edges.push({
+            id: `e_${attr.id}_${ownerId}`,
+            type: "attrOf",
+            from: { nodeId: attr.id },
+            to: { nodeId: ownerId },
+        });
+
+        // Composite children — smaller fan around the attribute node
+        if (attr.components?.length) {
+            const compArc = autoArcSpan(
+                attr.components.length,
+                LAYOUT.compRadius,
+                LAYOUT.attributeSize.w,
+                LAYOUT.compMinGap,
+            );
+
+            attr.components.forEach((comp, ci) => {
+                const cAngle = arcAngle(ci, attr.components!.length, angle, compArc);
+                const cFanPos = polarPos(pos.x, pos.y, cAngle, LAYOUT.compRadius);
+                const cPos = lookup.get(comp.id) ?? cFanPos;
+
+                nodes.push({
+                    id: comp.id,
+                    type: "attribute",
+                    position: cPos,
+                    size: LAYOUT.attributeSize,
+                    name: comp.name,
+                    attributeId: comp.id,
+                });
+
+                edges.push({
+                    id: `e_comp_${attr.id}_${comp.id}`,
+                    type: "componentOf",
+                    from: { nodeId: attr.id },
+                    to: { nodeId: comp.id },
+                });
+            });
+        }
+    });
+};

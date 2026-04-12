@@ -266,7 +266,7 @@ export const usePhysicalCollaboration = ({
             }
         };
 
-        provider.on("sync", (isSynced: boolean) => {
+        provider.on("synced", ({ state: isSynced }: { state: boolean }) => {
             if (isSynced) {
                 loadDiagramFromYjs();
                 loadModelFromYjs();

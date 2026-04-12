@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { Node, Edge } from "reactflow";
 import * as Y from "yjs";
@@ -15,8 +15,13 @@ import {
     mapReactNodesToStoredNodes,
     mapReactEdgesToStoredEdges,
 } from "../utils/conceptual-diagram.builder";
-import { buildConceptualModel } from "../utils/conceptual-model.builder";
+import { buildConceptualModel, buildDiagramFromModel, createEmptyConceptualModel } from "../utils/conceptual-model.builder";
 import type { ConceptualModelPayload } from "../utils/conceptual-model.builder";
+
+export type MutateModelFn = (
+    mutator: (model: ConceptualModelPayload) => ConceptualModelPayload,
+    opts?: { selectedNodeId?: string; positionHint?: { x: number; y: number } },
+) => void | Promise<void>;
 
 type UseConceptualCollaborationParams = {
     enabled: boolean;
@@ -56,6 +61,18 @@ export const useConceptualCollaboration = ({
     const modelDataRef = useRef<ConceptualModelPayload | null>(null);
     const [awareness, setAwareness] = useState<CollaborationAwareness | null>(null);
     const currentSchemaIdRef = useRef<string | null>(null);
+    /** Becomes `true` only after the initial Yjs sync handler has finished
+     *  AND at least one React render cycle has completed with the loaded
+     *  diagram.  Only then should external model changes regenerate the
+     *  diagram – otherwise we'd clobber saved positions with auto-layout. */
+    const initialSyncDoneRef = useRef(false);
+
+    // Keep live refs to nodes/edges so closures inside useEffects always
+    // read the latest list (needed for position-preserving model→diagram).
+    const nodesRef = useRef(nodes);
+    nodesRef.current = nodes;
+    const edgesRef = useRef(edges);
+    edgesRef.current = edges;
 
     useEffect(() => {
         if (!enabled) {
@@ -64,6 +81,7 @@ export const useConceptualCollaboration = ({
             lastSyncedModelStringRef.current = null;
             lastAppliedModelStringRef.current = null;
             hasLoadedInitialDataRef.current = false;
+            initialSyncDoneRef.current = false;
             currentSchemaIdRef.current = null;
             return;
         }
@@ -73,6 +91,7 @@ export const useConceptualCollaboration = ({
         lastSyncedModelStringRef.current = null;
         lastAppliedModelStringRef.current = null;
         hasLoadedInitialDataRef.current = false;
+        initialSyncDoneRef.current = false;
         currentSchemaIdRef.current = schema?.id ?? null;
     }, [enabled, schema?.id]);
 
@@ -183,10 +202,11 @@ export const useConceptualCollaboration = ({
             }
         };
 
-        const loadDiagramFromYjs = () => {
+        /** Try to load diagram from Yjs. Returns `true` if data existed and was applied. */
+        const loadDiagramFromYjs = (): boolean => {
             const diagramDataString = diagramMap.get('data');
             if (!diagramDataString || typeof diagramDataString !== 'string') {
-                return;
+                return false;
             }
 
             try {
@@ -200,10 +220,74 @@ export const useConceptualCollaboration = ({
 
                 if (parsedData.diagram) {
                     applyDiagramFromYjs(parsedData.diagram, diagramDataString);
+                    return true;
                 }
             } catch (error) {
                 console.error('Error parsing diagram data from Yjs:', error);
             }
+            return false;
+        };
+
+        // ── Generate diagram from model (model-as-truth) ──────────────────
+        // Builds stored nodes/edges from the model, writes the diagram to
+        // the Yjs diagram map, then reads it back via `loadDiagramFromYjs`
+        // — the exact same code-path used when a saved diagram already
+        // exists.  This guarantees the data goes through the same
+        // JSON.stringify → Yjs → JSON.parse → applyDiagramFromYjs pipeline
+        // that is proven to render correctly.
+        const applyModelToDiagramInternal = async (
+            modelPayload: ConceptualModelPayload,
+            rawModelString?: string | null,
+        ) => {
+            if (currentSchemaIdRef.current !== schema?.id) return;
+
+            const currentNodes = nodesRef.current;
+            const currentEdges = edgesRef.current;
+            const existingStoredNodes =
+                currentNodes.length > 0
+                    ? mapReactNodesToStoredNodes(currentNodes)
+                    : undefined;
+            const existingStoredEdges =
+                currentEdges.length > 0
+                    ? mapReactEdgesToStoredEdges(currentEdges, currentNodes)
+                    : undefined;
+
+            const { nodes: storedNodes, edges: storedEdges } = await buildDiagramFromModel({
+                model: modelPayload,
+                existingNodes: existingStoredNodes,
+                existingEdges: existingStoredEdges,
+                preserveUnmodeledNodes: true,
+            });
+
+            console.log(
+                '[Conceptual Collaboration] Generated diagram from model —',
+                storedNodes.length, 'nodes,', storedEdges.length, 'edges',
+            );
+
+            // Prevent handleModelChange from re-triggering for the same model
+            const modelStr = rawModelString ?? JSON.stringify(modelPayload);
+            lastAppliedModelStringRef.current = modelStr;
+            lastSyncedModelStringRef.current = modelStr;
+            modelDataRef.current = modelPayload;
+
+            // Write diagram to Yjs so it persists to the backend AND so
+            // that `loadDiagramFromYjs` can read it back immediately.
+            const diagStr = JSON.stringify({
+                diagram: { nodes: storedNodes, edges: storedEdges },
+            });
+            lastAppliedDiagramStringRef.current = diagStr;
+            lastSyncedDiagramStringRef.current = diagStr;
+
+            if (ydocRef.current) {
+                ydocRef.current.transact(() => {
+                    ydocRef.current!.getMap('diagram').set('data', diagStr);
+                });
+            }
+
+            // Read back from Yjs — identical code-path as "second load".
+            // The data goes through JSON.parse inside loadDiagramFromYjs,
+            // which is what makes it render correctly.
+            loadDiagramFromYjs();
         };
 
         const loadModelFromYjs = () => {
@@ -250,6 +334,7 @@ export const useConceptualCollaboration = ({
 
         const handleModelChange = () => {
             const modelDataString = modelMap.get('data');
+            // Skip our own writes
             if (modelDataString === lastAppliedModelStringRef.current) {
                 return;
             }
@@ -258,31 +343,67 @@ export const useConceptualCollaboration = ({
             }
 
             try {
-                const parsedModel = JSON.parse(modelDataString);
-                modelDataRef.current = parsedModel;
+                const newModel = JSON.parse(modelDataString) as ConceptualModelPayload;
+                modelDataRef.current = newModel;
                 lastSyncedModelStringRef.current = modelDataString;
+
+                // Only regenerate diagram for EXTERNAL model changes that
+                // arrive AFTER the initial sync is fully complete (including
+                // at least one React render cycle).  During initial sync the
+                // saved diagram (with user's positions) takes priority.
+                if (initialSyncDoneRef.current) {
+                    console.log('[Conceptual Collaboration] External model change — regenerating diagram from model (preserving positions)');
+                    void applyModelToDiagramInternal(newModel, modelDataString);
+                } else {
+                    console.log('[Conceptual Collaboration] Model change during initial sync — storing model ref only');
+                }
             } catch (error) {
                 console.error('Error parsing model data from Yjs:', error);
             }
         };
 
-        provider.on('sync', (isSynced: boolean) => {
+        // ── Initial sync: prefer diagram, fall back to model ─────────────
+        provider.on('synced', ({ state: isSynced }: { state: boolean }) => {
             if (isSynced) {
-                loadDiagramFromYjs();
+                // 1. Always load model first (source of truth for semantics)
                 loadModelFromYjs();
+
+                // 2. Try loading diagram (has layout / positions)
+                const diagramLoaded = loadDiagramFromYjs();
+
+                // 3. If no diagram exists but we have a model → generate
+                //    diagram, write it to Yjs, then load it back fresh.
+                if (!diagramLoaded && modelDataRef.current) {
+                    console.log('[Conceptual Collaboration] No diagram found — generating from model');
+                    void applyModelToDiagramInternal(modelDataRef.current, lastSyncedModelStringRef.current);
+                }
+
+                // Mark initial sync as done AFTER a React render cycle so
+                // that nodesRef / edgesRef have the loaded diagram data.
+                // From this point on, external model changes will regenerate
+                // the diagram (with position preservation).
+                setTimeout(() => {
+                    initialSyncDoneRef.current = true;
+                    console.log('[Conceptual Collaboration] Initial sync complete — model changes will now regenerate diagram');
+                }, 100);
             }
         });
 
         diagramMap.observe(handleDiagramChange);
         modelMap.observe(handleModelChange);
 
-        const initialDiagramData = diagramMap.get('data');
-        if (initialDiagramData && typeof initialDiagramData === 'string') {
-            loadDiagramFromYjs();
-        }
+        // ── Eagerly apply data already in the doc ────────────────────────
         const initialModelData = modelMap.get('data');
         if (initialModelData && typeof initialModelData === 'string') {
             loadModelFromYjs();
+        }
+
+        const initialDiagramData = diagramMap.get('data');
+        if (initialDiagramData && typeof initialDiagramData === 'string') {
+            loadDiagramFromYjs();
+        } else if (modelDataRef.current) {
+            // Model exists but no diagram yet — generate diagram from model
+            void applyModelToDiagramInternal(modelDataRef.current, lastSyncedModelStringRef.current);
         }
 
         return () => {
@@ -387,6 +508,92 @@ export const useConceptualCollaboration = ({
         }
     }, [enabled, nodes, edges, schema?.id, schema?.name, diagramName]);
 
-    return { awareness };
+    // ── Apply model payload (full replace: Model → Diagram) ─────────────
+    /**
+     * Replace the current model entirely and regenerate the diagram.
+     * Preserves positions of nodes whose IDs match existing nodes.
+     * Use this to apply AI-generated model changes onto the canvas.
+     */
+    const applyModelPayload = useCallback(
+        async (modelPayload: ConceptualModelPayload) => {
+            const existingStoredNodes = mapReactNodesToStoredNodes(nodesRef.current);
+            const existingStoredEdges = mapReactEdgesToStoredEdges(edgesRef.current, nodesRef.current);
+            const { nodes: storedNodes, edges: storedEdges } = await buildDiagramFromModel({
+                model: modelPayload,
+                existingNodes: existingStoredNodes,
+                existingEdges: existingStoredEdges,
+                preserveUnmodeledNodes: true,
+            });
+
+            const reactNodes = mapStoredNodesToReactNodes(storedNodes);
+            const reactEdges = mapStoredEdgesToReactEdges(storedEdges, reactNodes);
+
+            hasLoadedInitialDataRef.current = true;
+            setNodes(reactNodes);
+            setEdges(reactEdges);
+            modelDataRef.current = modelPayload;
+        },
+        [setNodes, setEdges],
+    );
+
+    // ── Incremental model mutation (model-as-truth for structural edits) ──
+    /**
+     * Apply an incremental mutation to the current model, then regenerate
+     * the diagram.  Floating (unmodeled) nodes are preserved.
+     *
+     * `opts.selectedNodeId` — auto-select a specific node after update.
+     * `opts.positionHint`   — place that node at a custom position (e.g.
+     *                         viewport center when adding from the sidebar).
+     */
+    const mutateModel: MutateModelFn = useCallback(
+        async (mutator, opts) => {
+            const current =
+                modelDataRef.current ??
+                createEmptyConceptualModel(schema?.id ?? undefined, schema?.name ?? undefined);
+            const next = mutator(current);
+
+            const existingStoredNodes = mapReactNodesToStoredNodes(nodesRef.current);
+            const existingStoredEdges = mapReactEdgesToStoredEdges(edgesRef.current, nodesRef.current);
+
+            const { nodes: storedNodes, edges: storedEdges } = await buildDiagramFromModel({
+                model: next,
+                existingNodes: existingStoredNodes,
+                existingEdges: existingStoredEdges,
+                preserveUnmodeledNodes: true,
+            });
+
+            const reactNodes = mapStoredNodesToReactNodes(storedNodes);
+            const reactEdges = mapStoredEdgesToReactEdges(storedEdges, reactNodes);
+
+            // Place new node at the requested position
+            if (opts?.selectedNodeId && opts?.positionHint) {
+                const target = reactNodes.find((n) => n.id === opts.selectedNodeId);
+                if (target) target.position = opts.positionHint;
+            }
+
+            // Select the target node
+            if (opts?.selectedNodeId) {
+                reactNodes.forEach((n) => {
+                    n.selected = n.id === opts.selectedNodeId;
+                });
+            }
+
+            hasLoadedInitialDataRef.current = true;
+            setNodes(reactNodes);
+            setEdges(reactEdges);
+            modelDataRef.current = next;
+        },
+        [setNodes, setEdges, schema?.id, schema?.name],
+    );
+
+    return {
+        awareness,
+        /** Replace entire model → regenerates diagram (AI / import). */
+        applyModelPayload,
+        /** Incremental model mutation → regenerates diagram (sidebar add). */
+        mutateModel,
+        /** Current model (derived from diagram or last applied). */
+        modelData: modelDataRef.current,
+    };
 };
 

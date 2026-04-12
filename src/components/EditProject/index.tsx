@@ -574,7 +574,12 @@ const EditProject = (props: IPropsEditProject) => {
         reactFlowInstanceRef,
     });
 
-    const { awareness: conceptualAwareness } = useConceptualCollaboration({
+    const {
+        awareness: conceptualAwareness,
+        applyModelPayload,
+        mutateModel: conceptualMutateModel,
+        modelData: conceptualModelData,
+    } = useConceptualCollaboration({
         enabled: Boolean(isConceptualSchema && hasPermission && isValidSchema === true && !!token),
         projectId: projectData?.id,
         schema: selectedSchema,
@@ -614,6 +619,20 @@ const EditProject = (props: IPropsEditProject) => {
     });
 
     const awareness = isConceptualSchema ? conceptualAwareness : isLogicalSchema ? logicalAwareness : isPhysicalSchema ? physicalAwareness : null;
+
+    // Override entity/relationship creators with model-first versions when
+    // operating on a conceptual schema (model-as-truth architecture).
+    const modelAwareCreators = useMemo(
+        () =>
+            isConceptualSchema && conceptualMutateModel
+                ? createNodeCreators(setNodes, { getViewportCenter, mutateModel: conceptualMutateModel })
+                : null,
+        [isConceptualSchema, conceptualMutateModel, setNodes, getViewportCenter],
+    );
+    const effectiveAddEntity = modelAwareCreators?.addEntity ?? addEntity;
+    const effectiveAddDoubleEntity = modelAwareCreators?.addDoubleEntity ?? addDoubleEntity;
+    const effectiveAddRelationship = modelAwareCreators?.addRelationship ?? addRelationship;
+    const effectiveAddDoubleRelationship = modelAwareCreators?.addDoubleRelationship ?? addDoubleRelationship;
 
     const projectAwareness = useProjectAwareness({
         enabled: Boolean(projectData?.id && sessionId && hasPermission && isValidSchema === true && !!token),
@@ -898,13 +917,13 @@ const EditProject = (props: IPropsEditProject) => {
                         isOpen={isSidebarModalOpen}
                         canEdit={canEdit}
                         onAddPage={() => setIsAddPageOpen(true)}
-                        onAddEntity={addEntity}
-                        onAddDoubleEntity={addDoubleEntity}
+                        onAddEntity={effectiveAddEntity}
+                        onAddDoubleEntity={effectiveAddDoubleEntity}
                         onAddAttribute={addAttribute}
                         onAddMultivaluedAttribute={addMultivaluedAttribute}
                         onAddDashedAttribute={addDashedAttribute}
-                        onAddRelationship={addRelationship}
-                        onAddDoubleRelationship={addDoubleRelationship}
+                        onAddRelationship={effectiveAddRelationship}
+                        onAddDoubleRelationship={effectiveAddDoubleRelationship}
                         onAddConstraint={addConstraint}
                         onAddRelationTable={selectedSchema?.type === SchemaType.LOGICAL ? addLogicalTable : addRelationTable}
                         projectSchemasData={schemaList}
