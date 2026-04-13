@@ -5,14 +5,7 @@ import { Node, Edge } from "reactflow";
 import type { AttributeData, NodeData, RelationshipData, EntityData } from "../../index";
 import type { RelationTableData } from "@/components/erds-notations/relation-table";
 import type { LogicalTableData } from "@/components/erds-notations/logical-table";
-
-export type ErdEdgeData = {
-    label?: string;
-    fromMult?: string;
-    toMult?: string;
-    lineStyle?: 'single' | 'double' | 'bracket';
-    bracketDirection?: 'from' | 'to';
-};
+import type { ErdEdgeData } from "../../utils/functions";
 
 type PropertiesPanelProps = {
     isOpen: boolean;
@@ -25,7 +18,8 @@ type PropertiesPanelProps = {
     onClose: () => void;
     onUpdateName: (name: string) => void;
     onUpdateAttributeKey: (checked: boolean) => void;
-    onUpdateRelationshipCardinality: (entityId: string, cardinality: string) => void;
+    onUpdateRelationshipCardinality: (edgeId: string, cardinality: string) => void;
+    onUpdateEdgeLabel: (value: string) => void;
     onUpdateEdgeFromMult: (value: string) => void;
     onUpdateEdgeToMult: (value: string) => void;
     onUpdateEdgeLineStyle: (style: 'single' | 'double' | 'bracket') => void;
@@ -57,6 +51,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     onUpdateName,
     onUpdateAttributeKey,
     onUpdateRelationshipCardinality,
+    onUpdateEdgeLabel,
     onUpdateEdgeFromMult,
     onUpdateEdgeToMult,
     onUpdateEdgeLineStyle,
@@ -70,28 +65,41 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     onReorderLogicalTableAttributes,
 }) => {
     const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-    const connectedEntities = useMemo(() => {
+    const connectedEnds = useMemo(() => {
         if (!selectedNode || selectedNode.type !== 'relationship') return [];
 
-        const relationshipEdges = edges.filter(
-            edge => edge.source === selectedNode.id || edge.target === selectedNode.id
+        const nodeMap = new Map(nodes.map(n => [n.id, n]));
+
+        // Get participation/identifying edges for this relationship
+        const participationEdges = edges.filter(
+            edge =>
+                (edge.data?.storedType === 'participation' || edge.data?.storedType === 'identifying') &&
+                (edge.source === selectedNode.id || edge.target === selectedNode.id)
         );
 
-        const entityIds = new Set<string>();
-        relationshipEdges.forEach(edge => {
-            if (edge.source === selectedNode.id) {
-                entityIds.add(edge.target);
-            } else {
-                entityIds.add(edge.source);
-            }
+        // Track entity appearance count for role labels
+        const entityCount = new Map<string, number>();
+        participationEdges.forEach(edge => {
+            const entityId = edge.source === selectedNode.id ? edge.target : edge.source;
+            entityCount.set(entityId, (entityCount.get(entityId) ?? 0) + 1);
         });
 
-        return nodes
-            .filter(node => node.type === 'entity' && entityIds.has(node.id))
-            .map(node => ({
-                id: node.id,
-                name: (node.data as EntityData).name || node.id,
-            }));
+        const entitySeenIdx = new Map<string, number>();
+        return participationEdges.map(edge => {
+            const entityId = edge.source === selectedNode.id ? edge.target : edge.source;
+            const entityNode = nodeMap.get(entityId);
+            const entityName = entityNode ? ((entityNode.data as EntityData).name || entityId) : entityId;
+            const isRecursive = (entityCount.get(entityId) ?? 0) > 1;
+            const idx = entitySeenIdx.get(entityId) ?? 0;
+            entitySeenIdx.set(entityId, idx + 1);
+
+            return {
+                edgeId: edge.id,
+                entityId,
+                entityName,
+                roleLabel: isRecursive ? `Role ${idx + 1}` : undefined,
+            };
+        });
     }, [selectedNode, nodes, edges]);
     return (
         <div
@@ -127,6 +135,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                         <Checkbox
                                             checked={(selectedNode.data as AttributeData).isKey || false}
                                             onChange={(e) => onUpdateAttributeKey(e.target.checked)}
+                                            disabled={(selectedNode.data as AttributeData).variant === 'dashed'}
                                         >
                                             Is Key
                                         </Checkbox>
@@ -352,19 +361,22 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                             placeholder="Relationship name"
                                         />
                                     </div>
-                                    {connectedEntities.length > 0 && (
+                                    {connectedEnds.length > 0 && (
                                         <div>
                                             <label className="block text-sm font-medium mb-2">Cardinalities</label>
                                             <div className="flex flex-col gap-3">
-                                                {connectedEntities.map((entity) => {
+                                                {connectedEnds.map((end) => {
                                                     const relationshipData = selectedNode.data as RelationshipData;
-                                                    const currentCardinality = relationshipData.cardinalities?.[entity.id] || '';
+                                                    const currentCardinality = relationshipData.cardinalities?.[end.edgeId] || '';
+                                                    const displayName = end.roleLabel
+                                                        ? `${end.entityName} (${end.roleLabel})`
+                                                        : end.entityName;
                                                     return (
-                                                        <div key={entity.id} className="flex items-center gap-2">
-                                                            <span className="text-sm flex-1 truncate">{entity.name}:</span>
+                                                        <div key={end.edgeId} className="flex items-center gap-2">
+                                                            <span className="text-sm flex-1 truncate">{displayName}:</span>
                                                             <Input
                                                                 value={currentCardinality || ''}
-                                                                onChange={(e) => onUpdateRelationshipCardinality(entity.id, e.target.value)}
+                                                                onChange={(e) => onUpdateRelationshipCardinality(end.edgeId, e.target.value)}
                                                                 placeholder="Enter"
                                                                 style={{ width: 80 }}
                                                             />
@@ -439,22 +451,16 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                         />
                                     </div>
                                 )}
-                                <div>
-                                    <label className="block text-sm font-medium mb-2">From Multiplicity</label>
-                                    <Input
-                                        value={selectedEdge.data?.fromMult || ''}
-                                        onChange={(e) => onUpdateEdgeFromMult(e.target.value)}
-                                        placeholder="e.g., 1, N, 0..1"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium mb-2">To Multiplicity</label>
-                                    <Input
-                                        value={selectedEdge.data?.toMult || ''}
-                                        onChange={(e) => onUpdateEdgeToMult(e.target.value)}
-                                        placeholder="e.g., 1, N, 0..1"
-                                    />
-                                </div>
+                                {(selectedEdge.data?.storedType === 'participation' || selectedEdge.data?.storedType === 'identifying') && (
+                                    <div>
+                                        <label className="block text-sm font-medium mb-2">Label</label>
+                                        <Input
+                                            value={selectedEdge.data?.label || ''}
+                                            onChange={(e) => onUpdateEdgeLabel(e.target.value)}
+                                            placeholder="e.g., manages, supervises"
+                                        />
+                                    </div>
+                                )}
                             </div>
                         )
                     ) : (

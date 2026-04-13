@@ -484,16 +484,102 @@ const EditProject = (props: IPropsEditProject) => {
             edgeType = "relation-table-edge";
         }
 
+        // Determine storedType for conceptual ER edges
+        let storedType: string | undefined;
+        let edgeData: Record<string, unknown> = {};
+        if (edgeType === "erd-edge") {
+            const srcType = sourceNode?.type;
+            const tgtType = targetNode?.type;
+            const hasRelationship = srcType === 'relationship' || tgtType === 'relationship';
+            const hasEntity = srcType === 'entity' || tgtType === 'entity';
+            const hasAttribute = srcType === 'attribute' || tgtType === 'attribute';
+            const hasConstraint = srcType === 'constraint' || tgtType === 'constraint';
+
+            if (hasRelationship && hasEntity) {
+                storedType = 'participation';
+            } else if (hasAttribute) {
+                storedType = 'componentOf';
+            } else if (hasConstraint) {
+                const constraintNode = srcType === 'constraint' ? sourceNode : targetNode;
+                const symbol = (constraintNode?.data as { symbol?: string })?.symbol?.toLowerCase();
+                if (symbol === 'u') {
+                    // Category/Union: entity→constraint = categoryLink, constraint→entity = categoryMember
+                    storedType = srcType === 'constraint' ? 'categoryMember' : 'categoryLink';
+                    if (storedType === 'categoryLink') {
+                        edgeData = { lineStyle: 'bracket', bracketDirection: 'to' };
+                    }
+                } else if (hasEntity) {
+                    // ISA: entity→constraint = isaParent, constraint→entity = isaChild
+                    storedType = srcType === 'constraint' ? 'isaChild' : 'isaParent';
+                }
+            }
+        }
+
         const edgeWithId = {
             ...connection,
             id: generateDiagramId(),
             type: edgeType,
             animated: false,
+            ...(storedType || Object.keys(edgeData).length
+                ? { data: { ...edgeData, ...(storedType ? { storedType } : {}) } }
+                : {}),
             // Add arrow marker for logical table edges
             ...(isLogicalTableEdge ? { markerEnd: { type: 'arrowclosed' } } : {}),
         };
         setEdges((eds) => addEdge(edgeWithId, eds));
     }, [setEdges, nodes]);
+
+    const edgeReconnectSuccessful = useRef(true);
+    const reconnectingEdgeRef = useRef<Edge | null>(null);
+
+    const onReconnectStart = useCallback((_: React.MouseEvent, edge: Edge) => {
+        edgeReconnectSuccessful.current = false;
+        reconnectingEdgeRef.current = edge;
+    }, []);
+
+    const onEdgeReconnect = useCallback(
+        (oldEdge: Edge, newConnection: Connection) => {
+            edgeReconnectSuccessful.current = true;
+            reconnectingEdgeRef.current = null;
+            setEdges((eds) =>
+                eds.map((e) => {
+                    if (e.id !== oldEdge.id) return e;
+                    return {
+                        ...e,
+                        source: newConnection.source!,
+                        target: newConnection.target!,
+                        sourceHandle: newConnection.sourceHandle ?? e.sourceHandle,
+                        targetHandle: newConnection.targetHandle ?? e.targetHandle,
+                    };
+                })
+            );
+        },
+        [setEdges]
+    );
+
+    const onReconnectEnd = useCallback((_: MouseEvent | TouchEvent, edge: Edge) => {
+        if (!edgeReconnectSuccessful.current && reconnectingEdgeRef.current) {
+            // Reconnection failed — restore the original edge
+            const saved = reconnectingEdgeRef.current;
+            setEdges((eds) => {
+                const exists = eds.some((e) => e.id === saved.id);
+                if (exists) {
+                    // Edge still exists but may have been modified — restore it
+                    return eds.map((e) => (e.id === saved.id ? saved : e));
+                }
+                // Edge was removed — re-add it
+                return [...eds, saved];
+            });
+        }
+        edgeReconnectSuccessful.current = true;
+        reconnectingEdgeRef.current = null;
+    }, [setEdges]);
+
+    // Only allow reconnect on the selected edge (one handle can have many edges)
+    const displayEdges = useMemo(
+        () => edges.map((e) => ({ ...e, reconnectable: !!e.selected })),
+        [edges]
+    );
 
     const handlePaneClick = useCallback(() => {
         setNodes((existingNodes) => existingNodes.map((node) => ({ ...node, selected: false })));
@@ -961,10 +1047,11 @@ const EditProject = (props: IPropsEditProject) => {
                             updateNodeName(name);
                         }}
                         onUpdateAttributeKey={updateAttributeKey}
-                        onUpdateRelationshipCardinality={(entityId, cardinality) => {
+                        onUpdateRelationshipCardinality={(edgeId, cardinality) => {
                             if (!selectedNode || selectedNode.type !== 'relationship') return;
                             const relationshipId = selectedNode.id;
 
+                            // Update relationship node cardinalities (keyed by edgeId)
                             setNodes((existingNodes) =>
                                 existingNodes.map((n) =>
                                     n.id === relationshipId
@@ -974,7 +1061,7 @@ const EditProject = (props: IPropsEditProject) => {
                                                 ...(n.data as RelationshipData),
                                                 cardinalities: {
                                                     ...(n.data as RelationshipData).cardinalities,
-                                                    [entityId]: cardinality,
+                                                    [edgeId]: cardinality,
                                                 },
                                             },
                                         }
@@ -982,12 +1069,10 @@ const EditProject = (props: IPropsEditProject) => {
                                 )
                             );
 
+                            // Update the specific edge's fromMult
                             setEdges((existingEdges) =>
                                 existingEdges.map((edge) => {
-                                    if (
-                                        (edge.source === relationshipId && edge.target === entityId) ||
-                                        (edge.source === entityId && edge.target === relationshipId)
-                                    ) {
+                                    if (edge.id === edgeId) {
                                         const isRelationshipSource = edge.source === relationshipId;
                                         return {
                                             ...edge,
@@ -1003,8 +1088,19 @@ const EditProject = (props: IPropsEditProject) => {
                                 })
                             );
                         }}
+                        onUpdateEdgeLabel={(value) => {
+                            if (!selectedEdge) return;
+                            setEdges((existingEdges) =>
+                                existingEdges.map((edge) =>
+                                    edge.id === selectedEdge.id
+                                        ? { ...edge, data: { ...edge.data, label: value || undefined } }
+                                        : edge
+                                )
+                            );
+                        }}
                         onUpdateEdgeFromMult={(value) => {
                             if (!selectedEdge) return;
+                            // Update edge data
                             setEdges((existingEdges) =>
                                 existingEdges.map((edge) =>
                                     edge.id === selectedEdge.id
@@ -1012,15 +1108,56 @@ const EditProject = (props: IPropsEditProject) => {
                                         : edge
                                 )
                             );
+                            // Sync back to relationship node's cardinalities (keyed by edgeId)
+                            const relationshipId = selectedEdge.source;
+                            const altRelationshipId = selectedEdge.target;
+                            setNodes((existingNodes) =>
+                                existingNodes.map((n) => {
+                                    if ((n.id === relationshipId || n.id === altRelationshipId) && n.type === 'relationship') {
+                                        return {
+                                            ...n,
+                                            data: {
+                                                ...(n.data as RelationshipData),
+                                                cardinalities: {
+                                                    ...(n.data as RelationshipData).cardinalities,
+                                                    [selectedEdge.id]: value || '',
+                                                },
+                                            },
+                                        };
+                                    }
+                                    return n;
+                                })
+                            );
                         }}
                         onUpdateEdgeToMult={(value) => {
                             if (!selectedEdge) return;
+                            // Update edge data
                             setEdges((existingEdges) =>
                                 existingEdges.map((edge) =>
                                     edge.id === selectedEdge.id
                                         ? { ...edge, data: { ...edge.data, toMult: value || undefined } }
                                         : edge
                                 )
+                            );
+                            // Sync back to relationship node's cardinalities (keyed by edgeId)
+                            const relationshipId = selectedEdge.target;
+                            const altRelationshipId = selectedEdge.source;
+                            setNodes((existingNodes) =>
+                                existingNodes.map((n) => {
+                                    if ((n.id === relationshipId || n.id === altRelationshipId) && n.type === 'relationship') {
+                                        return {
+                                            ...n,
+                                            data: {
+                                                ...(n.data as RelationshipData),
+                                                cardinalities: {
+                                                    ...(n.data as RelationshipData).cardinalities,
+                                                    [selectedEdge.id]: value || '',
+                                                },
+                                            },
+                                        };
+                                    }
+                                    return n;
+                                })
                             );
                         }}
                         onUpdateEdgeLineStyle={(style) => {
@@ -1060,14 +1197,18 @@ const EditProject = (props: IPropsEditProject) => {
                     >
                         <ReactFlow
                             nodes={nodes}
-                            edges={edges}
+                            edges={displayEdges}
                             nodeTypes={nodeTypes}
                             edgeTypes={edgeTypes}
                             connectionLineType={ConnectionLineType.Straight}
                             connectionLineStyle={{ stroke: 'var(--color-gray-700)', strokeWidth: 1 }}
                             onNodesChange={canEdit ? onNodesChange : undefined}
                             onEdgesChange={canEdit ? onEdgesChange : undefined}
+                            edgesUpdatable={false}
                             onConnect={canEdit ? onConnect : undefined}
+                            onReconnectStart={canEdit ? onReconnectStart : undefined}
+                            onReconnect={canEdit ? onEdgeReconnect : undefined}
+                            onReconnectEnd={canEdit ? onReconnectEnd : undefined}
                             onPaneClick={handlePaneClick}
                             connectionMode={ConnectionMode.Loose}
                             isValidConnection={() => {

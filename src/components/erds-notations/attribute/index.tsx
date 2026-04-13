@@ -1,5 +1,5 @@
 import classNames from "classnames";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { NodeResizer, Position, useNodeId, useStore, useReactFlow } from "reactflow";
 import ErdHandle from "../../erd-handle";
 
@@ -19,6 +19,40 @@ const AttributeNode: React.FC<{ data: AttributeData }> = ({ data }) => {
     const editableRef = useRef<HTMLDivElement | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+
+    // ── Auto-resize: grow the node when text overflows (only during editing) ──
+    const autoResize = useCallback(() => {
+        const el = editableRef.current;
+        if (!el || !containerRef.current || !nodeId) return;
+        const text = el.innerText || '';
+        const lines = text.replace(/\n$/, '').split('\n');
+        let maxLineW = 0;
+        for (const line of lines) {
+            let w = 0;
+            for (const ch of line) {
+                if ('ilI1|!.,;:\' '.includes(ch)) w += 4;
+                else if ('mwMW@'.includes(ch)) w += 9;
+                else w += 7;
+            }
+            maxLineW = Math.max(maxLineW, w);
+        }
+        const containerW = containerRef.current.offsetWidth;
+        const containerH = containerRef.current.offsetHeight;
+        const neededW = Math.ceil(maxLineW / 0.65) + 16;
+        const LINE_H = 16;
+        const neededH = lines.length > 1 ? Math.ceil(lines.length * LINE_H / 0.70) + 8 : 0;
+        const finalW = Math.max(neededW, containerW);
+        const finalH = Math.max(neededH, containerH);
+        if (finalW > containerW || finalH > containerH) {
+            setNodes((nds) =>
+                nds.map((n) =>
+                    n.id === nodeId
+                        ? { ...n, style: { ...n.style, width: finalW, height: finalH } }
+                        : n
+                )
+            );
+        }
+    }, [nodeId, setNodes]);
 
     useEffect(() => {
         if (!isEditing) {
@@ -109,8 +143,9 @@ const AttributeNode: React.FC<{ data: AttributeData }> = ({ data }) => {
                     onBlur={(e) => commitName(e.currentTarget.innerText)}
                     onMouseDown={(e) => e.stopPropagation()}
                     onPointerDown={(e) => e.stopPropagation()}
+                    onInput={() => autoResize()}
                     onKeyDown={(e) => {
-                        if (e.key === "Enter") {
+                        if (e.key === "Enter" && e.shiftKey) {
                             e.preventDefault();
                             commitName(e.currentTarget.innerText);
                         } else if (e.key === "Escape") {

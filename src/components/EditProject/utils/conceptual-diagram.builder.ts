@@ -530,8 +530,9 @@ const buildEdgeLabels = (edge: Edge<ErdEdgeData>): SchemaEdgeLabels | undefined 
     const labels: SchemaEdgeLabels = {};
     if (edge.data?.fromMult) labels.nearFrom = edge.data.fromMult;
     if (edge.data?.toMult) labels.nearTo = edge.data.toMult;
-    if (typeof edge.label === "string" && edge.label.trim().length > 0) {
-        labels.center = edge.label;
+    const centerLabel = edge.data?.label || (typeof edge.label === "string" ? edge.label : undefined);
+    if (centerLabel && centerLabel.trim().length > 0) {
+        labels.center = centerLabel;
     }
     return Object.keys(labels).length ? labels : undefined;
 };
@@ -703,6 +704,14 @@ const mapReactEdgeToStoredEdge = (
         storedEdge.endStyle = endStyle;
     }
 
+    // Category link edges always have a bracket on the 'to' side (near U circle)
+    if (classification.type === "categoryLink") {
+        storedEdge.endStyle = {
+            ...storedEdge.endStyle,
+            to: { ...storedEdge.endStyle?.to, bracket: true },
+        };
+    }
+
     return storedEdge;
 };
 
@@ -738,6 +747,8 @@ const mapSchemaEdgeToReactEdge = (
         fromMult: edge.labels?.nearFrom,
         toMult: edge.labels?.nearTo,
         bracketDirection,
+        storedType: edge.type,
+        label: edge.labels?.center,
     };
 
     const reactEdge: Edge<ErdEdgeData> = {

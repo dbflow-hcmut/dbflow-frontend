@@ -317,15 +317,16 @@ const buildRelationshipEnds = (
         const endStyle = edge.endStyle ?? {};
 
         const cardinality =
-            (entityIsFrom ? labels.nearFrom : labels.nearTo) ??
+            (entityIsFrom ? labels.nearTo : labels.nearFrom) ??
+            relationshipMetaCardinality?.[edge.id] ??
             relationshipMetaCardinality?.[entityId];
 
         const doubleLine = entityIsFrom ? endStyle.from?.doubleLine : endStyle.to?.doubleLine;
 
-        // Generate role hint for recursive relationships
+        // Read role from edge center label or generate for recursive
         const count = entityEndCounts.get(entityId) ?? 0;
         entityEndCounts.set(entityId, count + 1);
-        const role = count > 0 ? `role_${count}` : undefined;
+        const role = labels.center || (count > 0 ? `role_${count}` : undefined);
 
         ends.push({
             entityId,
@@ -566,7 +567,65 @@ const LAYOUT = {
     categoryGapY:      180,
 } as const;
 
+// ── Text-width estimation (server-safe, no DOM required) ─────────────────────
+
+const CHAR_AVG_PX   = 7;
+const CHAR_NARROW   = 4;
+const CHAR_WIDE     = 9;
+const NARROW = new Set('iljI|:;.,!\''.split(''));
+const WIDE   = new Set('mwMW@'.split(''));
+
+/** Estimate pixel width of text (handles multi-line → returns widest line). */
+const estimateTextWidth = (text: string): number => {
+    let maxW = 0;
+    for (const line of text.split('\n')) {
+        let w = 0;
+        for (const ch of line) {
+            if (NARROW.has(ch)) w += CHAR_NARROW;
+            else if (WIDE.has(ch)) w += CHAR_WIDE;
+            else w += CHAR_AVG_PX;
+        }
+        maxW = Math.max(maxW, w);
+    }
+    return maxW;
+};
+
+/** Compute size for an attribute node based on name length. */
+const attrNodeSize = (name: string): { w: number; h: number } => {
+    const textW = estimateTextWidth(name);
+    const needed = Math.ceil(textW / 0.65) + 16;
+    const w = Math.max(LAYOUT.attributeSize.w, needed);
+    return { w, h: LAYOUT.attributeSize.h };
+};
+
+/** Compute size for an entity node based on name length. */
+const entityNodeSize = (name: string): { w: number; h: number } => {
+    const textW = estimateTextWidth(name);
+    const needed = Math.ceil(textW / 0.85) + 16;
+    const w = Math.max(LAYOUT.entitySize.w, needed);
+    const lines = name.split('\n').length;
+    const LINE_H = 16;
+    const h = lines > 1
+        ? Math.max(LAYOUT.entitySize.h, Math.ceil(lines * LINE_H / 0.80) + 8)
+        : LAYOUT.entitySize.h;
+    return { w, h };
+};
+
+/** Compute size for a relationship node based on name length. */
+const relationshipNodeSize = (name: string): { w: number; h: number } => {
+    const textW = estimateTextWidth(name);
+    const needed = Math.ceil(textW / 0.65) + 16;
+    const w = Math.max(LAYOUT.relationshipSize.w, needed);
+    const lines = name.split('\n').length;
+    const LINE_H = 16;
+    const h = lines > 1
+        ? Math.max(LAYOUT.relationshipSize.h, Math.ceil(lines * LINE_H / 0.55) + 8)
+        : LAYOUT.relationshipSize.h;
+    return { w, h };
+};
+
 type PositionMap = Map<string, { x: number; y: number }>;
+type SizeMap = Map<string, { w: number; h: number }>;
 
 const buildPositionLookup = (nodes?: StoredDiagramNode[]): PositionMap => {
     const lookup: PositionMap = new Map();
@@ -579,6 +638,27 @@ const buildPositionLookup = (nodes?: StoredDiagramNode[]): PositionMap => {
         if (n.relationshipId && n.relationshipId !== n.id) lookup.set(n.relationshipId, n.position);
     }
     return lookup;
+};
+
+/** Build a lookup of existing node sizes so the builder preserves user-resized nodes. */
+const buildSizeLookup = (nodes?: StoredDiagramNode[]): SizeMap => {
+    const lookup: SizeMap = new Map();
+    if (!nodes) return lookup;
+    for (const n of nodes) {
+        if (!n.size) continue;
+        const key = n.entityId ?? n.relationshipId ?? n.attributeId ?? n.id;
+        lookup.set(key, n.size);
+    }
+    return lookup;
+};
+
+/** If a node already exists on the diagram, preserve its exact size. */
+const mergeSize = (
+    computed: { w: number; h: number },
+    existing: { w: number; h: number } | undefined,
+): { w: number; h: number } => {
+    if (existing) return existing;
+    return computed;
 };
 
 /**
@@ -670,6 +750,7 @@ export const buildDiagramFromModel = async ({
     const nodes: StoredDiagramNode[] = [];
     const edges: StoredDiagramEdge[] = [];
     const lookup = buildPositionLookup(existingNodes);
+    const sizeLookup = buildSizeLookup(existingNodes);
 
     // ══════════════════════════════════════════════════════════════════════
     //  PHASE 1 — Collect SKELETON layout items & edges for ELK
@@ -810,7 +891,7 @@ export const buildDiagramFromModel = async ({
             id: entity.id,
             type: "entity",
             position: pos,
-            size: LAYOUT.entitySize,
+            size: mergeSize(entityNodeSize(entity.name), sizeLookup.get(entity.id)),
             name: entity.name,
             entityId: entity.id,
             entityRender: entity.kind === "weak" ? { doubleStroke: true } : undefined,
@@ -823,14 +904,37 @@ export const buildDiagramFromModel = async ({
         const pos = getPos(rel.id);
         skeletonPositions.set(rel.id, pos);
 
+        // Build cardinalities map keyed by edge ID so PropertiesPanel can read it
+        // (edge IDs are `e_${rel.id}_${end.entityId}_${endIdx}`)
+        const cardinalities: Record<string, string> = {};
+        rel.ends.forEach((end, endIdx) => {
+            if (end.cardinality) {
+                const edgeId = `e_${rel.id}_${end.entityId}_${endIdx}`;
+                cardinalities[edgeId] = end.cardinality;
+            }
+        });
+        const hasCardinalities = Object.keys(cardinalities).length > 0;
+
+        const relationshipMeta: Record<string, unknown> = {};
+        if (hasCardinalities) {
+            relationshipMeta.cardinalities = cardinalities;
+        }
+        if (rel.type === "identifying") {
+            relationshipMeta.variant = "double";
+        }
+        const styleMeta = Object.keys(relationshipMeta).length
+            ? { meta: { relationship: relationshipMeta } }
+            : undefined;
+
         nodes.push({
             id: rel.id,
             type: "relationship",
             position: pos,
-            size: LAYOUT.relationshipSize,
+            size: mergeSize(relationshipNodeSize(rel.name), sizeLookup.get(rel.id)),
             name: rel.name,
             relationshipId: rel.id,
             relationshipRender: rel.type === "identifying" ? { doubleStroke: true } : undefined,
+            ...(styleMeta ? { style: styleMeta } : {}),
         });
 
         // Participation edges
@@ -844,6 +948,9 @@ export const buildDiagramFromModel = async ({
 
         rel.ends.forEach((end, endIdx) => {
             const isTotalParticipation = end.optional === false;
+            const edgeLabels: Record<string, string> = {};
+            if (end.cardinality) edgeLabels.nearFrom = end.cardinality;
+            if (isRecursive && end.role) edgeLabels.center = end.role;
             edges.push({
                 id: `e_${rel.id}_${end.entityId}_${endIdx}`,
                 type: "participation",
@@ -855,7 +962,7 @@ export const buildDiagramFromModel = async ({
                         : {}),
                 },
                 relationshipId: rel.id,
-                labels: end.cardinality ? { nearTo: end.cardinality } : undefined,
+                labels: Object.keys(edgeLabels).length ? edgeLabels : undefined,
                 endStyle: isTotalParticipation ? { to: { doubleLine: true } } : undefined,
             });
         });
@@ -906,7 +1013,7 @@ export const buildDiagramFromModel = async ({
             }
         }
 
-        emitAttributeNodes(attrs, ownerPos, ownerId, lookup, nodes, edges, baseAngle);
+        emitAttributeNodes(attrs, ownerPos, ownerId, lookup, sizeLookup, nodes, edges, baseAngle);
     };
 
     // Entity attributes
@@ -983,13 +1090,19 @@ export const buildDiagramFromModel = async ({
         });
 
         const isTotal = cat.completeness === "total";
+        const categoryLinkEndStyle: Record<string, Record<string, boolean>> = {
+            to: { bracket: true },
+        };
+        if (isTotal) {
+            categoryLinkEndStyle.from = { doubleLine: true };
+        }
         edges.push({
             id: `e_catl_${cat.id}`,
             type: "categoryLink",
             from: { nodeId: cat.categoryEntityId },
             to: { nodeId: cat.id },
             categoryId: cat.id,
-            endStyle: isTotal ? { from: { doubleLine: true } } : undefined,
+            endStyle: categoryLinkEndStyle,
         });
 
         cat.superclassEntityIds.forEach((sid) => {
@@ -1037,18 +1150,25 @@ const emitAttributeNodes = (
     ownerPos: { x: number; y: number },
     ownerId: string,
     lookup: PositionMap,
+    sizes: SizeMap,
     nodes: StoredDiagramNode[],
     edges: StoredDiagramEdge[],
     baseAngle: number,
 ) => {
+    const attrSizes = attrs.map(a => attrNodeSize(a.name));
+    const maxW = attrSizes.length > 0
+        ? Math.max(...attrSizes.map(s => s.w))
+        : LAYOUT.attributeSize.w;
+
     const arcSpan = autoArcSpan(
         attrs.length,
         LAYOUT.attrRadius,
-        LAYOUT.attributeSize.w,
+        maxW,
         LAYOUT.attrMinGap,
     );
 
     attrs.forEach((attr, i) => {
+        const size = attrSizes[i];
         const angle = arcAngle(i, attrs.length, baseAngle, arcSpan);
         const fanPos = polarPos(ownerPos.x, ownerPos.y, angle, LAYOUT.attrRadius);
 
@@ -1059,7 +1179,7 @@ const emitAttributeNodes = (
             id: attr.id,
             type: "attribute",
             position: pos,
-            size: LAYOUT.attributeSize,
+            size: mergeSize(size, sizes.get(attr.id)),
             name: attr.name,
             attributeId: attr.id,
             attributeRender: toAttrRender(attr),
@@ -1074,14 +1194,18 @@ const emitAttributeNodes = (
 
         // Composite children — smaller fan around the attribute node
         if (attr.components?.length) {
+            const compSizes = attr.components.map(c => attrNodeSize(c.name));
+            const maxCompW = Math.max(...compSizes.map(s => s.w));
+
             const compArc = autoArcSpan(
                 attr.components.length,
                 LAYOUT.compRadius,
-                LAYOUT.attributeSize.w,
+                maxCompW,
                 LAYOUT.compMinGap,
             );
 
             attr.components.forEach((comp, ci) => {
+                const compSize = compSizes[ci];
                 const cAngle = arcAngle(ci, attr.components!.length, angle, compArc);
                 const cFanPos = polarPos(pos.x, pos.y, cAngle, LAYOUT.compRadius);
                 const cPos = lookup.get(comp.id) ?? cFanPos;
@@ -1090,7 +1214,7 @@ const emitAttributeNodes = (
                     id: comp.id,
                     type: "attribute",
                     position: cPos,
-                    size: LAYOUT.attributeSize,
+                    size: mergeSize(compSize, sizes.get(comp.id)),
                     name: comp.name,
                     attributeId: comp.id,
                 });

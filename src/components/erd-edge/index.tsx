@@ -1,16 +1,8 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
-import { BaseEdge, EdgeLabelRenderer, EdgeProps, getStraightPath, useReactFlow } from "reactflow";
-import { Palette } from "lucide-react";
-
-type ErdEdgeData = {
-    label?: string;
-    fromMult?: string;
-    toMult?: string;
-    lineStyle?: 'single' | 'double' | 'bracket';
-    bracketDirection?: 'from' | 'to';
-};
+import React from "react";
+import { BaseEdge, EdgeLabelRenderer, EdgeProps, getStraightPath } from "reactflow";
+import type { ErdEdgeData } from "@/components/EditProject/utils/functions";
 
 const ErdEdge: React.FC<EdgeProps<ErdEdgeData>> = (props) => {
     const {
@@ -24,12 +16,6 @@ const ErdEdge: React.FC<EdgeProps<ErdEdgeData>> = (props) => {
         data,
         selected,
     } = props;
-
-    const { setEdges } = useReactFlow();
-    const [showButton, setShowButton] = useState(false);
-    const [showMenu, setShowMenu] = useState(false);
-    const menuRef = useRef<HTMLDivElement>(null);
-    const buttonRef = useRef<HTMLDivElement>(null);
 
     const [edgePath, labelX, labelY] = getStraightPath({
         sourceX,
@@ -56,39 +42,6 @@ const ErdEdge: React.FC<EdgeProps<ErdEdgeData>> = (props) => {
     const labelOffsetX = Math.cos(labelPerpAngle) * labelOffsetDistance;
     const labelOffsetY = Math.sin(labelPerpAngle) * labelOffsetDistance;
 
-    const handleStyleChange = (newStyle: 'single' | 'double' | 'bracket') => {
-        setEdges((edges) =>
-            edges.map((edge) =>
-                edge.id === id
-                    ? { ...edge, data: { ...edge.data, lineStyle: newStyle } }
-                    : edge
-            )
-        );
-        setShowMenu(false);
-        // Keep button visible if edge is selected
-        if (!selected) {
-            setShowButton(false);
-        }
-    };
-
-    const menuItems = [
-        {
-            key: 'single',
-            label: 'Single line',
-            onClick: () => handleStyleChange('single'),
-        },
-        {
-            key: 'double',
-            label: 'Double line',
-            onClick: () => handleStyleChange('double'),
-        },
-        {
-            key: 'bracket',
-            label: 'Identifying',
-            onClick: () => handleStyleChange('bracket'),
-        },
-    ];
-
     // Calculate offset points for double line (parallel line)
     const offsetDistance = 3;
     const perpAngle = angle + Math.PI / 2;
@@ -103,63 +56,9 @@ const ErdEdge: React.FC<EdgeProps<ErdEdgeData>> = (props) => {
         targetY: targetY + offsetY,
     });
 
-    // Close menu and button when clicking outside
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            const target = event.target as HTMLElement;
-
-            // Check if click is inside menu or button
-            const isInsideMenu = menuRef.current?.contains(target);
-            const isInsideButton = buttonRef.current?.contains(target);
-
-            // Close if clicked outside both menu and button
-            if (showMenu && !isInsideMenu && !isInsideButton) {
-                setShowMenu(false);
-            }
-
-            // Only close button if edge is not selected
-            if (showButton && !isInsideButton && !isInsideMenu && !selected) {
-                setShowButton(false);
-            }
-        };
-
-        if (showMenu || showButton) {
-            // Use capture phase to catch events early
-            document.addEventListener('mousedown', handleClickOutside, true);
-
-            return () => {
-                document.removeEventListener('mousedown', handleClickOutside, true);
-            };
-        }
-    }, [showMenu, showButton, selected]);
-
-    // Show/hide button based on edge selection
-    useEffect(() => {
-        if (selected) {
-            // Show button when edge is selected
-            if (!showButton && !showMenu) {
-                setShowButton(true);
-            }
-        } else {
-            // Hide button when edge is deselected (unless menu is open)
-            if (!showMenu) {
-                setShowButton(false);
-            }
-        }
-    }, [selected, showButton, showMenu]);
-
     return (
         <>
-            <g
-                onClick={() => {
-                    if (!showButton && !showMenu) {
-                        setTimeout(() => {
-                            setShowButton(true);
-                        }, 50);
-                    }
-                }}
-                style={{ cursor: 'pointer' }}
-            >
+            <g style={{ cursor: 'pointer' }}>
                 {/* Main edge */}
                 <BaseEdge
                     id={id}
@@ -213,76 +112,9 @@ const ErdEdge: React.FC<EdgeProps<ErdEdgeData>> = (props) => {
                         </g>
                     );
                 })()}
-
-
-
             </g>
 
             <EdgeLabelRenderer>
-                {/* Style button - show when clicked or when edge is selected */}
-                {(showButton || selected) && !showMenu && (
-                    <div
-                        ref={buttonRef}
-                        style={{
-                            position: "absolute",
-                            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-                            zIndex: 1001,
-                            pointerEvents: 'auto',
-                        }}
-                        className="nodrag nopan"
-                        onClick={(e) => e.stopPropagation()}
-                        onMouseDown={(e) => e.stopPropagation()}
-                    >
-                        <button
-                            className="w-4 h-4 flex items-center justify-center bg-white border border-primary-500 rounded-md shadow-md hover:bg-gray-50 transition-colors cursor-pointer"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                e.preventDefault();
-                                setShowMenu(true);
-                            }}
-                            onMouseDown={(e) => {
-                                e.stopPropagation();
-                            }}
-                        >
-                            <Palette size={8} />
-                        </button>
-                    </div>
-                )}
-
-                {/* Style selection menu */}
-                {showMenu && (
-                    <div
-                        ref={menuRef}
-                        style={{
-                            position: "absolute",
-                            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-                            zIndex: 1002,
-                            pointerEvents: 'auto',
-                        }}
-                        className="nodrag nopan"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="bg-white rounded-sm shadow-md min-w-20">
-                            <div className="h-4 px-2 py-1 font-semibold text-[7px] items-center flex bg-primary-500 text-white rounded-t-sm">
-                                Edge Style
-                            </div>
-                            {menuItems.map((item) => (
-                                <div
-                                    key={item.key}
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        item.onClick();
-                                    }}
-                                    className="px-2 py-1 text-[7px] leading-tight cursor-pointer hover:bg-gray-100 transition-colors pointer-events-auto whitespace-nowrap"
-                                    onMouseDown={(e) => e.stopPropagation()}
-                                >
-                                    {item.label}
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
                 {data?.label ? (
                     <div
                         style={{

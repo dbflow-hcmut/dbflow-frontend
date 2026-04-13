@@ -12,6 +12,7 @@ export type ErdEdgeData = {
     toMult?: string;
     lineStyle?: 'single' | 'double' | 'bracket';
     bracketDirection?: 'from' | 'to';
+    storedType?: string;
 };
 export const RELATION_NOTE_PREFIX = '__RELATION__::';
 

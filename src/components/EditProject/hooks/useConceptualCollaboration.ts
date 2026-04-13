@@ -15,7 +15,7 @@ import {
     mapReactNodesToStoredNodes,
     mapReactEdgesToStoredEdges,
 } from "../utils/conceptual-diagram.builder";
-import { buildConceptualModel, buildDiagramFromModel, createEmptyConceptualModel } from "../utils/conceptual-model.builder";
+import { buildDiagramFromModel, createEmptyConceptualModel } from "../utils/conceptual-model.builder";
 import type { ConceptualModelPayload } from "../utils/conceptual-model.builder";
 
 export type MutateModelFn = (
@@ -66,6 +66,10 @@ export const useConceptualCollaboration = ({
      *  diagram.  Only then should external model changes regenerate the
      *  diagram – otherwise we'd clobber saved positions with auto-layout. */
     const initialSyncDoneRef = useRef(false);
+    /** True while an async model→diagram generation is running.
+     *  Prevents the sync useEffect from patching the model with the
+     *  "stale" diagram that will be immediately replaced.  */
+    const isGeneratingDiagramRef = useRef(false);
 
     // Keep live refs to nodes/edges so closures inside useEffects always
     // read the latest list (needed for position-preserving model→diagram).
@@ -82,6 +86,7 @@ export const useConceptualCollaboration = ({
             lastAppliedModelStringRef.current = null;
             hasLoadedInitialDataRef.current = false;
             initialSyncDoneRef.current = false;
+            isGeneratingDiagramRef.current = false;
             currentSchemaIdRef.current = null;
             return;
         }
@@ -92,6 +97,7 @@ export const useConceptualCollaboration = ({
         lastAppliedModelStringRef.current = null;
         hasLoadedInitialDataRef.current = false;
         initialSyncDoneRef.current = false;
+        isGeneratingDiagramRef.current = false;
         currentSchemaIdRef.current = schema?.id ?? null;
     }, [enabled, schema?.id]);
 
@@ -241,6 +247,8 @@ export const useConceptualCollaboration = ({
         ) => {
             if (currentSchemaIdRef.current !== schema?.id) return;
 
+            isGeneratingDiagramRef.current = true;
+
             const currentNodes = nodesRef.current;
             const currentEdges = edgesRef.current;
             const existingStoredNodes =
@@ -288,6 +296,12 @@ export const useConceptualCollaboration = ({
             // The data goes through JSON.parse inside loadDiagramFromYjs,
             // which is what makes it render correctly.
             loadDiagramFromYjs();
+
+            // Allow the sync useEffect to patch model again AFTER React has
+            // committed the nodes/edges from this generation cycle.
+            setTimeout(() => {
+                isGeneratingDiagramRef.current = false;
+            }, 0);
         };
 
         const loadModelFromYjs = () => {
@@ -375,17 +389,25 @@ export const useConceptualCollaboration = ({
                 //    diagram, write it to Yjs, then load it back fresh.
                 if (!diagramLoaded && modelDataRef.current) {
                     console.log('[Conceptual Collaboration] No diagram found — generating from model');
-                    void applyModelToDiagramInternal(modelDataRef.current, lastSyncedModelStringRef.current);
+                    void applyModelToDiagramInternal(modelDataRef.current, lastSyncedModelStringRef.current)
+                        .finally(() => {
+                            // Mark initial sync done only AFTER the async
+                            // model→diagram build completes AND a render
+                            // cycle has passed.
+                            setTimeout(() => {
+                                initialSyncDoneRef.current = true;
+                                console.log('[Conceptual Collaboration] Initial sync complete — model changes will now regenerate diagram');
+                            }, 50);
+                        });
+                } else {
+                    // Diagram already existed — mark sync done after one
+                    // render cycle so the sync useEffect doesn't
+                    // immediately patch the model.
+                    setTimeout(() => {
+                        initialSyncDoneRef.current = true;
+                        console.log('[Conceptual Collaboration] Initial sync complete — model changes will now regenerate diagram');
+                    }, 50);
                 }
-
-                // Mark initial sync as done AFTER a React render cycle so
-                // that nodesRef / edgesRef have the loaded diagram data.
-                // From this point on, external model changes will regenerate
-                // the diagram (with position preservation).
-                setTimeout(() => {
-                    initialSyncDoneRef.current = true;
-                    console.log('[Conceptual Collaboration] Initial sync complete — model changes will now regenerate diagram');
-                }, 100);
             }
         });
 
@@ -447,26 +469,12 @@ export const useConceptualCollaboration = ({
         };
 
         let nextDiagramString: string | null = null;
-        let nextModelString: string | null = null;
 
         try {
             nextDiagramString = JSON.stringify(diagramPayload);
         } catch (error) {
             console.error("Failed to serialize diagram payload:", error);
             return;
-        }
-
-        try {
-            const modelPayload = buildConceptualModel({
-                storedNodes,
-                storedEdges,
-                schemaId: schema?.id,
-                schemaName: schema?.name,
-                diagramName,
-            });
-            nextModelString = JSON.stringify(modelPayload);
-        } catch (error) {
-            console.error("Failed to serialize model payload:", error);
         }
 
         const commitDiagramUpdate = () => {
@@ -480,16 +488,7 @@ export const useConceptualCollaboration = ({
             lastSyncedDiagramStringRef.current = nextDiagramString;
         };
 
-        const commitModelUpdate = () => {
-            if (!ydocRef.current || !nextModelString) return;
-            const doc = ydocRef.current;
-            const map = doc.getMap('model');
-            lastAppliedModelStringRef.current = nextModelString;
-            doc.transact(() => {
-                map.set('data', nextModelString!);
-            });
-            lastSyncedModelStringRef.current = nextModelString;
-        };
+        let diagramActuallyChanged = false;
 
         if (nextDiagramString && lastSyncedDiagramStringRef.current !== nextDiagramString) {
             if (!ydocRef.current) {
@@ -497,15 +496,13 @@ export const useConceptualCollaboration = ({
             } else {
                 commitDiagramUpdate();
             }
+            diagramActuallyChanged = true;
         }
 
-        if (nextModelString && lastSyncedModelStringRef.current !== nextModelString) {
-            if (!ydocRef.current) {
-                pendingModelUpdateRef.current = commitModelUpdate;
-            } else {
-                commitModelUpdate();
-            }
-        }
+        // NOTE: Model is NOT written to Yjs from the sync useEffect.
+        // The diagram-only sync to Yjs is sufficient. The model in Yjs
+        // (loaded from S3 via Hocuspocus) stays untouched.
+        // Model is only updated via applyModelPayload() or mutateModel().
     }, [enabled, nodes, edges, schema?.id, schema?.name, diagramName]);
 
     // ── Apply model payload (full replace: Model → Diagram) ─────────────
@@ -532,6 +529,16 @@ export const useConceptualCollaboration = ({
             setNodes(reactNodes);
             setEdges(reactEdges);
             modelDataRef.current = modelPayload;
+
+            // Persist model to Yjs so it survives page refresh / reconnect
+            const modelStr = JSON.stringify(modelPayload);
+            lastAppliedModelStringRef.current = modelStr;
+            lastSyncedModelStringRef.current = modelStr;
+            if (ydocRef.current) {
+                ydocRef.current.transact(() => {
+                    ydocRef.current!.getMap('model').set('data', modelStr);
+                });
+            }
         },
         [setNodes, setEdges],
     );
@@ -582,6 +589,16 @@ export const useConceptualCollaboration = ({
             setNodes(reactNodes);
             setEdges(reactEdges);
             modelDataRef.current = next;
+
+            // Persist model to Yjs so it survives page refresh / reconnect
+            const modelStr = JSON.stringify(next);
+            lastAppliedModelStringRef.current = modelStr;
+            lastSyncedModelStringRef.current = modelStr;
+            if (ydocRef.current) {
+                ydocRef.current.transact(() => {
+                    ydocRef.current!.getMap('model').set('data', modelStr);
+                });
+            }
         },
         [setNodes, setEdges, schema?.id, schema?.name],
     );
