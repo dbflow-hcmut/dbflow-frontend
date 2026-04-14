@@ -11,25 +11,55 @@ import { useState } from "react";
 import { notificationProvider } from "@/providers/notification";
 import { signIn } from "next-auth/react";
 import Image from "next/image";
+import { API_BASE } from "@/api";
 
-interface SignInFormValues {
+interface SignUpFormValues {
+    fullName: string;
     email: string;
     password: string;
+    confirmPassword: string;
 }
 
-export default function SignInPage() {
+export default function SignUpPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const [form] = Form.useForm();
     const [loading, setLoading] = useState(false);
     const [googleLoading, setGoogleLoading] = useState(false);
 
-    const handleSignIn = async (values: SignInFormValues) => {
+    const handleSignUp = async (values: SignUpFormValues) => {
         setLoading(true);
         try {
+            // Register on backend
+            const registerRes = await fetch(`${API_BASE}/auth/register`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'accept': 'application/json',
+                },
+                body: JSON.stringify({
+                    fullName: values.fullName,
+                    email: values.email,
+                    password: values.password,
+                }),
+            });
+
+            const registerData = await registerRes.json().catch(() => ({}));
+            const data = registerData?.data || registerData;
+
+            if (!registerRes.ok || data?.message === 'Email already in use') {
+                notificationProvider.open({
+                    type: "error",
+                    message: data?.message === 'Email already in use'
+                        ? 'Email already in use. Please try another email.'
+                        : 'Registration failed. Please try again.',
+                });
+                return;
+            }
+
+            // Auto login after registration
             const callbackUrl = searchParams.get('callbackUrl') || '/projects';
-            // Call proxy login to set access_token on FE domain
-            const beRes = await fetch('/api/auth/login', {
+            const loginRes = await fetch('/api/auth/login', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -41,45 +71,49 @@ export default function SignInPage() {
                     password: values.password,
                 }),
             });
-            if (!beRes.ok) {
-                throw new Error('Login failed');
+
+            if (!loginRes.ok) {
+                notificationProvider.open({
+                    type: "success",
+                    message: 'Account created! Please sign in.',
+                });
+                router.push('/auth/signin');
+                return;
             }
+
             const result = await signIn("credentials", {
                 email: values.email,
                 password: values.password,
                 redirect: false,
             });
 
-            if (result?.error) {
-                notificationProvider.open({
-                    type: "error",
-                    message: "Login failed. Please check your information.",
-                });
-            } else if (result?.ok) {
+            if (result?.ok) {
                 router.push(callbackUrl);
                 router.refresh();
+            } else {
+                router.push('/auth/signin');
             }
         } catch (error) {
-            console.error('Sign in error:', error);
+            console.error('Sign up error:', error);
             notificationProvider.open({
                 type: "error",
-                message: 'Login failed. Please check your information.',
+                message: 'Registration failed. Please try again.',
             });
         } finally {
             setLoading(false);
         }
     };
 
-    const handleGoogleLogin = async () => {
+    const handleGoogleSignUp = async () => {
         setGoogleLoading(true);
         try {
             const callbackUrl = searchParams.get('callbackUrl') || '/ai-chat';
             await signIn('google', { callbackUrl });
         } catch (error) {
-            console.error('Google login error:', error);
+            console.error('Google sign up error:', error);
             notificationProvider.open({
                 type: "error",
-                message: 'Google login failed. Please try again.',
+                message: 'Google sign up failed. Please try again.',
             });
             setGoogleLoading(false);
         }
@@ -93,13 +127,23 @@ export default function SignInPage() {
                     <CloseOutlined className="text-lg !text-gray-600 cursor-pointer" onClick={() => router.back()} />
                 </div>
                 <div className="bg-white border rounded-lg p-6 w-full border-gray-200">
-                    <div className="text-2xl font-medium pb-6">Login to your account</div>
+                    <div className="text-2xl font-medium pb-6">Create your account</div>
                     <Form
                         form={form}
-                        onFinish={handleSignIn}
+                        onFinish={handleSignUp}
                         className="flex flex-col gap-1 pt-6"
                         layout="vertical"
                     >
+                        <div className="mb-1">Full Name</div>
+                        <Form.Item
+                            name="fullName"
+                            rules={[
+                                { required: true, message: "Please enter your name!" },
+                            ]}
+                        >
+                            <InputAnt placeholder="John Doe" className="w-full text-sm" />
+                        </Form.Item>
+
                         <div className="mb-1">Email</div>
                         <Form.Item
                             name="email"
@@ -111,10 +155,7 @@ export default function SignInPage() {
                             <InputAnt placeholder="name@work-email.com" className="w-full text-sm" />
                         </Form.Item>
 
-                        <div className="flex justify-between items-center mb-1">
-                            <span>Password</span>
-                            <span className="text-gray-700 text-sm font-medium cursor-pointer">Forgot your password?</span>
-                        </div>
+                        <div className="mb-1">Password</div>
                         <Form.Item
                             name="password"
                             rules={[
@@ -125,6 +166,25 @@ export default function SignInPage() {
                             <PassAnt type="password" placeholder="password" className="w-full text-sm" />
                         </Form.Item>
 
+                        <div className="mb-1">Confirm Password</div>
+                        <Form.Item
+                            name="confirmPassword"
+                            dependencies={['password']}
+                            rules={[
+                                { required: true, message: "Please confirm your password!" },
+                                ({ getFieldValue }) => ({
+                                    validator(_, value) {
+                                        if (!value || getFieldValue('password') === value) {
+                                            return Promise.resolve();
+                                        }
+                                        return Promise.reject(new Error('Passwords do not match!'));
+                                    },
+                                }),
+                            ]}
+                        >
+                            <PassAnt type="password" placeholder="confirm password" className="w-full text-sm" />
+                        </Form.Item>
+
                         <Form.Item>
                             <ButtonAnt 
                                 type="primary" 
@@ -132,7 +192,7 @@ export default function SignInPage() {
                                 className="w-full"
                                 loading={loading}
                             >
-                                Sign in with Email
+                                Sign up with Email
                             </ButtonAnt>
                         </Form.Item>
 
@@ -146,27 +206,27 @@ export default function SignInPage() {
                             <ButtonAnt 
                                 type="default" 
                                 className="w-full"
-                                onClick={handleGoogleLogin}
+                                onClick={handleGoogleSignUp}
                                 loading={googleLoading}
                             >
                                 <Image src="/icon-google.png" alt="Google" width={24} height={24} />
-                                <div>Sign in with Google</div>
+                                <div>Sign up with Google</div>
                             </ButtonAnt>
                         </div>
                     </Form>
                 </div>
                 <div className="flex justify-center pt-4">
                     <div className="text-center pt-2 flex gap-1 text-sm">
-                        <div>New to DB Flow?</div>
+                        <div>Already have an account?</div>
                         <div 
                             className="text-primary-500 hover:underline cursor-pointer"
-                            onClick={() => router.push('/auth/signup')}
+                            onClick={() => router.push('/auth/signin')}
                         >
-                            Create an account
+                            Sign in
                         </div>
                     </div>
                 </div>
             </div>
         </div>
     );
-};
+}

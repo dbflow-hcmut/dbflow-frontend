@@ -1,12 +1,17 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+import Google from "next-auth/providers/google";
 import { cookies } from "next/headers";
-import { PROXY_USERS_ME } from "./api";
+import { API_BASE, PROXY_USERS_ME } from "./api";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   trustHost: true,
   secret: process.env.AUTH_SECRET,
   providers: [
+    Google({
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    }),
     Credentials({
       name: "Credentials",
       credentials: {
@@ -51,8 +56,34 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     signIn: "/auth/signin",
   },
   callbacks: {
-    async jwt({ token, user }) {
-      if (user) {
+    async jwt({ token, user, account }) {
+      if (account?.provider === "google" && user?.email) {
+        try {
+          const res = await fetch(`${API_BASE}/auth/google`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ idToken: account.id_token }),
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            const backendData = data?.data || data;
+            token.id = backendData.user.id;
+            token.role = backendData.user.role;
+
+            const cookieStore = await cookies();
+            cookieStore.set("access_token", backendData.access_token, {
+              httpOnly: true,
+              sameSite: "lax",
+              secure: process.env.NODE_ENV === "production",
+              path: "/",
+              maxAge: 7 * 24 * 60 * 60,
+            });
+          }
+        } catch (error) {
+          console.error("Google backend sync error:", error);
+        }
+      } else if (user) {
         token.id = user.id;
         token.role = user.role;
       }
