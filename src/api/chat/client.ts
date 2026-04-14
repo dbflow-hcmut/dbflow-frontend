@@ -2,6 +2,8 @@ import {
   PROXY_CHAT_CONVERSATIONS,
   PROXY_CHAT_CONVERSATION_DETAIL,
   PROXY_CHAT_CONVERSATION_MESSAGES,
+  PROXY_CHAT_CONVERSATION_PROJECT,
+  PROXY_CHAT_PROJECT_CONVERSATIONS,
 } from "@/api";
 
 export interface ChatConversation {
@@ -144,4 +146,43 @@ export async function deleteConversation(
   if (!response.ok) {
     throw new Error(`Failed to delete conversation: ${response.status}`);
   }
+}
+
+/**
+ * Link a conversation to a project and/or schema
+ */
+export async function linkConversationToProject(
+  conversationId: string,
+  projectId?: string,
+  schemaId?: string
+): Promise<ChatConversation> {
+  const response = await fetch(PROXY_CHAT_CONVERSATION_PROJECT(conversationId), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ projectId, schemaId }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to link conversation: ${response.status}`);
+  }
+
+  return unwrapResponse<ChatConversation>(response);
+}
+
+/**
+ * Get conversations linked to a specific project
+ */
+export async function getProjectConversations(
+  projectId: string
+): Promise<ChatConversation[]> {
+  const response = await fetch(PROXY_CHAT_PROJECT_CONVERSATIONS(projectId), {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get project conversations: ${response.status}`);
+  }
+
+  return unwrapResponse<ChatConversation[]>(response);
 }

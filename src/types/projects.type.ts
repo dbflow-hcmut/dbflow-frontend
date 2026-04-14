@@ -3,6 +3,7 @@ import { SchemaType } from "@/utils/constants";
 export interface CreateProjectRequest {
     name: string;
     description?: string;
+    skipDefaultSchema?: boolean;
 }
 
 export interface ProjectResponse {

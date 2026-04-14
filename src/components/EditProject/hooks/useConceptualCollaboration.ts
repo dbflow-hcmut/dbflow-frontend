@@ -385,11 +385,17 @@ export const useConceptualCollaboration = ({
                 // 2. Try loading diagram (has layout / positions)
                 const diagramLoaded = loadDiagramFromYjs();
 
-                // 3. If no diagram exists but we have a model → generate
-                //    diagram, write it to Yjs, then load it back fresh.
-                if (!diagramLoaded && modelDataRef.current) {
-                    console.log('[Conceptual Collaboration] No diagram found — generating from model');
-                    void applyModelToDiagramInternal(modelDataRef.current, lastSyncedModelStringRef.current)
+                // 3. If no diagram exists, or diagram is empty but model has
+                //    entities (e.g. AI-generated model saved before first
+                //    visit) → generate diagram from model.
+                const hasModel = modelDataRef.current &&
+                    (modelDataRef.current.entities?.length > 0 ||
+                     ('tables' in modelDataRef.current && Array.isArray((modelDataRef.current as Record<string, unknown>).tables) && ((modelDataRef.current as Record<string, unknown>).tables as unknown[]).length > 0));
+                const diagramIsEmpty = diagramLoaded && nodesRef.current.length === 0;
+
+                if ((!diagramLoaded || diagramIsEmpty) && hasModel) {
+                    console.log('[Conceptual Collaboration] No diagram (or empty) with model data — generating from model');
+                    void applyModelToDiagramInternal(modelDataRef.current!, lastSyncedModelStringRef.current)
                         .finally(() => {
                             // Mark initial sync done only AFTER the async
                             // model→diagram build completes AND a render
@@ -488,15 +494,12 @@ export const useConceptualCollaboration = ({
             lastSyncedDiagramStringRef.current = nextDiagramString;
         };
 
-        let diagramActuallyChanged = false;
-
         if (nextDiagramString && lastSyncedDiagramStringRef.current !== nextDiagramString) {
             if (!ydocRef.current) {
                 pendingDiagramUpdateRef.current = commitDiagramUpdate;
             } else {
                 commitDiagramUpdate();
             }
-            diagramActuallyChanged = true;
         }
 
         // NOTE: Model is NOT written to Yjs from the sync useEffect.

@@ -1,33 +1,133 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { X, Minimize2, Maximize2, ExternalLink } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { ChatContent, Message } from "./ChatContent";
+import {
+    streamChatToLangGraph,
+    generateThreadId,
+    DBFLOW_ASSISTANT_ID,
+    ChatMessage,
+    RoutingInfo,
+    extractModelJsonFromContent,
+    cancelRun,
+} from "@/api/ai/client";
+import {
+    createConversation,
+    saveMessages,
+    getConversation,
+    getProjectConversations,
+    linkConversationToProject,
+} from "@/api/chat/client";
 
 interface ChatBoxProps {
     isOpen: boolean;
     onClose: () => void;
+    projectId?: string;
+    schemaId?: string;
+    /** If provided, load this thread's history and continue from it */
+    initialThreadId?: string;
+    /** Callback when AI generates a model JSON (for applying to diagram) */
+    onModelGenerated?: (modelJson: Record<string, unknown>) => void;
 }
 
-const ChatBox: React.FC<ChatBoxProps> = ({ isOpen, onClose }) => {
+const ChatBox: React.FC<ChatBoxProps> = ({
+    isOpen,
+    onClose,
+    projectId: propProjectId,
+    schemaId: propSchemaId,
+    initialThreadId,
+    onModelGenerated,
+}) => {
     const pathname = usePathname();
-    const projectId = pathname?.split('/')[2];
-    
-    const [messages, setMessages] = useState<Message[]>([
-        {
-            id: "1",
-            text: "Hello! How can I help you with your database design?",
-            sender: "ai",
-            timestamp: new Date(),
-        },
-    ]);
+    const searchParams = useSearchParams();
+    const projectId = propProjectId || pathname?.split('/')[2];
+    const schemaId = propSchemaId || searchParams.get("schemaId") || undefined;
+
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [isLoading, setIsLoading] = useState(false);
     const [isMinimized, setIsMinimized] = useState(false);
     const [position, setPosition] = useState({ x: 0, y: 100 });
     const [isDragging, setIsDragging] = useState(false);
     const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+    const [reasoningText, setReasoningText] = useState<string | undefined>();
+    const [isStreamingJson, setIsStreamingJson] = useState(false);
     const chatBoxRef = useRef<HTMLDivElement>(null);
 
+    // Thread management
+    const [threadId, setThreadId] = useState<string>(() => initialThreadId || generateThreadId());
+    const [conversationCreated, setConversationCreated] = useState(false);
+    const [historyLoaded, setHistoryLoaded] = useState(false);
+    const currentIntentRef = useRef<string | null>(null);
+    const lastUserMessageRef = useRef<string>("");
+    const abortControllerRef = useRef<AbortController | null>(null);
+    const runIdRef = useRef<string | null>(null);
+
+    // Load chat history when opened
+    useEffect(() => {
+        if (!isOpen || historyLoaded) return;
+
+        /**
+         * Convert backend messages to UI messages.
+         * For AI messages that contain JSON code blocks (diagram responses),
+         * strip the JSON and show only the human-readable text description.
+         */
+        const toUiMessages = (msgs: { id: string; content: string; role: string; createdAt: string }[]): Message[] =>
+            msgs.map((msg, index) => {
+                let displayText = msg.content;
+                if (msg.role === "assistant") {
+                    const extracted = extractModelJsonFromContent(msg.content);
+                    if (extracted.hasDiagram && extracted.textDescription) {
+                        displayText = extracted.modelJson
+                            ? `${extracted.textDescription}\n\nDiagram updated successfully!`
+                            : extracted.textDescription;
+                    }
+                }
+                return {
+                    id: `loaded-${index}-${msg.id}`,
+                    text: displayText,
+                    sender: msg.role === "user" ? "user" as const : "ai" as const,
+                    timestamp: new Date(msg.createdAt),
+                };
+            });
+
+        const loadHistory = async () => {
+            try {
+                // If we have an initial thread ID (from URL param), load that conversation
+                if (initialThreadId) {
+                    const conversation = await getConversation(initialThreadId);
+                    const msgs = conversation?.messages ?? [];
+                    if (msgs.length > 0) {
+                        setMessages(toUiMessages(msgs));
+                        setConversationCreated(true);
+                        setThreadId(initialThreadId);
+                    }
+                } else if (projectId) {
+                    // Try to load the most recent conversation for this project
+                    const conversations = await getProjectConversations(projectId);
+                    if (conversations && conversations.length > 0) {
+                        const latestConv = conversations[0];
+                        const conversation = await getConversation(latestConv.id);
+                        const msgs = conversation?.messages ?? [];
+                        if (msgs.length > 0) {
+                            setMessages(toUiMessages(msgs));
+                            setConversationCreated(true);
+                            setThreadId(latestConv.id);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error("Failed to load chat history:", error);
+            } finally {
+                setHistoryLoaded(true);
+            }
+        };
+
+        loadHistory();
+    }, [isOpen, historyLoaded, initialThreadId, projectId]);
+
+    // Position calculation
     useEffect(() => {
         if (isOpen && position.x === 0 && typeof window !== 'undefined') {
             const chatBoxWidth = 400;
@@ -45,7 +145,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({ isOpen, onClose }) => {
         }
     }, [isOpen, position.x]);
 
-
+    // Drag handlers
     useEffect(() => {
         if (!isOpen) return;
 
@@ -56,13 +156,9 @@ const ChatBox: React.FC<ChatBoxProps> = ({ isOpen, onClose }) => {
                 
                 const newX = e.clientX - dragOffset.x;
                 let newY = e.clientY - dragOffset.y;
-
                 newY = Math.max(0, Math.min(newY, windowHeight - headerHeight));
 
-                setPosition({
-                    x: newX,
-                    y: newY,
-                });
+                setPosition({ x: newX, y: newY });
             }
         };
 
@@ -92,51 +188,229 @@ const ChatBox: React.FC<ChatBoxProps> = ({ isOpen, onClose }) => {
         }
     };
 
-    const handleSend = (text: string) => {
-        const newMessage: Message = {
+    const handleSend = useCallback(async (text: string) => {
+        if (!text.trim() || isLoading) return;
+
+        lastUserMessageRef.current = text.trim();
+
+        const userMessage: Message = {
             id: Date.now().toString(),
-            text: text,
+            text: text.trim(),
             sender: "user",
             timestamp: new Date(),
         };
 
-        setMessages((prev) => [...prev, newMessage]);
+        setMessages((prev) => [...prev, userMessage]);
+        setIsLoading(true);
+        setReasoningText(undefined);
+        currentIntentRef.current = null;
 
-        setTimeout(() => {
-            const aiResponse: Message = {
-                id: (Date.now() + 1).toString(),
-                text: "I understand. Let me help you with that.",
-                sender: "ai",
-                timestamp: new Date(),
-            };
-            setMessages((prev) => [...prev, aiResponse]);
-        }, 1000);
-    };
+        // Create AbortController for this stream
+        const abortController = new AbortController();
+        abortControllerRef.current = abortController;
+        runIdRef.current = null;
 
-    const handleOpenInNewWindow = () => {
-        if (!projectId) return;
-        
-        const chatUrl = `/projects/${projectId}/chat`;
-        const popup = window.open(
-            chatUrl,
-            'chatWindow',
-            'width=500,height=700,resizable=yes,scrollbars=yes'
-        );
-        
-        if (popup) {
-            const sendMessages = () => {
-                popup.postMessage({ type: 'CHAT_MESSAGES', messages }, window.location.origin);
-            };
-            
+        // Create conversation in backend if first message
+        if (!conversationCreated) {
             try {
-                sendMessages();
-            } catch {
-                setTimeout(sendMessages, 100);
+                await createConversation(threadId);
+                setConversationCreated(true);
+                // Link conversation to project
+                if (projectId) {
+                    await linkConversationToProject(threadId, projectId, schemaId);
+                }
+            } catch (error) {
+                console.error("Failed to create conversation:", error);
             }
-            
-            onClose();
         }
-    };
+
+        // Create placeholder for AI response
+        const aiMessageId = (Date.now() + 1).toString();
+        const aiMessage: Message = {
+            id: aiMessageId,
+            text: "",
+            sender: "ai",
+            timestamp: new Date(),
+            isStreaming: true,
+        };
+
+        setMessages((prev) => [...prev, aiMessage]);
+
+        const chatMessages: ChatMessage[] = [
+            { role: "user", content: text.trim() },
+        ];
+
+        let finalContent = "";
+        let modelAlreadyApplied = false;
+
+        const returnedRunId = await streamChatToLangGraph(
+            DBFLOW_ASSISTANT_ID,
+            threadId,
+            chatMessages,
+            // onChunk
+            (chunk: string) => {
+                finalContent = chunk;
+                setReasoningText(undefined);
+
+                const isCreateOrEdit = currentIntentRef.current === "create" || currentIntentRef.current === "edit";
+                
+                if (isCreateOrEdit) {
+                    // For diagram responses, show text description only
+                    const extracted = extractModelJsonFromContent(chunk);
+                    setIsStreamingJson(extracted.hasDiagram && !extracted.isJsonComplete);
+                    const displayText = extracted.textDescription || 
+                        (extracted.hasDiagram ? "Generating diagram..." : chunk);
+                    
+                    setMessages((prev) =>
+                        prev.map((msg) =>
+                            msg.id === aiMessageId
+                                ? { ...msg, text: displayText, isStreaming: !extracted.isJsonComplete }
+                                : msg
+                        )
+                    );
+
+                    // If model JSON is complete, apply to diagram (only once)
+                    if (extracted.isJsonComplete && extracted.modelJson && onModelGenerated && !modelAlreadyApplied) {
+                        onModelGenerated(extracted.modelJson);
+                        modelAlreadyApplied = true;
+                    }
+                } else {
+                    setMessages((prev) =>
+                        prev.map((msg) =>
+                            msg.id === aiMessageId
+                                ? { ...msg, text: chunk, isStreaming: true }
+                                : msg
+                        )
+                    );
+                }
+            },
+            // onComplete
+            async () => {
+                setIsLoading(false);
+                setReasoningText(undefined);
+                setIsStreamingJson(false);
+
+                // Final update for diagram responses
+                const isCreateOrEdit = currentIntentRef.current === "create" || currentIntentRef.current === "edit";
+                if (isCreateOrEdit) {
+                    const extracted = extractModelJsonFromContent(finalContent);
+                    const displayText = extracted.textDescription || "Diagram updated!";
+
+                    setMessages((prev) =>
+                        prev.map((msg) =>
+                            msg.id === aiMessageId
+                                ? {
+                                    ...msg,
+                                    text: extracted.modelJson 
+                                        ? `${displayText}\n\nDiagram updated successfully!`
+                                        : displayText,
+                                    isStreaming: false,
+                                  }
+                                : msg
+                        )
+                    );
+
+                    // Apply final model JSON to diagram (only if not already applied during streaming)
+                    if (extracted.modelJson && onModelGenerated && !modelAlreadyApplied) {
+                        onModelGenerated(extracted.modelJson);
+                        modelAlreadyApplied = true;
+                    }
+                } else {
+                    // Final state for normal messages
+                    setMessages((prev) =>
+                        prev.map((msg) =>
+                            msg.id === aiMessageId
+                                ? { ...msg, isStreaming: false }
+                                : msg
+                        )
+                    );
+                }
+
+                // Save messages to backend
+                if (finalContent) {
+                    try {
+                        await saveMessages(threadId, [
+                            { role: "user", content: text.trim() },
+                            { role: "assistant", content: finalContent },
+                        ]);
+                    } catch (error) {
+                        console.error("Failed to save messages:", error);
+                    }
+                }
+            },
+            // onError
+            (error: Error) => {
+                console.error("LangGraph streaming error:", error);
+                setIsStreamingJson(false);
+                setMessages((prev) =>
+                    prev.map((msg) =>
+                        msg.id === aiMessageId
+                            ? {
+                                ...msg,
+                                text: error.message || "An error occurred. Please try again.",
+                                isStreaming: false,
+                                isError: true,
+                              }
+                            : msg
+                    )
+                );
+                setIsLoading(false);
+            },
+            !conversationCreated,
+            // onReasoning
+            (info: RoutingInfo) => {
+                setReasoningText(info.reasoning || "Analyzing...");
+                if (info.intent) {
+                    currentIntentRef.current = info.intent;
+                }
+            },
+            abortController.signal,
+        );
+        if (returnedRunId) runIdRef.current = returnedRunId;
+        abortControllerRef.current = null;
+    }, [isLoading, threadId, conversationCreated, projectId, schemaId, onModelGenerated]);
+
+    const handleRetry = useCallback(() => {
+        if (!lastUserMessageRef.current) return;
+        // Remove the last error message before retrying
+        setMessages((prev) => {
+            const lastMsg = prev[prev.length - 1];
+            if (lastMsg?.isError) {
+                return prev.slice(0, -1);
+            }
+            return prev;
+        });
+        handleSend(lastUserMessageRef.current);
+    }, [handleSend]);
+
+    const handleStop = useCallback(() => {
+        // Abort the fetch stream
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+            abortControllerRef.current = null;
+        }
+        // Cancel the run on LangGraph server
+        if (runIdRef.current) {
+            cancelRun(threadId, runIdRef.current);
+            runIdRef.current = null;
+        }
+        setIsLoading(false);
+        setIsStreamingJson(false);
+        setReasoningText(undefined);
+        // Finalize the last AI message
+        setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last?.sender === "ai" && !last.text) {
+                return prev.slice(0, -1);
+            }
+            if (last?.sender === "ai") {
+                return prev.map((msg, i) =>
+                    i === prev.length - 1 ? { ...msg, isStreaming: false } : msg
+                );
+            }
+            return prev;
+        });
+    }, [threadId]);
 
     if (!isOpen) return null;
 
@@ -164,9 +438,11 @@ const ChatBox: React.FC<ChatBoxProps> = ({ isOpen, onClose }) => {
                 </div>
                 <div className="flex items-center gap-2">
                     <button
-                        onClick={handleOpenInNewWindow}
+                        onClick={() => {
+                            window.open(`/ai-chat/c/${threadId}`, '_blank');
+                        }}
                         className="text-white hover:bg-white/20 rounded p-1 transition-colors cursor-pointer"
-                        title="Open in new window"
+                        title="Open in AI Chat"
                     >
                         <ExternalLink size={16} />
                     </button>
@@ -194,6 +470,11 @@ const ChatBox: React.FC<ChatBoxProps> = ({ isOpen, onClose }) => {
                     messages={messages}
                     onSend={handleSend}
                     onMessagesChange={setMessages}
+                    isLoading={isLoading}
+                    reasoningText={reasoningText}
+                    onRetry={handleRetry}
+                    isStreamingJson={isStreamingJson}
+                    onStop={handleStop}
                 />
             )}
         </div>

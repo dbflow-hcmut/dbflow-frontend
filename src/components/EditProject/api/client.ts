@@ -1,7 +1,7 @@
 import useSWRMutation from "swr/mutation";
 import { mutate } from "swr";
-import { apiPost } from "@/lib/clientFetch";
-import { PROXY_PROJECT_SCHEMAS } from "@/api";
+import { apiPost, apiPut } from "@/lib/clientFetch";
+import { PROXY_PROJECT_SCHEMAS, PROXY_SCHEMA_MODEL } from "@/api";
 import { ProjectSchemasResponse } from "@/types/projects.type";
 import { SchemaType } from "@/utils/constants";
 import { revalidateProjectSchemas } from "@/app/projects/actions";
@@ -38,5 +38,19 @@ export function useCreateSchema(projectId: string | null) {
         error,
         isLoading: isMutating,
     };
+}
+
+/**
+ * Save model JSON directly to S3 for a schema.
+ * Used by AI chat to persist generated model data before the user opens the editor.
+ */
+export async function saveSchemaModel(
+    projectId: string,
+    schemaId: string,
+    modelData: Record<string, unknown>
+): Promise<{ message: string }> {
+    const url = PROXY_SCHEMA_MODEL(projectId, schemaId);
+    const res = await apiPut<{ message: string }, Record<string, unknown>>(url, modelData);
+    return res;
 }
 

@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, Loader2, RefreshCw, Square } from "lucide-react";
 import { Input } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
+import { useRouter } from "next/navigation";
 import LogoHeader from "@/components/LogoHeader";
 import {
   streamChatToLangGraph,
@@ -11,12 +12,18 @@ import {
   DBFLOW_ASSISTANT_ID,
   ChatMessage,
   RoutingInfo,
+  extractModelJsonFromContent,
+  cancelRun,
 } from "@/api/ai/client";
 import {
   createConversation,
   saveMessages,
   getConversation,
+  linkConversationToProject,
 } from "@/api/chat/client";
+import { createProject } from "@/components/CreateProject/api/client";
+import { createSchema, saveSchemaModel } from "@/components/EditProject/api/client";
+import { SchemaType } from "@/utils/constants";
 
 const { TextArea } = Input;
 
@@ -25,6 +32,7 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+  isError?: boolean;
 }
 
 interface AIChatViewProps {
@@ -33,6 +41,7 @@ interface AIChatViewProps {
 }
 
 export default function AIChatView({ threadId: initialThreadId }: AIChatViewProps) {
+  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -42,8 +51,22 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
   );
   const [conversationCreated, setConversationCreated] = useState(!!initialThreadId);
   const [reasoningInfo, setReasoningInfo] = useState<RoutingInfo | null>(null);
+  const [isRedirecting, setIsRedirecting] = useState(false);
+  /** True while JSON code block is being streamed (diagram intent) */
+  const [isStreamingJson, setIsStreamingJson] = useState(false);
+  /** Track the project created in this conversation to reuse it */
+  const [createdProjectId, setCreatedProjectId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textAreaRef = useRef<TextAreaRef>(null);
+  /** Track the current routing intent */
+  const currentIntentRef = useRef<string | null>(null);
+  const redirectTriggeredRef = useRef(false);
+  /** Track the last user message for retry */
+  const lastUserMessageRef = useRef<string>("");
+  /** AbortController for cancelling the current stream */
+  const abortControllerRef = useRef<AbortController | null>(null);
+  /** Track run_id for cancelling via LangGraph API */
+  const runIdRef = useRef<string | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -80,13 +103,25 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
     loadConversation();
   }, [initialThreadId]);
 
-  const handleSend = useCallback(async () => {
-    if (!inputValue.trim() || isLoading) return;
+  const handleSend = useCallback(async (retryMessage?: string) => {
+    const messageToSend = retryMessage || inputValue.trim();
+    if (!messageToSend || isLoading) return;
 
-    const userMessageContent = inputValue.trim();
+    const userMessageContent = messageToSend;
+    if (!retryMessage) setInputValue("");
+    redirectTriggeredRef.current = false;
+    lastUserMessageRef.current = userMessageContent;
 
-    // Clear input immediately
-    setInputValue("");
+    // Remove any previous error messages when retrying
+    if (retryMessage) {
+      setMessages((prev) => {
+        const lastMsg = prev[prev.length - 1];
+        if (lastMsg?.isError) {
+          return prev.slice(0, -1);
+        }
+        return prev;
+      });
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -98,10 +133,17 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
     setMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
     setReasoningInfo(null);
+    currentIntentRef.current = null;
 
-    // Create conversation in backend if it's the first message (non-blocking)
+    // Create AbortController for this stream
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+    runIdRef.current = null;
+
+    // Create conversation in backend if first message
+    let conversationPromise: Promise<void> | null = null;
     if (!conversationCreated) {
-      createConversation(threadId)
+      conversationPromise = createConversation(threadId)
         .then(() => {
           setConversationCreated(true);
           window.history.replaceState(null, "", `/ai-chat/c/${threadId}`);
@@ -113,51 +155,157 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
 
     // Create placeholder for assistant message
     const assistantMessageId = (Date.now() + 1).toString();
-    const assistantMessage: Message = {
-      id: assistantMessageId,
-      role: "assistant",
-      content: "",
-      timestamp: new Date(),
-    };
+    setMessages((prev) => [
+      ...prev,
+      { id: assistantMessageId, role: "assistant", content: "", timestamp: new Date() },
+    ]);
 
-    setMessages((prev) => [...prev, assistantMessage]);
-
-    // Only send the new user message — LangGraph manages conversation state via thread_id
     const chatMessages: ChatMessage[] = [
-      {
-        role: "user" as const,
-        content: userMessageContent,
-      },
+      { role: "user" as const, content: userMessageContent },
     ];
 
     let finalAssistantContent = "";
 
-    // Stream response from LangGraph
-    // Skip LangGraph thread creation if conversation already exists
-    await streamChatToLangGraph(
-      DBFLOW_ASSISTANT_ID,
-      threadId,
-      chatMessages,
-      // onChunk: Update assistant message with streaming content
-      (chunk: string) => {
-        finalAssistantContent = chunk;
-        setReasoningInfo(null); // Clear reasoning when real content arrives
+    const ensureConversationReady = async () => {
+      if (conversationPromise) await conversationPromise;
+    };
+
+    /**
+     * After stream completes with a create/edit intent:
+     * 1. Extract model JSON from the full response
+     * 2. Create project + schema
+     * 3. Save model JSON to S3 via backend
+     * 4. Redirect to editor — HocusPocus will load the model from S3
+     */
+    const handleDiagramRedirectAfterStream = async (
+      fullContent: string,
+      userMsg: string,
+    ) => {
+      if (redirectTriggeredRef.current) return;
+      redirectTriggeredRef.current = true;
+      setIsRedirecting(true);
+
+      const extracted = extractModelJsonFromContent(fullContent);
+      if (!extracted.isJsonComplete || !extracted.modelJson) {
+        // JSON extraction failed — show error, don't redirect
+        redirectTriggeredRef.current = false;
+        setIsRedirecting(false);
+        return;
+      }
+
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === assistantMessageId
+            ? {
+                ...msg,
+                content: extracted.textDescription || "Creating project and opening editor...",
+              }
+            : msg
+        )
+      );
+
+      try {
+        let projectIdToUse = createdProjectId;
+
+        // Only create a new project if we don't already have one from this conversation
+        if (!projectIdToUse) {
+          const projectName =
+            userMsg.length > 50 ? userMsg.substring(0, 50) + "..." : userMsg;
+
+          const project = await createProject({
+            name: `AI: ${projectName}`,
+            skipDefaultSchema: true,
+          });
+          if (!project) throw new Error("Failed to create project");
+          projectIdToUse = project.id;
+          setCreatedProjectId(project.id);
+        }
+
+        const schema = await createSchema(projectIdToUse, {
+          name: "Conceptual Schema",
+          type: SchemaType.CONCEPTUAL,
+        });
+
+        // Save model JSON to S3 so HocusPocus loads it on connect
+        await saveSchemaModel(projectIdToUse, schema.id, extracted.modelJson);
+
+        // Save messages and link conversation to this project
+        await ensureConversationReady();
+        await saveMessages(threadId, [
+          { role: "user", content: userMsg },
+          { role: "assistant", content: fullContent },
+        ]);
+        await linkConversationToProject(threadId, projectIdToUse, schema.id);
+
+        // Navigate to editor with ChatBox auto-opened showing this conversation
+        router.push(
+          `/projects/${projectIdToUse}?schemaId=${schema.id}&openChat=true&chatThread=${threadId}`
+        );
+      } catch (err) {
+        console.error("Failed to create project:", err);
+        redirectTriggeredRef.current = false;
+        setIsRedirecting(false);
         setMessages((prev) =>
           prev.map((msg) =>
             msg.id === assistantMessageId
-              ? { ...msg, content: chunk }
+              ? { ...msg, content: "Failed to create project. Please try again." }
               : msg
           )
         );
-      },
-      // onComplete: Save messages to backend
-      async () => {
-        setIsLoading(false);
+      }
+    };
+
+    const returnedRunId = await streamChatToLangGraph(
+      DBFLOW_ASSISTANT_ID,
+      threadId,
+      chatMessages,
+      // onChunk — show streaming text (strip JSON block for diagram intents)
+      (chunk: string) => {
+        if (redirectTriggeredRef.current) return;
+        finalAssistantContent = chunk;
         setReasoningInfo(null);
 
-        // Save the user + assistant message pair to backend
-        if (finalAssistantContent && typeof finalAssistantContent === "string") {
+        const isDiagramIntent =
+          currentIntentRef.current === "create" || currentIntentRef.current === "edit";
+
+        if (isDiagramIntent) {
+          // Show only text description while streaming, hide JSON block
+          const extracted = extractModelJsonFromContent(chunk);
+          setIsStreamingJson(extracted.hasDiagram && !extracted.isJsonComplete);
+          const displayText = extracted.textDescription || 
+            (extracted.hasDiagram ? "Generating diagram..." : chunk);
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessageId ? { ...msg, content: displayText } : msg
+            )
+          );
+        } else {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessageId ? { ...msg, content: chunk } : msg
+            )
+          );
+        }
+      },
+      // onComplete — handle redirect for diagram intents, save messages otherwise
+      async () => {
+        setReasoningInfo(null);
+
+        const isDiagramIntent =
+          currentIntentRef.current === "create" || currentIntentRef.current === "edit";
+
+        if (isDiagramIntent && finalAssistantContent) {
+          // Keep loading state while creating project + saving to S3
+          setIsStreamingJson(false);
+          await handleDiagramRedirectAfterStream(finalAssistantContent, userMessageContent);
+        } else {
+          setIsLoading(false);
+        }
+
+        // Save messages for non-diagram intents (diagram messages are saved in handleDiagramRedirectAfterStream)
+        if (finalAssistantContent && !isDiagramIntent) {
           try {
+            await ensureConversationReady();
             await saveMessages(threadId, [
               { role: "user", content: userMessageContent },
               { role: "assistant", content: finalAssistantContent },
@@ -169,26 +317,63 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
       },
       // onError
       (error: Error) => {
+        if (redirectTriggeredRef.current) return;
         console.error("LangGraph streaming error:", error);
+        setIsStreamingJson(false);
         setMessages((prev) =>
           prev.map((msg) =>
             msg.id === assistantMessageId
-              ? {
-                  ...msg,
-                  content: `❌ Error: ${error.message}. Please check if LangGraph server is running.`,
-                }
+              ? { ...msg, content: error.message || "An error occurred. Please try again.", isError: true }
               : msg
           )
         );
         setIsLoading(false);
       },
-      !conversationCreated, // ensureThread: only create LangGraph thread for new conversations
-      // onReasoning: Show reasoning indicator
+      !conversationCreated,
+      // onReasoning — track intent but don't redirect early
       (info: RoutingInfo) => {
         setReasoningInfo(info);
-      }
+        if (info.intent) {
+          currentIntentRef.current = info.intent;
+        }
+      },
+      abortController.signal,
     );
-  }, [inputValue, isLoading, threadId, conversationCreated]);
+    if (returnedRunId) runIdRef.current = returnedRunId;
+    abortControllerRef.current = null;
+  }, [inputValue, isLoading, threadId, conversationCreated, router, createdProjectId]);
+
+  const handleRetry = useCallback(() => {
+    if (lastUserMessageRef.current) {
+      handleSend(lastUserMessageRef.current);
+    }
+  }, [handleSend]);
+
+  const handleStop = useCallback(() => {
+    // Abort the fetch stream
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    // Cancel the run on LangGraph server
+    if (runIdRef.current) {
+      cancelRun(threadId, runIdRef.current);
+      runIdRef.current = null;
+    }
+    setIsLoading(false);
+    setIsStreamingJson(false);
+    setReasoningInfo(null);
+    setIsRedirecting(false);
+    // Finalize the last assistant message
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last?.role === "assistant" && !last.content) {
+        // Remove empty placeholder
+        return prev.slice(0, -1);
+      }
+      return prev;
+    });
+  }, [threadId]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -200,7 +385,6 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
   return (
     <div className="flex flex-col h-full">
       {messages.length === 0 && !isLoadingHistory && !initialThreadId ? (
-        /* Empty State - Centered Input */
         <div className="flex-1 flex items-center justify-center px-4 pb-12">
           <div className="w-full max-w-3xl">
             <div className="flex justify-center mb-6">
@@ -219,7 +403,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
                 autoFocus
               />
               <button
-                onClick={handleSend}
+                onClick={() => handleSend()}
                 disabled={!inputValue.trim() || isLoading}
                 className="absolute cursor-pointer right-3 bottom-[10px] p-2 bg-primary-500 text-white rounded-full hover:bg-primary-500 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
               >
@@ -242,35 +426,30 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
         </div>
       ) : (
         <>
-          {/* Messages Area */}
           <div className="flex-1 overflow-y-auto">
             <div className="max-w-3xl mx-auto px-4 py-6">
               {isLoadingHistory ? (
                 <div className="flex flex-col gap-6 py-4">
-                  {/* Skeleton: user bubble */}
                   <div className="flex justify-end">
                     <div className="w-[60%] h-12 bg-gray-200 rounded-2xl rounded-tr-sm animate-pulse" />
                   </div>
-                  {/* Skeleton: assistant bubble */}
                   <div className="flex justify-start">
                     <div className="w-[75%] h-20 bg-gray-100 rounded-2xl rounded-tl-sm animate-pulse" />
                   </div>
-                  {/* Skeleton: user bubble */}
                   <div className="flex justify-end">
                     <div className="w-[50%] h-10 bg-gray-200 rounded-2xl rounded-tr-sm animate-pulse" />
                   </div>
-                  {/* Skeleton: assistant bubble */}
                   <div className="flex justify-start">
                     <div className="w-[70%] h-16 bg-gray-100 rounded-2xl rounded-tl-sm animate-pulse" />
                   </div>
                 </div>
               ) : (
               <>
-              {messages.map((message) => {
-                // Hide empty assistant messages (placeholder while streaming)
+              {messages.map((message, index) => {
                 if (message.role === "assistant" && !message.content) {
                   return null;
                 }
+                const isLastMessage = index === messages.length - 1;
                 return (
                 <div
                   key={message.id}
@@ -278,36 +457,52 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
                     message.role === "user" ? "justify-end" : "justify-start"
                   }`}
                 >
-                  <div
-                    className={`max-w-[80%] ${
-                      message.role === "user"
-                        ? "bg-primary-500 text-white rounded-2xl rounded-tr-sm"
-                        : "bg-gray-100 text-gray-900 rounded-2xl rounded-tl-sm"
-                    } px-5 py-3`}
-                  >
-                    <div className="text-sm leading-relaxed whitespace-pre-wrap">
-                      {message.content}
-                    </div>
+                  <div className="max-w-[80%]">
                     <div
-                      className={`text-xs mt-2 ${
+                      className={`${
                         message.role === "user"
-                          ? "text-primary-100"
-                          : "text-gray-500"
-                      }`}
+                          ? "bg-primary-500 text-white rounded-2xl rounded-tr-sm"
+                          : message.isError
+                            ? "bg-red-50 text-red-700 border border-red-200 rounded-2xl rounded-tl-sm"
+                            : "bg-gray-100 text-gray-900 rounded-2xl rounded-tl-sm"
+                      } px-5 py-3`}
                     >
-                      {message.timestamp.toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                      <div className="text-sm leading-relaxed whitespace-pre-wrap">
+                        {message.content}
+                      </div>
+                      <div
+                        className={`text-xs mt-2 ${
+                          message.role === "user"
+                            ? "text-primary-100"
+                            : message.isError
+                              ? "text-red-400"
+                              : "text-gray-500"
+                        }`}
+                      >
+                        {message.timestamp.toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </div>
                     </div>
+                    {message.isError && isLastMessage && !isLoading && (
+                      <div className="pt-4">
+                        <button
+                          onClick={handleRetry}
+                          className="mt-2 flex items-center gap-1.5 text-sm text-red-600 hover:text-red-700 cursor-pointer transition-colors"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          Try again
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
                 );
               })}
 
-              {isLoading && messages[messages.length - 1]?.content === "" && (
+              {isLoading && messages[messages.length - 1]?.content === "" && !isRedirecting && !isStreamingJson && (
                 <div className="mb-6">
-                  {/* Thinking dots */}
                   <div className="flex justify-start">
                     <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-5 py-3">
                       <div className="flex items-center gap-2">
@@ -327,7 +522,6 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
                     </div>
                   </div>
 
-                  {/* Reasoning indicator - below bubble */}
                   {reasoningInfo && (
                     <div className="flex items-center gap-2 mt-2 ml-1">
                       <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-pulse"></span>
@@ -339,13 +533,38 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
                 </div>
               )}
 
+              {isStreamingJson && (
+                <div className="mb-6">
+                  <div className="flex justify-start">
+                    <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-5 py-3">
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 text-primary-500 animate-spin" />
+                        <span className="text-sm text-gray-500">Generating schema...</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {isRedirecting && (
+                <div className="mb-6">
+                  <div className="flex justify-start">
+                    <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-5 py-3">
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 text-primary-500 animate-spin" />
+                        <span className="text-sm text-gray-500">Creating project and opening editor...</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div ref={messagesEndRef} />
               </>
               )}
             </div>
           </div>
 
-          {/* Input Area - Bottom */}
           <div>
             <div className="max-w-3xl mx-auto px-4 py-4">
               <div className="relative">
@@ -358,13 +577,22 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
                   className="!resize-none !pr-12 !py-4 !text-sm !rounded-xl !border-gray-300 focus:!border-primary-500 focus:!ring-2 focus:!ring-primary-100"
                   autoSize={{ minRows: 1, maxRows: 6 }}
                 />
-                <button
-                  onClick={handleSend}
-                  disabled={!inputValue.trim() || isLoading}
-                  className="absolute cursor-pointer right-3 bottom-[10px] p-2 bg-primary-500 text-white rounded-full hover:bg-primary-500 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                >
-                  <ArrowUp className="w-5 h-5 font-bold text-white" />
-                </button>
+                {isLoading ? (
+                  <button
+                    onClick={handleStop}
+                    className="absolute cursor-pointer right-3 bottom-[10px] p-2 bg-primary-500 text-white rounded-full hover:bg-primary-500 transition-colors"
+                  >
+                    <Square className="w-5 h-5" fill="white" color="white" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleSend()}
+                    disabled={!inputValue.trim()}
+                    className="absolute cursor-pointer right-3 bottom-[10px] p-2 bg-primary-500 text-white rounded-full hover:bg-primary-500 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <ArrowUp className="w-5 h-5 font-bold text-white" />
+                  </button>
+                )}
               </div>
             </div>
           </div>

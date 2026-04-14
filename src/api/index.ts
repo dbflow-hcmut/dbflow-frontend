@@ -22,8 +22,13 @@ export const PROXY_SCHEMA_DIAGRAM = (schemaId: string) => `${PROXY_BASE}/schemas
 // LangGraph API endpoints
 export const LANGGRAPH_THREADS = `${LANGGRAPH_API_BASE}/threads`;
 export const LANGGRAPH_STREAM = (threadId: string) => `${LANGGRAPH_API_BASE}/threads/${threadId}/runs/stream`;
+export const LANGGRAPH_CANCEL_RUN = (threadId: string, runId: string) => `${LANGGRAPH_API_BASE}/threads/${threadId}/runs/${runId}/cancel`;
 
 // Chat conversation API endpoints (proxied through backend)
+export const PROXY_SCHEMA_MODEL = (projectId: string, schemaId: string) => `${PROXY_BASE}/projects/${projectId}/schemas/${schemaId}/model`;
+
 export const PROXY_CHAT_CONVERSATIONS = `${PROXY_BASE}/chat/conversations`;
 export const PROXY_CHAT_CONVERSATION_DETAIL = (conversationId: string) => `${PROXY_CHAT_CONVERSATIONS}/${conversationId}`;
 export const PROXY_CHAT_CONVERSATION_MESSAGES = (conversationId: string) => `${PROXY_CHAT_CONVERSATIONS}/${conversationId}/messages`;
+export const PROXY_CHAT_CONVERSATION_PROJECT = (conversationId: string) => `${PROXY_CHAT_CONVERSATIONS}/${conversationId}/project`;
+export const PROXY_CHAT_PROJECT_CONVERSATIONS = (projectId: string) => `${PROXY_CHAT_CONVERSATIONS}/project/${projectId}`;

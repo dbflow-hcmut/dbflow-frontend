@@ -58,6 +58,7 @@ import { useAuth } from "@/providers/AuthProvider";
 import { checkSchemaExistence, getProjectPermissions } from "@/api/projects/client";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import ShareProject from "@/components/ShareProject";
+import type { ConceptualModelPayload } from "./utils/conceptual-model.builder";
 
 export type EntityField = {
     id: string;
@@ -133,6 +134,7 @@ const EditProject = (props: IPropsEditProject) => {
     const [isSidebarModalOpen, setIsSidebarModalOpen] = useState(true);
     const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
     const [isChatBoxOpen, setIsChatBoxOpen] = useState(false);
+    const [chatThreadId, setChatThreadId] = useState<string | undefined>(undefined);
     const [propertiesName, setPropertiesName] = useState("");
     const [selectedSchema, setSelectedSchema] = useState<ProjectSchemasResponse | null>(null);
     const [isLoadingDiagram, setIsLoadingDiagram] = useState(false);
@@ -278,6 +280,25 @@ const EditProject = (props: IPropsEditProject) => {
     const [exportInitialConfig, setExportInitialConfig] = useState<{ format: ExportFormat; scope: ExportScope }>({ format: 'png', scope: 'all' });
 
     const isUserSelectingSchemaRef = useRef(false);
+
+    // Auto-open chatbox when navigated from AI chat page (with URL params)
+    useEffect(() => {
+        const openChat = searchParams.get("openChat");
+        const chatThread = searchParams.get("chatThread");
+        if (openChat === "true") {
+            setIsChatBoxOpen(true);
+            if (chatThread) {
+                setChatThreadId(chatThread);
+            }
+            // Clean URL params (remove openChat and chatThread)
+            const params = new URLSearchParams(searchParams.toString());
+            params.delete("openChat");
+            params.delete("chatThread");
+            if (projectData?.id) {
+                router.replace(`/projects/${projectData.id}?${params.toString()}`, { scroll: false });
+            }
+        }
+    }, [searchParams, projectData?.id, router]);
 
     const updateUrlWithSchemaId = useCallback((schemaId: string) => {
         if (!projectData?.id) return;
@@ -557,7 +578,7 @@ const EditProject = (props: IPropsEditProject) => {
         [setEdges]
     );
 
-    const onReconnectEnd = useCallback((_: MouseEvent | TouchEvent, edge: Edge) => {
+    const onReconnectEnd = useCallback((_evt: MouseEvent | TouchEvent, _edge: Edge) => {
         if (!edgeReconnectSuccessful.current && reconnectingEdgeRef.current) {
             // Reconnection failed — restore the original edge
             const saved = reconnectingEdgeRef.current;
@@ -664,7 +685,7 @@ const EditProject = (props: IPropsEditProject) => {
         awareness: conceptualAwareness,
         applyModelPayload,
         mutateModel: conceptualMutateModel,
-        modelData: conceptualModelData,
+        modelData: _conceptualModelData,
     } = useConceptualCollaboration({
         enabled: Boolean(isConceptualSchema && hasPermission && isValidSchema === true && !!token),
         projectId: projectData?.id,
@@ -719,6 +740,17 @@ const EditProject = (props: IPropsEditProject) => {
     const effectiveAddDoubleEntity = modelAwareCreators?.addDoubleEntity ?? addDoubleEntity;
     const effectiveAddRelationship = modelAwareCreators?.addRelationship ?? addRelationship;
     const effectiveAddDoubleRelationship = modelAwareCreators?.addDoubleRelationship ?? addDoubleRelationship;
+
+    // Callback for ChatBox: when AI generates a model JSON, apply it to the conceptual diagram
+    const handleChatModelGenerated = useCallback((modelJson: Record<string, unknown>) => {
+        if (isConceptualSchema && applyModelPayload) {
+            try {
+                applyModelPayload(modelJson as ConceptualModelPayload);
+            } catch (error) {
+                console.error("Failed to apply model from chat:", error);
+            }
+        }
+    }, [isConceptualSchema, applyModelPayload]);
 
     const projectAwareness = useProjectAwareness({
         enabled: Boolean(projectData?.id && sessionId && hasPermission && isValidSchema === true && !!token),
@@ -1281,7 +1313,14 @@ const EditProject = (props: IPropsEditProject) => {
                 />
 
                 <SearchModal open={isSearchModalOpen} onClose={() => setIsSearchModalOpen(false)} />
-                <ChatBox isOpen={isChatBoxOpen} onClose={() => setIsChatBoxOpen(false)} />
+                <ChatBox
+                    isOpen={isChatBoxOpen}
+                    onClose={() => setIsChatBoxOpen(false)}
+                    projectId={projectData?.id}
+                    schemaId={selectedSchema?.id}
+                    initialThreadId={chatThreadId}
+                    onModelGenerated={handleChatModelGenerated}
+                />
             </div>
         </ReactFlowProvider>
     );
