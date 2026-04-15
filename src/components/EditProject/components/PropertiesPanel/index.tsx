@@ -37,6 +37,8 @@ type PropertiesPanelProps = {
         updates: Partial<{ name: string; isKey: boolean }>
     ) => void;
     onReorderLogicalTableAttributes?: (fromIndex: number, toIndex: number) => void;
+    onUpdateLogicalEdgeCardinality?: (side: 'source' | 'target', value: '1' | 'N') => void;
+    onUpdatePhysicalEdgeCardinality?: (side: 'source' | 'target', value: '1' | 'N') => void;
 };
 
 const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
@@ -63,6 +65,8 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     onRemoveLogicalTableAttribute,
     onUpdateLogicalTableAttribute,
     onReorderLogicalTableAttributes,
+    onUpdateLogicalEdgeCardinality,
+    onUpdatePhysicalEdgeCardinality,
 }) => {
     const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
     const connectedEnds = useMemo(() => {
@@ -391,37 +395,180 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                         </div>
                     ) : selectedEdge ? (
                         selectedEdge.type === 'logical-table-edge' ? (
-                            <div className="flex flex-col gap-4">
-                                <div className="text-sm text-gray-600">
-                                    This is a logical table edge. You can adjust the path by dragging control points when the edge is selected.
-                                </div>
-                                {selectedEdge.data?.label && (
-                                    <div>
-                                        <label className="block text-sm font-medium mb-2">Label</label>
-                                        <Input
-                                            value={selectedEdge.data.label}
-                                            placeholder="Edge label"
-                                            disabled
-                                        />
+                            (() => {
+                                // Parse handle ids to extract table / column info
+                                const srcNode = nodes.find(n => n.id === selectedEdge.source);
+                                const tgtNode = nodes.find(n => n.id === selectedEdge.target);
+                                const srcData = srcNode?.data as LogicalTableData | undefined;
+                                const tgtData = tgtNode?.data as LogicalTableData | undefined;
+
+                                // Handle format: lid_{nodeId}_col_{index}-{side}
+                                const parseColIndex = (handle?: string | null): number => {
+                                    if (!handle) return -1;
+                                    const m = handle.match(/_col_(\d+)/);
+                                    return m ? parseInt(m[1], 10) : -1;
+                                };
+
+                                const srcColIdx = parseColIndex(selectedEdge.sourceHandle);
+                                const tgtColIdx = parseColIndex(selectedEdge.targetHandle);
+                                const srcCol = srcData?.columns?.[srcColIdx];
+                                const tgtCol = tgtData?.columns?.[tgtColIdx];
+
+                                const srcCard: string = (selectedEdge.data as Record<string, unknown>)?.sourceCardinality as string || 'N';
+                                const tgtCard: string = (selectedEdge.data as Record<string, unknown>)?.targetCardinality as string || '1';
+
+                                return (
+                                    <div className="flex flex-col gap-4">
+                                        {/* Cardinality selector */}
+                                        <div>
+                                            <label className="block text-sm font-medium mb-2">Cardinality</label>
+                                            <Select
+                                                value={`${srcCard}:${tgtCard}`}
+                                                onChange={(val: string) => {
+                                                    const [s, t] = val.split(':') as ['1' | 'N', '1' | 'N'];
+                                                    onUpdateLogicalEdgeCardinality?.('source', s);
+                                                    setTimeout(() => onUpdateLogicalEdgeCardinality?.('target', t), 0);
+                                                }}
+                                                className="w-full"
+                                                options={[
+                                                    { label: 'N : 1 (Many-to-One)', value: 'N:1' },
+                                                    { label: '1 : 1 (One-to-One)', value: '1:1' },
+                                                    { label: '1 : N (One-to-Many)', value: '1:N' },
+                                                    { label: 'N : N (Many-to-Many)', value: 'N:N' },
+                                                ]}
+                                            />
+                                        </div>
+
+                                        {/* Source side */}
+                                        <div className="border border-gray-200 rounded-lg p-3">
+                                            <div className="text-xs font-semibold mb-2 text-gray-500">
+                                                {srcCard} — Source
+                                            </div>
+                                            <div className="space-y-1">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-xs text-gray-500">Table</span>
+                                                    <span className="text-sm font-medium truncate ml-2">
+                                                        {srcData?.name || selectedEdge.source}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-xs text-gray-500">Column</span>
+                                                    <span className="text-sm font-medium truncate ml-2">
+                                                        {srcCol?.name || `col_${srcColIdx}`}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Arrow */}
+                                        <div className="flex justify-center text-gray-400 text-lg">→</div>
+
+                                        {/* Target side */}
+                                        <div className="border border-gray-200 rounded-lg p-3">
+                                            <div className="text-xs font-semibold mb-2 text-gray-500">
+                                                {tgtCard} — Target
+                                            </div>
+                                            <div className="space-y-1">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-xs text-gray-500">Table</span>
+                                                    <span className="text-sm font-medium truncate ml-2">
+                                                        {tgtData?.name || selectedEdge.target}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-xs text-gray-500">Column</span>
+                                                    <span className="text-sm font-medium truncate ml-2">
+                                                        {tgtCol?.name || `col_${tgtColIdx}`}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
-                                )}
-                            </div>
+                                );
+                            })()
                         ) : selectedEdge.type === 'relation-table-edge' ? (
-                            <div className="flex flex-col gap-4">
-                                <div className="text-sm text-gray-600">
-                                    This is a relation table edge. You can adjust the path by dragging control points when the edge is selected.
-                                </div>
-                                {selectedEdge.data?.label && (
-                                    <div>
-                                        <label className="block text-sm font-medium mb-2">Label</label>
-                                        <Input
-                                            value={selectedEdge.data.label}
-                                            placeholder="Edge label"
-                                            disabled
-                                        />
+                            (() => {
+                                const srcNode = nodes.find(n => n.id === selectedEdge.source);
+                                const tgtNode = nodes.find(n => n.id === selectedEdge.target);
+                                const srcData = srcNode?.data as RelationTableData | undefined;
+                                const tgtData = tgtNode?.data as RelationTableData | undefined;
+
+                                // Find column names from handles
+                                const srcColName = selectedEdge.sourceHandle || '';
+                                const tgtColName = selectedEdge.targetHandle || '';
+
+                                const srcCard: string = (selectedEdge.data as Record<string, unknown>)?.sourceCardinality as string || 'N';
+                                const tgtCard: string = (selectedEdge.data as Record<string, unknown>)?.targetCardinality as string || '1';
+
+                                return (
+                                    <div className="flex flex-col gap-4">
+                                        {/* Cardinality selector */}
+                                        <div>
+                                            <label className="block text-sm font-medium mb-2">Cardinality</label>
+                                            <Select
+                                                value={`${srcCard}:${tgtCard}`}
+                                                onChange={(val: string) => {
+                                                    const [s, t] = val.split(':') as ['1' | 'N', '1' | 'N'];
+                                                    onUpdatePhysicalEdgeCardinality?.('source', s);
+                                                    setTimeout(() => onUpdatePhysicalEdgeCardinality?.('target', t), 0);
+                                                }}
+                                                className="w-full"
+                                                options={[
+                                                    { label: 'N : 1 (Many-to-One)', value: 'N:1' },
+                                                    { label: '1 : 1 (One-to-One)', value: '1:1' },
+                                                    { label: '1 : N (One-to-Many)', value: '1:N' },
+                                                    { label: 'N : N (Many-to-Many)', value: 'N:N' },
+                                                ]}
+                                            />
+                                        </div>
+
+                                        {/* Source side */}
+                                        <div className="border border-gray-200 rounded-lg p-3">
+                                            <div className="text-xs font-semibold mb-2 text-gray-500">
+                                                {srcCard} — Source
+                                            </div>
+                                            <div className="space-y-1">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-xs text-gray-500">Table</span>
+                                                    <span className="text-sm font-medium truncate ml-2">
+                                                        {srcData?.name || selectedEdge.source}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-xs text-gray-500">Column</span>
+                                                    <span className="text-sm font-medium truncate ml-2">
+                                                        {srcColName || '?'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Arrow */}
+                                        <div className="flex justify-center text-gray-400 text-lg">→</div>
+
+                                        {/* Target side */}
+                                        <div className="border border-gray-200 rounded-lg p-3">
+                                            <div className="text-xs font-semibold mb-2 text-gray-500">
+                                                {tgtCard} — Target
+                                            </div>
+                                            <div className="space-y-1">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-xs text-gray-500">Table</span>
+                                                    <span className="text-sm font-medium truncate ml-2">
+                                                        {tgtData?.name || selectedEdge.target}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-xs text-gray-500">Column</span>
+                                                    <span className="text-sm font-medium truncate ml-2">
+                                                        {tgtColName || '?'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
-                                )}
-                            </div>
+                                );
+                            })()
                         ) : (
                             <div className="flex flex-col gap-4">
                                 <div>

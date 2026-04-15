@@ -14,6 +14,7 @@ export interface LangGraphStreamRequest {
   assistant_id: string;
   input: {
     messages: ChatMessage[];
+    current_level?: string;
   };
   config?: {
     configurable?: {
@@ -252,6 +253,7 @@ export async function streamChatToLangGraph(
   ensureThread: boolean = true,
   onReasoning?: (info: RoutingInfo) => void,
   abortSignal?: AbortSignal,
+  currentLevel?: string,
 ): Promise<string | null> {
   let runId: string | null = null;
   try {
@@ -268,6 +270,7 @@ export async function streamChatToLangGraph(
       assistant_id: assistantId,
       input: {
         messages: messages,
+        ...(currentLevel ? { current_level: currentLevel } : {}),
       },
       config: {
         configurable: {

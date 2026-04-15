@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { NodeResizer, Position, useNodeId, useStore, useReactFlow } from "reactflow";
 import classNames from "classnames";
 import {
@@ -9,7 +9,7 @@ import {
     DatabaseSchemaTableCell,
 } from "@/components/database-schema-node";
 import { LabeledHandle } from "@/components/labeled-handle";
-import { KeyRound } from "lucide-react";
+import { KeyRound, Link2 } from "lucide-react";
 
 type LogicalColumn = {
     name: string;
@@ -24,10 +24,23 @@ export type LogicalTableData = {
 const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
     const nodeId = useNodeId();
     const node = useStore((store) => store.nodeInternals.get(nodeId!));
+    const edges = useStore((store) => store.edges);
     const isSelected = node?.selected;
     const [isHovered, setIsHovered] = useState(false);
     const [isEditingName, setIsEditingName] = useState(false);
     const [localName, setLocalName] = useState(data.name);
+
+    // Derive FK columns from edges: a column is FK if it's the source of an FK edge
+    const fkColumnIds = useMemo(() => {
+        const ids = new Set<string>();
+        for (const e of edges) {
+            if (e.type === 'logical-table-edge' && e.source === nodeId && e.sourceHandle) {
+                const match = e.sourceHandle.match(/^(lid_.+_col_\d+)/);
+                if (match) ids.add(match[1]);
+            }
+        }
+        return ids;
+    }, [edges, nodeId]);
     const { setNodes } = useReactFlow();
     const nameRef = useRef<HTMLDivElement | null>(null);
     const contentRef = useRef<HTMLDivElement | null>(null);
@@ -238,9 +251,10 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
                         data.columns.map((col, idx) => {
                             // Generate columnId following the same format as in builder
                             const columnId = `lid_${nodeId}_col_${idx}`;
+                            const isFK = fkColumnIds.has(columnId);
                             return (
                                 <DatabaseSchemaTableRow key={idx} style={{ whiteSpace: 'nowrap' }}>
-                                    <DatabaseSchemaTableCell className="font-light flex-1 flex justify-start" style={{ paddingLeft: 0, paddingRight: '12px' }}>
+                                    <DatabaseSchemaTableCell className="font-light flex-1 flex items-center gap-1 justify-start" style={{ paddingLeft: 0, paddingRight: '12px' }}>
                                         <LabeledHandle
                                             id={`${columnId}-left`}
                                             title={col.name}
@@ -252,7 +266,10 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
                                             isHovered={isHovered}
                                         />
                                         {col.isKey && (
-                                            <KeyRound size={14} className="text-gray-500" />
+                                            <KeyRound size={14} className="text-amber-500" title="Primary Key" />
+                                        )}
+                                        {isFK && (
+                                            <Link2 size={14} className="text-blue-500" title="Foreign Key" />
                                         )}
                                     </DatabaseSchemaTableCell>
                                     <DatabaseSchemaTableCell className="font-thin flex-1 flex justify-end" style={{ paddingRight: 0, paddingLeft: '12px' }}>

@@ -9,9 +9,11 @@ type FooterProps = {
     isSidebarModalOpen: boolean;
     isRightPanelOpen: boolean;
     canEdit?: boolean;
+    commentMode?: boolean;
     onToggleSidebar: () => void;
     onToggleRightPanel: () => void;
     onToggleChatBox: () => void;
+    onToggleCommentMode?: () => void;
     onUndo?: () => void;
     onRedo?: () => void;
     canUndo?: boolean;
@@ -24,9 +26,11 @@ const Footer: React.FC<FooterProps> = ({
     isSidebarModalOpen,
     isRightPanelOpen,
     canEdit = true,
+    commentMode = false,
     onToggleSidebar,
     onToggleRightPanel,
     onToggleChatBox,
+    onToggleCommentMode,
     onUndo,
     onRedo,
     canUndo = false,
@@ -51,46 +55,50 @@ const Footer: React.FC<FooterProps> = ({
                     </div>
                     <div className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 pl-8 py-2 h-12 ml-10" style={{ pointerEvents: canEdit ? 'auto' : 'none', opacity: canEdit ? 1 : 0.5 }}>                        
                         <Button
-                            type={interactionMode === 'default' ? 'primary' : 'text'}
-                            className="!px-2"
-                            onClick={() => setInteractionMode('default')}
+                            type={interactionMode === 'default' && !commentMode ? 'primary' : 'text'}
+                            className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
+                            onClick={() => { setInteractionMode('default'); if (onToggleCommentMode && commentMode) onToggleCommentMode(); }}
                         >
                             <MousePointer2 size={18} />
                         </Button>
                         <Button
-                            type={interactionMode === 'panning' ? 'primary' : 'text'}
-                            className="!px-2"
-                            onClick={() => setInteractionMode('panning')}
+                            type={interactionMode === 'panning' && !commentMode ? 'primary' : 'text'}
+                            className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
+                            onClick={() => { setInteractionMode('panning'); if (onToggleCommentMode && commentMode) onToggleCommentMode(); }}
                         >
                             <Hand size={18} />
                         </Button>
                         <Button
                             type="text"
-                            className="!px-2"
+                            className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
                         >
                             <StickyNote size={18} />
                         </Button>
                         <Button
                             type="text"
-                            className="!px-2"
+                            className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
                         >
                             <Type size={18} />
                         </Button>
                         <Button
                             type="text"
-                            className="!px-2"
+                            className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
                         >
                             <ArrowUpRight size={18} />
                         </Button>
                         <Button
                             type="text"
-                            className="!px-2"
+                            className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
                         >
                             <PenTool size={18} />
                         </Button>
                         <Button
-                            type="text"
-                            className="!px-2"
+                            type={commentMode ? 'primary' : 'text'}
+                            className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
+                            onClick={() => {
+                                if (onToggleCommentMode) onToggleCommentMode();
+                                if (!commentMode) setInteractionMode('default');
+                            }}
                         >
                             <MessageCircleMore size={18} />
                         </Button>

@@ -1,4 +1,4 @@
-import { Node, Viewport, Edge, MarkerType } from "reactflow";
+import { Node, Viewport, Edge } from "reactflow";
 import type { NodeData } from "../index";
 import type { LogicalTableData } from "@/components/erds-notations/logical-table";
 import { generateDiagramId } from "./functions";
@@ -6,6 +6,8 @@ import { generateDiagramId } from "./functions";
 type LogicalTableEdgeData = {
     label?: string;
     controlPoints?: Array<{ x: number; y: number }>;
+    sourceCardinality?: '1' | 'N';
+    targetCardinality?: '1' | 'N';
 };
 
 export const getViewportStorageKey = (schemaId?: string | null) =>
@@ -84,6 +86,8 @@ export type StoredLogicalDiagramEdge = {
         text?: string;
         position?: { x: number; y: number };
     };
+    sourceCardinality?: '1' | 'N';
+    targetCardinality?: '1' | 'N';
 };
 
 type LegacyStoredNode = {
@@ -271,27 +275,26 @@ const mapReactEdgeToStoredEdge = (
     // Extract columnId and side from edge handles
     // Handle format: "{columnId}-{side}"
     // Example: "lid_cid_3b6a8e47-8ab9-44ec-9278-475dbbff890a_col_0-left"
-    const extractHandleInfo = (handle: string | null | undefined): { columnId: string; side: "left" | "right" } | null => {
-        if (!handle) return null;
-        // Match pattern: (columnId)-(left|right) where columnId is lid_..._col_\d+
-        const match = handle.match(/^(lid_.+_col_\d+)-(left|right)$/);
-        if (!match) return null;
-        return { 
-            columnId: match[1], 
-            side: match[2] as "left" | "right" 
+    const extractHandleInfo = (handle: string | null | undefined, fallbackNodeId: string): { columnId: string; side: "left" | "right" } => {
+        if (handle) {
+            // Match pattern: (columnId)-(left|right) where columnId is lid_..._col_\d+
+            const match = handle.match(/^(lid_.+_col_\d+)-(left|right)$/);
+            if (match) {
+                return { 
+                    columnId: match[1], 
+                    side: match[2] as "left" | "right" 
+                };
+            }
+        }
+        // Fallback: first column of the node
+        return {
+            columnId: `lid_${fallbackNodeId}_col_0`,
+            side: "right",
         };
     };
 
-    const sourceHandleInfo = extractHandleInfo(edge.sourceHandle);
-    const targetHandleInfo = extractHandleInfo(edge.targetHandle);
-
-    if (!sourceHandleInfo || !targetHandleInfo) {
-        console.warn('[Logical] Invalid handle format:', {
-            sourceHandle: edge.sourceHandle,
-            targetHandle: edge.targetHandle
-        });
-        return null;
-    }
+    const sourceHandleInfo = extractHandleInfo(edge.sourceHandle, edge.source);
+    const targetHandleInfo = extractHandleInfo(edge.targetHandle, edge.target);
 
     // Extract column index from columnId for fkRef
     const extractColumnIndex = (columnId: string): number => {
@@ -307,10 +310,10 @@ const mapReactEdgeToStoredEdge = (
     const storedEdge: StoredLogicalDiagramEdge = {
         id: edge.id || generateDiagramId(),
         type: "fk",
-        source: sourceHandleInfo.columnId, // columnId from handle
-        target: targetHandleInfo.columnId, // columnId from handle
-        sourceSide: sourceHandleInfo.side, // Store which side (left/right)
-        targetSide: targetHandleInfo.side, // Store which side (left/right)
+        source: sourceHandleInfo.columnId,
+        target: targetHandleInfo.columnId,
+        sourceSide: sourceHandleInfo.side,
+        targetSide: targetHandleInfo.side,
         points,
         style: sanitizeStyleForStorage(edge.style),
         fkRef: {
@@ -320,9 +323,11 @@ const mapReactEdgeToStoredEdge = (
         labels: edge.data?.label
             ? {
                   text: edge.data.label,
-                  position: { x: 0, y: 0 }, // Will be calculated from control points
+                  position: { x: 0, y: 0 },
               }
             : undefined,
+        sourceCardinality: edge.data?.sourceCardinality,
+        targetCardinality: edge.data?.targetCardinality,
     };
 
     return storedEdge;
@@ -331,9 +336,12 @@ const mapReactEdgeToStoredEdge = (
 const isSchemaStoredEdge = (edge: unknown): edge is StoredLogicalDiagramEdge => {
     if (!edge || typeof edge !== "object") return false;
     const candidate = edge as StoredLogicalDiagramEdge;
+    // Stored edges have type "fk" or "noteLink" and source is a columnId (lid_xxx_col_N)
+    // React edges have type "logical-table-edge" and source is a nodeId
     return (
         typeof candidate.id === "string" &&
         typeof candidate.type === "string" &&
+        (candidate.type === "fk" || candidate.type === "noteLink") &&
         typeof candidate.source === "string" &&
         typeof candidate.target === "string"
     );
@@ -392,6 +400,8 @@ const mapSchemaEdgeToReactEdge = (
     const data: LogicalTableEdgeData = {
         label: edge.labels?.text,
         controlPoints: edge.points?.map((p) => ({ x: p.x, y: p.y })),
+        sourceCardinality: edge.sourceCardinality || 'N',
+        targetCardinality: edge.targetCardinality || '1',
     };
 
     const reactEdge: Edge<LogicalTableEdgeData> = {
@@ -400,7 +410,6 @@ const mapSchemaEdgeToReactEdge = (
         target: targetNodeId, // Use nodeId for ReactFlow
         type: "logical-table-edge",
         data,
-        markerEnd: { type: MarkerType.ArrowClosed },
         ...(sourceHandle ? { sourceHandle } : {}),
         ...(targetHandle ? { targetHandle } : {}),
     };
@@ -439,13 +448,14 @@ export const mapStoredEdgesToReactEdges = (
                 return mapSchemaEdgeToReactEdge(edge, nodeMap);
             }
 
-            // Legacy edge format
+            // Legacy/React edge format — preserve as-is with correct type
             const legacyEdge = edge as Edge;
             if (!legacyEdge.source || !legacyEdge.target) return null;
 
             return {
                 ...legacyEdge,
                 type: "logical-table-edge",
+                selected: false,
                 data: legacyEdge.data || {},
             };
         })

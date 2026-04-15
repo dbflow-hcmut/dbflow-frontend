@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { Node, Edge } from "reactflow";
 import * as Y from "yjs";
@@ -15,8 +15,10 @@ import {
     mapReactNodesToStoredNodes,
     mapReactEdgesToStoredEdges,
 } from "../utils/logical-diagram.builder";
-import { buildLogicalModel } from "../utils/logical-model.builder";
-import type { LogicalModelPayload } from "../utils/logical-model.builder";
+import { buildDiagramFromLogicalModel, createEmptyLogicalModel } from "../utils/logical-model.builder";
+import type { LogicalModelPayload, MutateLogicalModelFn } from "../utils/logical-model.builder";
+
+export type { MutateLogicalModelFn };
 
 type UseLogicalCollaborationParams = {
     enabled: boolean;
@@ -56,7 +58,15 @@ export const useLogicalCollaboration = ({
     const modelDataRef = useRef<LogicalModelPayload | null>(null);
     const [awareness, setAwareness] = useState<CollaborationAwareness | null>(null);
     const currentSchemaIdRef = useRef<string | null>(null);
+    const initialSyncDoneRef = useRef(false);
+    const isGeneratingDiagramRef = useRef(false);
 
+    const nodesRef = useRef(nodes);
+    nodesRef.current = nodes;
+    const edgesRef = useRef(edges);
+    edgesRef.current = edges;
+
+    // ── Reset refs when schema or enabled changes ────────────────────────
     useEffect(() => {
         if (!enabled) {
             lastSyncedDiagramStringRef.current = null;
@@ -64,6 +74,8 @@ export const useLogicalCollaboration = ({
             lastSyncedModelStringRef.current = null;
             lastAppliedModelStringRef.current = null;
             hasLoadedInitialDataRef.current = false;
+            initialSyncDoneRef.current = false;
+            isGeneratingDiagramRef.current = false;
             currentSchemaIdRef.current = null;
             return;
         }
@@ -73,9 +85,12 @@ export const useLogicalCollaboration = ({
         lastSyncedModelStringRef.current = null;
         lastAppliedModelStringRef.current = null;
         hasLoadedInitialDataRef.current = false;
+        initialSyncDoneRef.current = false;
+        isGeneratingDiagramRef.current = false;
         currentSchemaIdRef.current = schema?.id ?? null;
     }, [enabled, schema?.id]);
 
+    // ── Main Yjs connection + sync effect ────────────────────────────────
     useEffect(() => {
         if (!enabled) return;
         if (!sessionId || !schema?.id) return;
@@ -105,72 +120,56 @@ export const useLogicalCollaboration = ({
             pendingModelUpdateRef.current = null;
         }
 
+        // ── Apply diagram from Yjs into React state ──────────────────
         const applyDiagramFromYjs = (
             diagramPayload: {
                 nodes?: StoredLogicalNode[] | Node<NodeData>[];
                 edges?: StoredLogicalDiagramEdge[] | Edge[];
             },
-            rawDiagramString?: string
+            rawDiagramString?: string,
         ) => {
-            // Only apply if this hook is handling the current schema
-            if (currentSchemaIdRef.current !== schema?.id) {
-                return;
-            }
+            if (currentSchemaIdRef.current !== schema?.id) return;
 
             const { nodes: yjsNodes = [], edges: yjsEdges = [] } = diagramPayload;
 
-            console.log("[Logical Collaboration] applyDiagramFromYjs - received nodes:", yjsNodes.length, "edges:", yjsEdges.length);
-
-            // Detect if nodes are stored format or react format
-            // Stored nodes have: size: {w, h} (not style.width/height), or tableId
-            // React nodes have: data object, style: {width, height} (not size: {w, h})
-            const isStoredFormat = yjsNodes.length > 0 && (
-                (yjsNodes[0] && 'size' in yjsNodes[0] && typeof (yjsNodes[0] as { size: unknown }).size === 'object' && 'w' in ((yjsNodes[0] as { size: Record<string, unknown> }).size)) ||
-                (yjsNodes[0] && 'tableId' in yjsNodes[0])
-            );
-
-            console.log("[Logical Collaboration] isStoredFormat:", isStoredFormat, "sample node:", yjsNodes[0]);
+            // Detect stored vs react format from nodes
+            const isStoredFormat =
+                yjsNodes.length > 0 &&
+                ((yjsNodes[0] &&
+                    "size" in yjsNodes[0] &&
+                    typeof (yjsNodes[0] as { size: unknown }).size === "object" &&
+                    "w" in (yjsNodes[0] as { size: Record<string, unknown> }).size) ||
+                    (yjsNodes[0] && "tableId" in yjsNodes[0]));
 
             let reactNodes: Node<NodeData>[];
             try {
                 if (isStoredFormat) {
                     reactNodes = mapStoredNodesToReactNodes(yjsNodes as StoredLogicalNode[]);
                 } else {
-                    // Already in React format, just ensure selected is false
-                    reactNodes = (yjsNodes as Node<NodeData>[]).map(node => ({
+                    reactNodes = (yjsNodes as Node<NodeData>[]).map((node) => ({
                         ...node,
-                        selected: false
+                        selected: false,
                     }));
                 }
-                console.log("[Logical Collaboration] mapped reactNodes:", reactNodes.length);
             } catch (error) {
-                console.error("[Logical Collaboration] Error mapping nodes:", error);
+                console.error("[Logical] Error mapping nodes:", error);
                 return;
             }
 
             let reactEdges: Edge[];
             try {
-                if (isStoredFormat) {
-                    reactEdges = mapStoredEdgesToReactEdges(
-                        yjsEdges as (StoredLogicalDiagramEdge | Edge)[],
-                        reactNodes
-                    );
-                } else {
-                    // Already in React format
-                    reactEdges = (yjsEdges as Edge[]).map(edge => ({
-                        ...edge,
-                        selected: false
-                    }));
-                }
-                console.log("[Logical Collaboration] mapped reactEdges:", reactEdges.length);
+                // Always use mapStoredEdgesToReactEdges — handles both formats
+                reactEdges = mapStoredEdgesToReactEdges(
+                    yjsEdges as (StoredLogicalDiagramEdge | Edge)[],
+                    reactNodes,
+                );
             } catch (error) {
-                console.error("[Logical Collaboration] Error mapping edges:", error);
+                console.error("[Logical] Error mapping edges:", error);
                 return;
             }
 
             isSyncingFromYjsRef.current = true;
             hasLoadedInitialDataRef.current = true;
-            console.log("[Logical Collaboration] Setting nodes and edges to state");
             setNodes(reactNodes);
             setEdges(reactEdges);
 
@@ -183,106 +182,192 @@ export const useLogicalCollaboration = ({
             }
         };
 
-        const loadDiagramFromYjs = () => {
+        // ── Load diagram from Yjs ────────────────────────────────────
+        const loadDiagramFromYjs = (): { loaded: boolean; nodeCount: number; edgeCount: number } => {
             const diagramDataString = diagramMap.get("data");
             if (!diagramDataString || typeof diagramDataString !== "string") {
-                return;
+                return { loaded: false, nodeCount: 0, edgeCount: 0 };
             }
-
             try {
-                const parsedData = JSON.parse(diagramDataString) as {
+                const parsed = JSON.parse(diagramDataString) as {
                     diagram?: {
                         nodes?: Node<NodeData>[];
                         edges?: Edge[];
-                        viewport?: { x: number; y: number; zoom: number };
                     };
                 };
-
-                if (parsedData.diagram) {
-                    applyDiagramFromYjs(parsedData.diagram, diagramDataString);
+                if (parsed.diagram) {
+                    const nodeCount = (parsed.diagram.nodes ?? []).length;
+                    const edgeCount = (parsed.diagram.edges ?? []).length;
+                    applyDiagramFromYjs(parsed.diagram, diagramDataString);
+                    return { loaded: true, nodeCount, edgeCount };
                 }
             } catch (error) {
-                console.error("Error parsing diagram data from Yjs:", error);
+                console.error("[Logical] Error parsing diagram from Yjs:", error);
             }
+            return { loaded: false, nodeCount: 0, edgeCount: 0 };
         };
 
+        // ── Generate diagram from model (model-as-truth) ────────────
+        const applyModelToDiagramInternal = async (
+            modelPayload: LogicalModelPayload,
+            rawModelString?: string | null,
+        ) => {
+            if (currentSchemaIdRef.current !== schema?.id) return;
+
+            isGeneratingDiagramRef.current = true;
+
+            const currentNodes = nodesRef.current;
+            const currentEdges = edgesRef.current;
+            const existingStoredNodes =
+                currentNodes.length > 0 ? mapReactNodesToStoredNodes(currentNodes) : undefined;
+            const existingStoredEdges =
+                currentEdges.length > 0
+                    ? mapReactEdgesToStoredEdges(currentEdges, currentNodes)
+                    : undefined;
+
+            const { nodes: storedNodes, edges: storedEdges } = await buildDiagramFromLogicalModel({
+                model: modelPayload,
+                existingNodes: existingStoredNodes,
+                existingEdges: existingStoredEdges,
+                preserveUnmodeledNodes: true,
+            });
+
+            // Prevent handleModelChange from re-triggering
+            const modelStr = rawModelString ?? JSON.stringify(modelPayload);
+            lastAppliedModelStringRef.current = modelStr;
+            lastSyncedModelStringRef.current = modelStr;
+            modelDataRef.current = modelPayload;
+
+            // Write diagram to Yjs so it persists
+            const diagStr = JSON.stringify({
+                diagram: { nodes: storedNodes, edges: storedEdges },
+            });
+            lastAppliedDiagramStringRef.current = diagStr;
+            lastSyncedDiagramStringRef.current = diagStr;
+
+            if (ydocRef.current) {
+                ydocRef.current.transact(() => {
+                    ydocRef.current!.getMap("diagram").set("data", diagStr);
+                });
+            }
+
+            // Read back via same code-path as loading saved diagram
+            loadDiagramFromYjs();
+
+            setTimeout(() => {
+                isGeneratingDiagramRef.current = false;
+            }, 0);
+        };
+
+        // ── Load model ref from Yjs ─────────────────────────────────
         const loadModelFromYjs = () => {
             const modelDataString = modelMap.get("data");
-            if (!modelDataString || typeof modelDataString !== "string") {
-                return;
-            }
-
+            if (!modelDataString || typeof modelDataString !== "string") return;
             try {
                 const parsedModel = JSON.parse(modelDataString);
                 modelDataRef.current = parsedModel;
                 lastSyncedModelStringRef.current = modelDataString;
+                // NOTE: Do NOT set lastAppliedModelStringRef here.
+                // Matches conceptual pattern exactly.
             } catch (error) {
-                console.error("Error parsing model data from Yjs:", error);
+                console.error("[Logical] Error parsing model from Yjs:", error);
             }
         };
 
+        // ── Observe diagram changes (from collaborators) ─────────────
         const handleDiagramChange = () => {
             const diagramDataString = diagramMap.get("data");
-            if (diagramDataString === lastAppliedDiagramStringRef.current) {
-                return;
-            }
-
-            if (!diagramDataString || typeof diagramDataString !== "string") {
-                return;
-            }
+            if (diagramDataString === lastAppliedDiagramStringRef.current) return;
+            if (!diagramDataString || typeof diagramDataString !== "string") return;
 
             try {
-                const parsedData = JSON.parse(diagramDataString) as {
-                    diagram?: {
-                        nodes?: Node<NodeData>[];
-                        edges?: Edge[];
-                        viewport?: { x: number; y: number; zoom: number };
-                    };
+                const parsed = JSON.parse(diagramDataString) as {
+                    diagram?: { nodes?: Node<NodeData>[]; edges?: Edge[] };
                 };
-
-                if (parsedData.diagram) {
-                    applyDiagramFromYjs(parsedData.diagram, diagramDataString);
+                if (parsed.diagram) {
+                    applyDiagramFromYjs(parsed.diagram, diagramDataString);
                 }
             } catch (error) {
-                console.error("Error parsing diagram data from Yjs:", error);
+                console.error("[Logical] Error in handleDiagramChange:", error);
             }
         };
 
+        // ── Observe model changes (from AI / external) ───────────────
         const handleModelChange = () => {
             const modelDataString = modelMap.get("data");
-            if (modelDataString === lastAppliedModelStringRef.current) {
-                return;
-            }
-            if (!modelDataString || typeof modelDataString !== "string") {
-                return;
-            }
+            // Skip our own writes
+            if (modelDataString === lastAppliedModelStringRef.current) return;
+            if (!modelDataString || typeof modelDataString !== "string") return;
 
             try {
-                const parsedModel = JSON.parse(modelDataString);
-                modelDataRef.current = parsedModel;
+                const newModel = JSON.parse(modelDataString) as LogicalModelPayload;
+                modelDataRef.current = newModel;
                 lastSyncedModelStringRef.current = modelDataString;
+
+                // Only regenerate for external changes AFTER initial sync
+                if (initialSyncDoneRef.current) {
+                    console.log("[Logical] External model change → regenerating diagram");
+                    applyModelToDiagramInternal(newModel, modelDataString);
+                }
             } catch (error) {
-                console.error("Error parsing model data from Yjs:", error);
+                console.error("[Logical] Error in handleModelChange:", error);
             }
         };
 
+        // ── Initial sync: prefer diagram, fall back to model ─────────
         provider.on("synced", ({ state: isSynced }: { state: boolean }) => {
-            if (isSynced) {
-                loadDiagramFromYjs();
-                loadModelFromYjs();
+            if (!isSynced) return;
+
+            // 1. Always load model first
+            loadModelFromYjs();
+
+            // 2. Try loading diagram (has positions)
+            const { loaded: diagramLoaded, nodeCount } = loadDiagramFromYjs();
+
+            // 3. No diagram but model → auto-generate
+            const hasModel =
+                modelDataRef.current && (modelDataRef.current.tables?.length > 0);
+            // Use parsed nodeCount instead of nodesRef (React state hasn't rendered yet)
+            const diagramHasContent = diagramLoaded && nodeCount > 0;
+
+            if (diagramHasContent) {
+                // Diagram loaded successfully — mark model as "already applied"
+                // so handleModelChange won't regenerate and overwrite the diagram
+                lastAppliedModelStringRef.current = lastSyncedModelStringRef.current;
+            } else if (hasModel) {
+                console.log("[Logical] No diagram — generating from model");
+                applyModelToDiagramInternal(
+                    modelDataRef.current!,
+                    lastSyncedModelStringRef.current,
+                );
             }
+
+            // Mark initial sync done after one render cycle
+            setTimeout(() => {
+                initialSyncDoneRef.current = true;
+            }, 50);
         });
 
         diagramMap.observe(handleDiagramChange);
         modelMap.observe(handleModelChange);
 
-        const initialDiagramData = diagramMap.get("data");
-        if (initialDiagramData && typeof initialDiagramData === "string") {
-            loadDiagramFromYjs();
-        }
+        // ── Eagerly apply data already in the doc ────────────────────
         const initialModelData = modelMap.get("data");
         if (initialModelData && typeof initialModelData === "string") {
             loadModelFromYjs();
+        }
+
+        const initialDiagramData = diagramMap.get("data");
+        if (initialDiagramData && typeof initialDiagramData === "string") {
+            const { loaded, nodeCount } = loadDiagramFromYjs();
+            if (loaded && nodeCount > 0) {
+                lastAppliedModelStringRef.current = lastSyncedModelStringRef.current;
+            }
+        } else if (modelDataRef.current) {
+            applyModelToDiagramInternal(
+                modelDataRef.current,
+                lastSyncedModelStringRef.current,
+            );
         }
 
         return () => {
@@ -296,22 +381,16 @@ export const useLogicalCollaboration = ({
         };
     }, [enabled, sessionId, schema?.id, projectId, token, setNodes, setEdges]);
 
+    // ── Save diagram to Yjs (diagram only — NOT model) ───────────────
     useEffect(() => {
         if (!enabled) return;
         if (!ydocRef.current || !schema?.id) return;
-        // Only sync if this hook is handling the current schema
-        if (currentSchemaIdRef.current !== schema?.id) {
-            return;
-        }
-        if (isSyncingFromYjsRef.current) {
-            console.log("[Logical Collaboration] Skipping sync - currently syncing from Yjs");
-            return;
-        }
+        if (currentSchemaIdRef.current !== schema?.id) return;
+        if (isSyncingFromYjsRef.current) return;
+        if (isGeneratingDiagramRef.current) return;
 
-        // Prevent syncing empty data if initial data hasn't been loaded yet
-        // This prevents data loss when switching schemas
+        // Prevent syncing empty data before initial load
         if (!hasLoadedInitialDataRef.current && nodes.length === 0 && edges.length === 0) {
-            console.log("[Logical Collaboration] Skipping sync - no initial data loaded yet and diagram is empty");
             return;
         }
 
@@ -319,33 +398,15 @@ export const useLogicalCollaboration = ({
         const storedEdges = mapReactEdgesToStoredEdges(edges, nodes);
 
         const diagramPayload = {
-            diagram: {
-                nodes: storedNodes,
-                edges: storedEdges,
-            },
+            diagram: { nodes: storedNodes, edges: storedEdges },
         };
 
         let nextDiagramString: string | null = null;
-        let nextModelString: string | null = null;
-
         try {
             nextDiagramString = JSON.stringify(diagramPayload);
         } catch (error) {
-            console.error("Failed to serialize diagram payload:", error);
+            console.error("[Logical] Failed to serialize diagram:", error);
             return;
-        }
-
-        try {
-            const modelPayload = buildLogicalModel({
-                storedNodes,
-                storedEdges,
-                schemaId: schema?.id,
-                schemaName: schema?.name,
-                diagramName,
-            });
-            nextModelString = JSON.stringify(modelPayload);
-        } catch (error) {
-            console.error("Failed to serialize model payload:", error);
         }
 
         const commitDiagramUpdate = () => {
@@ -359,17 +420,6 @@ export const useLogicalCollaboration = ({
             lastSyncedDiagramStringRef.current = nextDiagramString;
         };
 
-        const commitModelUpdate = () => {
-            if (!ydocRef.current || !nextModelString) return;
-            const doc = ydocRef.current;
-            const map = doc.getMap("model");
-            lastAppliedModelStringRef.current = nextModelString;
-            doc.transact(() => {
-                map.set("data", nextModelString!);
-            });
-            lastSyncedModelStringRef.current = nextModelString;
-        };
-
         if (nextDiagramString && lastSyncedDiagramStringRef.current !== nextDiagramString) {
             if (!ydocRef.current) {
                 pendingDiagramUpdateRef.current = commitDiagramUpdate;
@@ -378,15 +428,101 @@ export const useLogicalCollaboration = ({
             }
         }
 
-        if (nextModelString && lastSyncedModelStringRef.current !== nextModelString) {
-            if (!ydocRef.current) {
-                pendingModelUpdateRef.current = commitModelUpdate;
-            } else {
-                commitModelUpdate();
-            }
-        }
+        // NOTE: Model is NOT written here.
+        // Model is only updated via applyModelPayload() or mutateModel().
     }, [enabled, nodes, edges, schema?.id, schema?.name, diagramName]);
 
-    return { awareness };
-};
+    // ── Apply model payload (full replace: Model → Diagram) ──────────
+    const applyModelPayload = useCallback(
+        async (modelPayload: LogicalModelPayload) => {
+            const existingStoredNodes = mapReactNodesToStoredNodes(nodesRef.current);
+            const existingStoredEdges = mapReactEdgesToStoredEdges(
+                edgesRef.current,
+                nodesRef.current,
+            );
+            const { nodes: storedNodes, edges: storedEdges } = await buildDiagramFromLogicalModel({
+                model: modelPayload,
+                existingNodes: existingStoredNodes,
+                existingEdges: existingStoredEdges,
+                preserveUnmodeledNodes: true,
+            });
 
+            const reactNodes = mapStoredNodesToReactNodes(storedNodes);
+            const reactEdges = mapStoredEdgesToReactEdges(storedEdges, reactNodes);
+
+            hasLoadedInitialDataRef.current = true;
+            setNodes(reactNodes);
+            setEdges(reactEdges);
+            modelDataRef.current = modelPayload;
+
+            const modelStr = JSON.stringify(modelPayload);
+            lastAppliedModelStringRef.current = modelStr;
+            lastSyncedModelStringRef.current = modelStr;
+            if (ydocRef.current) {
+                ydocRef.current.transact(() => {
+                    ydocRef.current!.getMap("model").set("data", modelStr);
+                });
+            }
+        },
+        [setNodes, setEdges],
+    );
+
+    // ── Incremental model mutation ───────────────────────────────────
+    const mutateModel: MutateLogicalModelFn = useCallback(
+        async (mutator, opts) => {
+            const current =
+                modelDataRef.current ??
+                createEmptyLogicalModel(schema?.id ?? undefined, schema?.name ?? undefined);
+            const next = mutator(current);
+
+            const existingStoredNodes = mapReactNodesToStoredNodes(nodesRef.current);
+            const existingStoredEdges = mapReactEdgesToStoredEdges(
+                edgesRef.current,
+                nodesRef.current,
+            );
+
+            const { nodes: storedNodes, edges: storedEdges } = await buildDiagramFromLogicalModel({
+                model: next,
+                existingNodes: existingStoredNodes,
+                existingEdges: existingStoredEdges,
+                preserveUnmodeledNodes: true,
+            });
+
+            const reactNodes = mapStoredNodesToReactNodes(storedNodes);
+            const reactEdges = mapStoredEdgesToReactEdges(storedEdges, reactNodes);
+
+            if (opts?.selectedNodeId && opts?.positionHint) {
+                const target = reactNodes.find((n) => n.id === opts.selectedNodeId);
+                if (target) target.position = opts.positionHint;
+            }
+
+            if (opts?.selectedNodeId) {
+                reactNodes.forEach((n) => {
+                    n.selected = n.id === opts.selectedNodeId;
+                });
+            }
+
+            hasLoadedInitialDataRef.current = true;
+            setNodes(reactNodes);
+            setEdges(reactEdges);
+            modelDataRef.current = next;
+
+            const modelStr = JSON.stringify(next);
+            lastAppliedModelStringRef.current = modelStr;
+            lastSyncedModelStringRef.current = modelStr;
+            if (ydocRef.current) {
+                ydocRef.current.transact(() => {
+                    ydocRef.current!.getMap("model").set("data", modelStr);
+                });
+            }
+        },
+        [setNodes, setEdges, schema?.id, schema?.name],
+    );
+
+    return {
+        awareness,
+        applyModelPayload,
+        mutateModel,
+        modelData: modelDataRef.current,
+    };
+};

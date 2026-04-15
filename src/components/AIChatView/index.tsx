@@ -60,6 +60,8 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
   const textAreaRef = useRef<TextAreaRef>(null);
   /** Track the current routing intent */
   const currentIntentRef = useRef<string | null>(null);
+  /** Track the detected schema level from AI routing */
+  const detectedLevelRef = useRef<string | null>(null);
   const redirectTriggeredRef = useRef(false);
   /** Track the last user message for retry */
   const lastUserMessageRef = useRef<string>("");
@@ -134,6 +136,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
     setIsLoading(true);
     setReasoningInfo(null);
     currentIntentRef.current = null;
+    detectedLevelRef.current = null;
 
     // Create AbortController for this stream
     const abortController = new AbortController();
@@ -221,9 +224,23 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
           setCreatedProjectId(project.id);
         }
 
+        const level = detectedLevelRef.current;
+        const schemaType =
+          level === "logical"
+            ? SchemaType.LOGICAL
+            : level === "physical"
+              ? SchemaType.PHYSICAL
+              : SchemaType.CONCEPTUAL;
+        const schemaName =
+          schemaType === SchemaType.LOGICAL
+            ? "Logical Schema"
+            : schemaType === SchemaType.PHYSICAL
+              ? "Physical Schema"
+              : "Conceptual Schema";
+
         const schema = await createSchema(projectIdToUse, {
-          name: "Conceptual Schema",
-          type: SchemaType.CONCEPTUAL,
+          name: schemaName,
+          type: schemaType,
         });
 
         // Save model JSON to S3 so HocusPocus loads it on connect
@@ -335,6 +352,9 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
         setReasoningInfo(info);
         if (info.intent) {
           currentIntentRef.current = info.intent;
+        }
+        if (info.detected_level) {
+          detectedLevelRef.current = info.detected_level;
         }
       },
       abortController.signal,

@@ -271,10 +271,9 @@ const mapReactEdgeToStoredEdge = (
     const targetData = targetNode.data as RelationTableData;
 
     // Extract FK information from edge handles
-    // The source handle should be a column name from source table
-    // The target handle should be a column name from target table
-    const sourceColumnName = edge.sourceHandle?.replace("-source", "") || "";
-    const targetColumnName = edge.targetHandle?.replace("-target", "") || "";
+    // Handle IDs are plain column names (no suffix) from relation-table component
+    const sourceColumnName = edge.sourceHandle?.replace("-source", "")?.replace("-target", "") || "";
+    const targetColumnName = edge.targetHandle?.replace("-target", "")?.replace("-source", "") || "";
 
     // Find the column indices
     const sourceColumnIndex = sourceData.columns?.findIndex((col) => col.name === sourceColumnName) ?? -1;
@@ -340,18 +339,28 @@ const mapSchemaEdgeToReactEdge = (
     const targetData = targetNode.data as RelationTableData;
 
     // Determine source and target handles from FK reference
+    // Handle IDs on relation-table component are just col.name (NO suffix)
     let sourceHandle: string | undefined;
     let targetHandle: string | undefined;
 
     if (edge.fkRef) {
-        const fkColumn = sourceData.columns?.[edge.fkRef.foreignKeyIndex];
-        if (fkColumn) {
-            sourceHandle = `${fkColumn.name}-source`;
+        // Source: prefer stored sourceColumnName, fallback to index lookup
+        if (edge.fkRef.sourceColumnName) {
+            sourceHandle = edge.fkRef.sourceColumnName;
+        } else {
+            const fkColumn = sourceData.columns?.[edge.fkRef.foreignKeyIndex];
+            if (fkColumn) {
+                sourceHandle = fkColumn.name;
+            }
         }
-        // For target, we need to find the primary key column
-        const pkColumn = targetData.columns?.find((col) => col.isPrimary);
-        if (pkColumn) {
-            targetHandle = `${pkColumn.name}-target`;
+        // Target: prefer stored targetColumnName, fallback to PK lookup
+        if (edge.fkRef.targetColumnName) {
+            targetHandle = edge.fkRef.targetColumnName;
+        } else {
+            const pkColumn = targetData.columns?.find((col) => col.isPrimary);
+            if (pkColumn) {
+                targetHandle = pkColumn.name;
+            }
         }
     }
 

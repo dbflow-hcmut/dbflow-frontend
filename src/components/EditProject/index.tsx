@@ -22,13 +22,15 @@ import ReactFlow, {
 } from "reactflow";
 import { toPng, toSvg } from 'html-to-image';
 import { message } from 'antd';
+import { apiGet } from "@/lib/clientFetch";
+import { PROXY_PROJECT_DETAIL } from "@/api";
 import "reactflow/dist/style.css";
 import RelationshipNode from "@/components/erds-notations/relationship";
 import AttributeNode from "@/components/erds-notations/attribute";
 import EntityNode from "@/components/erds-notations/entity";
 import ConstraintNode from "@/components/erds-notations/constraint";
 import RelationTableNode, { type RelationTableData } from "@/components/erds-notations/relation-table";
-import LogicalTableNode from "@/components/erds-notations/logical-table";
+import LogicalTableNode, { type LogicalTableData } from "@/components/erds-notations/logical-table";
 import ErdEdge from "@/components/erd-edge";
 import RelationTableEdge from "@/components/relation-table-edge";
 import LogicalTableEdge from "@/components/logical-table-edge";
@@ -39,8 +41,11 @@ import Header from "./components/Header";
 import Footer from "./components/Footer";
 import ChatBox from "./components/ChatBox";
 import ExportModal, { ExportSettings, ExportFormat, ExportScope } from "./components/ExportModal";
+import CommentPin, { type CommentData, type MentionableUser } from "./components/CommentPin";
+import CommentPanel from "./components/CommentPanel";
+import { fetchComments, createComment, updateComment, deleteComment } from "./api/comments";
 import { generateDiagramId, createNodeCreators, createUpdateFunctions } from "./utils/functions";
-import { ProjectResponse, ProjectSchemasResponse } from "@/types/projects.type";
+import { ProjectResponse, ProjectSchemasResponse, ISharedPermissionResponse } from "@/types/projects.type";
 import type { UserResponse } from "@/types/user.type";
 import useToken from "@/hooks/useToken";
 import { AddPage } from "./components/AddPage";
@@ -59,6 +64,8 @@ import { checkSchemaExistence, getProjectPermissions } from "@/api/projects/clie
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import ShareProject from "@/components/ShareProject";
 import type { ConceptualModelPayload } from "./utils/conceptual-model.builder";
+import type { LogicalModelPayload } from "./utils/logical-model.builder";
+import type { PhysicalModelPayload } from "./utils/physical-model.builder";
 
 export type EntityField = {
     id: string;
@@ -138,6 +145,13 @@ const EditProject = (props: IPropsEditProject) => {
     const [propertiesName, setPropertiesName] = useState("");
     const [selectedSchema, setSelectedSchema] = useState<ProjectSchemasResponse | null>(null);
     const [isLoadingDiagram, setIsLoadingDiagram] = useState(false);
+
+    // Comment state
+    const [commentMode, setCommentMode] = useState(false);
+    const [comments, setComments] = useState<CommentData[]>([]);
+    const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
+    const [draftComment, setDraftComment] = useState<{ x: number; y: number; nodeId: string | null } | null>(null);
+    const [mentionUsers, setMentionUsers] = useState<MentionableUser[]>([]);
 
     // Undo/Redo hook - lớp trung gian quản lý state
     // maxHistorySize: 0 = không giới hạn
@@ -394,6 +408,132 @@ const EditProject = (props: IPropsEditProject) => {
         return () => clearTimeout(timeout);
     }, [nodes, edges, isLoadingDiagram]);
 
+    // Load comments when schema changes
+    const loadComments = useCallback(async () => {
+        if (!projectData?.id || !selectedSchema?.id) return;
+        try {
+            const data = await fetchComments(projectData.id, selectedSchema.id);
+            setComments(Array.isArray(data) ? data : []);
+        } catch {
+            // silently fail
+        }
+    }, [projectData?.id, selectedSchema?.id]);
+
+    useEffect(() => {
+        loadComments();
+    }, [loadComments]);
+
+    // Load project members for @mention
+    useEffect(() => {
+        if (!projectData?.id) return;
+        (async () => {
+            try {
+                const url = `${PROXY_PROJECT_DETAIL(projectData.id)}/permissions`;
+                const res = await apiGet<ISharedPermissionResponse>(url);
+                if (res?.list_users) {
+                    setMentionUsers(
+                        res.list_users.map((u) => ({
+                            userId: u.userId,
+                            fullName: u.fullName,
+                            email: u.email,
+                            avatar: u.avatar,
+                        })),
+                    );
+                }
+            } catch {
+                // silently fail
+            }
+        })();
+    }, [projectData?.id]);
+
+    // Comment handlers — draft-based flow (no browser prompt)
+    const handlePlaceComment = useCallback(
+        (x: number, y: number) => {
+            if (!projectData?.id || !selectedSchema?.id) return;
+            // Detect if click is inside a node
+            let attachedNodeId: string | null = null;
+            let storeX = x;
+            let storeY = y;
+            for (const node of nodes) {
+                const nx = node.position.x;
+                const ny = node.position.y;
+                const nw = (node as unknown as { measured?: { width?: number } }).measured?.width ?? (node.width || 0);
+                const nh = (node as unknown as { measured?: { height?: number } }).measured?.height ?? (node.height || 0);
+                if (x >= nx && x <= nx + nw && y >= ny && y <= ny + nh) {
+                    attachedNodeId = node.id;
+                    // Store as offset from node origin so it follows the node
+                    storeX = x - nx;
+                    storeY = y - ny;
+                    break;
+                }
+            }
+            setDraftComment({ x: storeX, y: storeY, nodeId: attachedNodeId });
+            setActiveCommentId(null);
+        },
+        [projectData?.id, selectedSchema?.id, nodes],
+    );
+
+    const handleSubmitDraft = useCallback(
+        async (content: string) => {
+            if (!projectData?.id || !selectedSchema?.id || !draftComment) return;
+            try {
+                await createComment(projectData.id, selectedSchema.id, {
+                    x: draftComment.x,
+                    y: draftComment.y,
+                    content,
+                    nodeId: draftComment.nodeId ?? undefined,
+                });
+                await loadComments();
+            } catch {
+                message.error("Failed to create comment");
+            }
+            setDraftComment(null);
+            setCommentMode(false);
+        },
+        [projectData?.id, selectedSchema?.id, draftComment, loadComments],
+    );
+
+    const handleCancelDraft = useCallback(() => {
+        setDraftComment(null);
+        setCommentMode(false);
+    }, []);
+
+    const handleReplyComment = useCallback(async (parentId: string, content: string) => {
+        if (!projectData?.id || !selectedSchema?.id) return;
+        const parent = comments.find(c => c.id === parentId);
+        if (!parent) return;
+        try {
+            await createComment(projectData.id, selectedSchema.id, {
+                x: parent.x, y: parent.y, content, parentId,
+            });
+            await loadComments();
+        } catch {
+            message.error("Failed to add reply");
+        }
+    }, [projectData?.id, selectedSchema?.id, comments, loadComments]);
+
+    const handleResolveComment = useCallback(async (commentId: string) => {
+        if (!projectData?.id || !selectedSchema?.id) return;
+        try {
+            await updateComment(projectData.id, selectedSchema.id, commentId, { resolved: true });
+            await loadComments();
+            setActiveCommentId(null);
+        } catch {
+            message.error("Failed to resolve comment");
+        }
+    }, [projectData?.id, selectedSchema?.id, loadComments]);
+
+    const handleDeleteComment = useCallback(async (commentId: string) => {
+        if (!projectData?.id || !selectedSchema?.id) return;
+        try {
+            await deleteComment(projectData.id, selectedSchema.id, commentId);
+            await loadComments();
+            setActiveCommentId(null);
+        } catch {
+            message.error("Failed to delete comment");
+        }
+    }, [projectData?.id, selectedSchema?.id, loadComments]);
+
     useEffect(() => {
         if (token) {
             const sessionId = crypto.randomUUID();
@@ -541,11 +681,28 @@ const EditProject = (props: IPropsEditProject) => {
             id: generateDiagramId(),
             type: edgeType,
             animated: false,
-            ...(storedType || Object.keys(edgeData).length
-                ? { data: { ...edgeData, ...(storedType ? { storedType } : {}) } }
-                : {}),
-            // Add arrow marker for logical table edges
-            ...(isLogicalTableEdge ? { markerEnd: { type: 'arrowclosed' } } : {}),
+            ...(edgeType === 'logical-table-edge'
+                ? (() => {
+                    // Auto-detect cardinality from column isKey
+                    const srcData = sourceNode?.data as LogicalTableData | undefined;
+                    const tgtData = targetNode?.data as LogicalTableData | undefined;
+                    const parseColIdx = (handle?: string | null) => {
+                        const m = handle?.match(/_col_(\d+)/);
+                        return m ? parseInt(m[1], 10) : -1;
+                    };
+                    const srcCol = srcData?.columns?.[parseColIdx(connection.sourceHandle)];
+                    const tgtCol = tgtData?.columns?.[parseColIdx(connection.targetHandle)];
+                    const srcIsKey = srcCol?.isKey || false;
+                    const tgtIsKey = tgtCol?.isKey || false;
+                    // Both PK → 1:1, otherwise default N:1
+                    const sourceCardinality = (srcIsKey && tgtIsKey) ? '1' : 'N';
+                    const targetCardinality = '1';
+                    return { data: { sourceCardinality, targetCardinality } };
+                })()
+                : (storedType || Object.keys(edgeData).length
+                    ? { data: { ...edgeData, ...(storedType ? { storedType } : {}) } }
+                    : {})),
+
         };
         setEdges((eds) => addEdge(edgeWithId, eds));
     }, [setEdges, nodes]);
@@ -602,10 +759,23 @@ const EditProject = (props: IPropsEditProject) => {
         [edges]
     );
 
-    const handlePaneClick = useCallback(() => {
+    const handlePaneClick = useCallback((event: React.MouseEvent) => {
+        if (commentMode && reactFlowInstanceRef.current) {
+            const canvasPos = reactFlowInstanceRef.current.screenToFlowPosition({
+                x: event.clientX,
+                y: event.clientY,
+            });
+            handlePlaceComment(canvasPos.x, canvasPos.y);
+            return;
+        }
+        // Close draft if clicking on empty canvas
+        if (draftComment) {
+            setDraftComment(null);
+        }
         setNodes((existingNodes) => existingNodes.map((node) => ({ ...node, selected: false })));
         setEdges((existingEdges) => existingEdges.map((edge) => ({ ...edge, selected: false })));
-    }, [setNodes, setEdges]);
+        setActiveCommentId(null);
+    }, [setNodes, setEdges, commentMode, handlePlaceComment, draftComment]);
 
     useEffect(() => {
         const handleGlobalFindShortcut = (event: KeyboardEvent) => {
@@ -699,7 +869,12 @@ const EditProject = (props: IPropsEditProject) => {
         diagramName,
     });
 
-    const { awareness: logicalAwareness } = useLogicalCollaboration({
+    const {
+        awareness: logicalAwareness,
+        applyModelPayload: applyLogicalModelPayload,
+        mutateModel: logicalMutateModel,
+        modelData: _logicalModelData,
+    } = useLogicalCollaboration({
         enabled: Boolean(isLogicalSchema && hasPermission && isValidSchema === true && !!token),
         projectId: projectData?.id,
         schema: selectedSchema,
@@ -712,7 +887,12 @@ const EditProject = (props: IPropsEditProject) => {
         diagramName,
     });
 
-    const { awareness: physicalAwareness } = usePhysicalCollaboration({
+    const {
+        awareness: physicalAwareness,
+        applyModelPayload: applyPhysicalModelPayload,
+        mutateModel: physicalMutateModel,
+        modelData: _physicalModelData,
+    } = usePhysicalCollaboration({
         enabled: Boolean(isPhysicalSchema && hasPermission && isValidSchema === true && !!token),
         projectId: projectData?.id,
         schema: selectedSchema,
@@ -741,7 +921,29 @@ const EditProject = (props: IPropsEditProject) => {
     const effectiveAddRelationship = modelAwareCreators?.addRelationship ?? addRelationship;
     const effectiveAddDoubleRelationship = modelAwareCreators?.addDoubleRelationship ?? addDoubleRelationship;
 
-    // Callback for ChatBox: when AI generates a model JSON, apply it to the conceptual diagram
+    // Override logical table creators with model-first versions when
+    // operating on a logical schema (model-as-truth architecture).
+    const logicalModelAwareCreators = useMemo(
+        () =>
+            isLogicalSchema && logicalMutateModel
+                ? createNodeCreators(setNodes, { getViewportCenter, mutateLogicalModel: logicalMutateModel })
+                : null,
+        [isLogicalSchema, logicalMutateModel, setNodes, getViewportCenter],
+    );
+    const effectiveAddLogicalTable = logicalModelAwareCreators?.addLogicalTable ?? addLogicalTable;
+
+    // Override physical table creators with model-first versions when
+    // operating on a physical schema (model-as-truth architecture).
+    const physicalModelAwareCreators = useMemo(
+        () =>
+            isPhysicalSchema && physicalMutateModel
+                ? createNodeCreators(setNodes, { getViewportCenter, mutatePhysicalModel: physicalMutateModel })
+                : null,
+        [isPhysicalSchema, physicalMutateModel, setNodes, getViewportCenter],
+    );
+    const effectiveAddRelationTable = physicalModelAwareCreators?.addRelationTable ?? addRelationTable;
+
+    // Callback for ChatBox: when AI generates a model JSON, apply it to the diagram
     const handleChatModelGenerated = useCallback((modelJson: Record<string, unknown>) => {
         if (isConceptualSchema && applyModelPayload) {
             try {
@@ -749,8 +951,20 @@ const EditProject = (props: IPropsEditProject) => {
             } catch (error) {
                 console.error("Failed to apply model from chat:", error);
             }
+        } else if (isLogicalSchema && applyLogicalModelPayload) {
+            try {
+                applyLogicalModelPayload(modelJson as LogicalModelPayload);
+            } catch (error) {
+                console.error("Failed to apply model from chat:", error);
+            }
+        } else if (isPhysicalSchema && applyPhysicalModelPayload) {
+            try {
+                applyPhysicalModelPayload(modelJson as PhysicalModelPayload);
+            } catch (error) {
+                console.error("Failed to apply physical model from chat:", error);
+            }
         }
-    }, [isConceptualSchema, applyModelPayload]);
+    }, [isConceptualSchema, isLogicalSchema, isPhysicalSchema, applyModelPayload, applyLogicalModelPayload, applyPhysicalModelPayload]);
 
     const projectAwareness = useProjectAwareness({
         enabled: Boolean(projectData?.id && sessionId && hasPermission && isValidSchema === true && !!token),
@@ -998,7 +1212,7 @@ const EditProject = (props: IPropsEditProject) => {
 
     return (
         <ReactFlowProvider>
-            <div className="h-screen w-full">
+            <div className="h-screen w-full overflow-hidden">
                 <AddPage
                     open={isAddPageOpen}
                     onClose={() => setIsAddPageOpen(false)}
@@ -1030,7 +1244,7 @@ const EditProject = (props: IPropsEditProject) => {
                     initialValues={exportInitialConfig}
                     hasSelection={nodes.some(n => n.selected)}
                 />
-                <div className="flex h-full">
+                <div className="flex h-full overflow-hidden">
                     <NotationsSidebar
                         isOpen={isSidebarModalOpen}
                         canEdit={canEdit}
@@ -1043,7 +1257,7 @@ const EditProject = (props: IPropsEditProject) => {
                         onAddRelationship={effectiveAddRelationship}
                         onAddDoubleRelationship={effectiveAddDoubleRelationship}
                         onAddConstraint={addConstraint}
-                        onAddRelationTable={selectedSchema?.type === SchemaType.LOGICAL ? addLogicalTable : addRelationTable}
+                        onAddRelationTable={selectedSchema?.type === SchemaType.LOGICAL ? effectiveAddLogicalTable : selectedSchema?.type === SchemaType.PHYSICAL ? effectiveAddRelationTable : addRelationTable}
                         projectSchemasData={schemaList}
                         selectedSchema={selectedSchema}
                         setSelectedSchema={handleSetSelectedSchema}
@@ -1219,14 +1433,83 @@ const EditProject = (props: IPropsEditProject) => {
                         onRemoveLogicalTableAttribute={removeLogicalTableAttribute}
                         onUpdateLogicalTableAttribute={updateLogicalTableAttribute}
                         onReorderLogicalTableAttributes={reorderLogicalTableAttributes}
+                        onUpdateLogicalEdgeCardinality={(side, value) => {
+                            if (!selectedEdge) return;
+                            setEdges((existingEdges) =>
+                                existingEdges.map((edge) =>
+                                    edge.id === selectedEdge.id
+                                        ? {
+                                            ...edge,
+                                            data: {
+                                                ...edge.data,
+                                                [side === 'source' ? 'sourceCardinality' : 'targetCardinality']: value,
+                                            },
+                                        }
+                                        : edge
+                                )
+                            );
+                        }}
+                        onUpdatePhysicalEdgeCardinality={(side, value) => {
+                            if (!selectedEdge) return;
+                            setEdges((existingEdges) =>
+                                existingEdges.map((edge) =>
+                                    edge.id === selectedEdge.id
+                                        ? {
+                                            ...edge,
+                                            data: {
+                                                ...edge.data,
+                                                [side === 'source' ? 'sourceCardinality' : 'targetCardinality']: value,
+                                            },
+                                        }
+                                        : edge
+                                )
+                            );
+                        }}
                     />
+                    {commentMode && (
+                        <CommentPanel
+                            comments={comments}
+                            currentUserId={currentUser?.id || ''}
+                            onClose={() => setCommentMode(false)}
+                            onActivateComment={(id) => {
+                                setActiveCommentId(id);
+                                const comment = comments.find((c) => c.id === id);
+                                if (comment && reactFlowInstanceRef.current) {
+                                    let cx = comment.x;
+                                    let cy = comment.y;
+                                    if (comment.nodeId) {
+                                        const attachedNode = nodes.find((n) => n.id === comment.nodeId);
+                                        if (attachedNode) {
+                                            cx = attachedNode.position.x + comment.x;
+                                            cy = attachedNode.position.y + comment.y;
+                                        }
+                                    }
+                                    reactFlowInstanceRef.current.setCenter(cx, cy, { zoom: 1, duration: 500 });
+                                }
+                            }}
+                            onResolve={handleResolveComment}
+                            onDelete={handleDeleteComment}
+                        />
+                    )}
                     <div
-                        className="flex-1 h-full relative"
+                        className={`flex-1 h-full relative overflow-hidden${commentMode ? ' comment-cursor-mode' : ''}`}
                         ref={(el) => {
                             reactFlowWrapperRef.current = el;
                             setDiagramWrapperEl(el);
                         }}
                     >
+                        {/* Custom cursor style for comment mode — must override ReactFlow's internal pane cursor */}
+                        {commentMode && (
+                            <style>{`
+                                .comment-cursor-mode,
+                                .comment-cursor-mode .react-flow__pane,
+                                .comment-cursor-mode .react-flow__node,
+                                .comment-cursor-mode .react-flow__edge,
+                                .comment-cursor-mode .react-flow__renderer {
+                                    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32' fill='none'%3E%3Cpath d='M16 3C8.82 3 3 7.92 3 14c0 3.37 1.78 6.39 4.58 8.5L6 27l5.64-2.82C13.04 24.72 14.49 25 16 25c7.18 0 13-4.92 13-11S23.18 3 16 3z' fill='%2342A5F5' stroke='white' stroke-width='1.5'/%3E%3C/svg%3E") 6 24, crosshair !important;
+                                }
+                            `}</style>
+                        )}
                         <ReactFlow
                             nodes={nodes}
                             edges={displayEdges}
@@ -1242,6 +1525,19 @@ const EditProject = (props: IPropsEditProject) => {
                             onReconnect={canEdit ? onEdgeReconnect : undefined}
                             onReconnectEnd={canEdit ? onReconnectEnd : undefined}
                             onPaneClick={handlePaneClick}
+                            onNodeClick={(event) => {
+                                if (commentMode && reactFlowInstanceRef.current) {
+                                    const canvasPos = reactFlowInstanceRef.current.screenToFlowPosition({
+                                        x: event.clientX,
+                                        y: event.clientY,
+                                    });
+                                    handlePlaceComment(canvasPos.x, canvasPos.y);
+                                }
+                            }}
+                            onEdgeClick={(_event, edge) => {
+                                setNodes((ns) => ns.map((n) => ({ ...n, selected: false })));
+                                setEdges((es) => es.map((e) => ({ ...e, selected: e.id === edge.id })));
+                            }}
                             connectionMode={ConnectionMode.Loose}
                             isValidConnection={() => {
                                 // Allow multiple connections to the same handle
@@ -1271,6 +1567,7 @@ const EditProject = (props: IPropsEditProject) => {
                             nodesConnectable={canEdit && interactionMode === 'default'}
                             fitView={false}
                             defaultViewport={viewport ? { x: viewport.x, y: viewport.y, zoom: viewport.zoom } : undefined}
+                            minZoom={0.1}
                             proOptions={{ hideAttribution: true }}
                         >
                             {isLoadingDiagram && (
@@ -1294,6 +1591,96 @@ const EditProject = (props: IPropsEditProject) => {
                             containerRef={diagramWrapperEl}
                             viewport={viewport}
                         />
+                        {/* Comment pins layer */}
+                        {viewport && ((Array.isArray(comments) && comments.length > 0) || draftComment) && (
+                            <div
+                                className="absolute inset-0 pointer-events-none overflow-hidden"
+                                style={{ zIndex: 5 }}
+                            >
+                                <div
+                                    style={{
+                                        transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
+                                        transformOrigin: '0 0',
+                                        pointerEvents: 'auto',
+                                    }}
+                                >
+                                    {comments.map((comment, idx) => {
+                                        // Node-attached comments: adjust position based on current node
+                                        let cx = comment.x;
+                                        let cy = comment.y;
+                                        if (comment.nodeId) {
+                                            const attachedNode = nodes.find((n) => n.id === comment.nodeId);
+                                            if (attachedNode) {
+                                                // comment.x/y were stored as absolute canvas positions at creation time.
+                                                // We find the offset from the original node position by looking at the
+                                                // difference. But the simplest approach: store absolute pos and re-anchor.
+                                                // Since we stored absolute canvas coords but the node may have moved,
+                                                // we need to compute the delta. However we don't store original node pos.
+                                                // Simplest: just use the comment's stored x/y as offset from node origin.
+                                                // We'll store them as offsets in handlePlaceComment.
+                                                cx = attachedNode.position.x + comment.x;
+                                                cy = attachedNode.position.y + comment.y;
+                                            }
+                                        }
+                                        return (
+                                            <CommentPin
+                                                key={comment.id}
+                                                comment={{ ...comment, x: cx, y: cy }}
+                                                currentUserId={currentUser?.id || ''}
+                                                index={idx}
+                                                isActive={activeCommentId === comment.id}
+                                                onActivate={(id) => { setActiveCommentId(id); setCommentMode(true); }}
+                                                onDeactivate={() => setActiveCommentId(null)}
+                                                onReply={handleReplyComment}
+                                                onResolve={handleResolveComment}
+                                                onDelete={handleDeleteComment}
+                                                mentionUsers={mentionUsers}
+                                            />
+                                        );
+                                    })}
+                                    {/* Draft pin — newly placed, awaiting first message */}
+                                    {draftComment && (
+                                        <CommentPin
+                                            key="__draft__"
+                                            comment={{
+                                                id: '__draft__',
+                                                x: draftComment.nodeId
+                                                    ? (() => {
+                                                        const n = nodes.find((nd) => nd.id === draftComment.nodeId);
+                                                        return n ? n.position.x + draftComment.x : draftComment.x;
+                                                    })()
+                                                    : draftComment.x,
+                                                y: draftComment.nodeId
+                                                    ? (() => {
+                                                        const n = nodes.find((nd) => nd.id === draftComment.nodeId);
+                                                        return n ? n.position.y + draftComment.y : draftComment.y;
+                                                    })()
+                                                    : draftComment.y,
+                                                content: '',
+                                                resolved: false,
+                                                parentId: null,
+                                                nodeId: draftComment.nodeId,
+                                                userId: currentUser?.id || '',
+                                                createdAt: new Date().toISOString(),
+                                                user: currentUser ? { id: currentUser.id, fullName: currentUser.fullName || '', email: currentUser.email || '' } : undefined,
+                                            }}
+                                            currentUserId={currentUser?.id || ''}
+                                            index={comments.length}
+                                            isActive
+                                            isDraft
+                                            onActivate={() => {}}
+                                            onDeactivate={handleCancelDraft}
+                                            onReply={() => {}}
+                                            onResolve={() => {}}
+                                            onDelete={() => {}}
+                                            onSubmitDraft={handleSubmitDraft}
+                                            onCancelDraft={handleCancelDraft}
+                                            mentionUsers={mentionUsers}
+                                        />
+                                    )}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -1301,9 +1688,11 @@ const EditProject = (props: IPropsEditProject) => {
                     isSidebarModalOpen={isSidebarModalOpen}
                     isRightPanelOpen={isRightPanelOpen}
                     canEdit={canEdit}
+                    commentMode={commentMode}
                     onToggleSidebar={() => setIsSidebarModalOpen(!isSidebarModalOpen)}
                     onToggleRightPanel={() => setIsRightPanelOpen(!isRightPanelOpen)}
                     onToggleChatBox={() => setIsChatBoxOpen(!isChatBoxOpen)}
+                    onToggleCommentMode={() => setCommentMode(!commentMode)}
                     onUndo={handleUndo}
                     onRedo={handleRedo}
                     canUndo={canUndo()}
@@ -1318,6 +1707,12 @@ const EditProject = (props: IPropsEditProject) => {
                     onClose={() => setIsChatBoxOpen(false)}
                     projectId={projectData?.id}
                     schemaId={selectedSchema?.id}
+                    schemaLevel={
+                        isConceptualSchema ? "conceptual" :
+                        isLogicalSchema ? "logical" :
+                        isPhysicalSchema ? "physical" :
+                        undefined
+                    }
                     initialThreadId={chatThreadId}
                     onModelGenerated={handleChatModelGenerated}
                 />

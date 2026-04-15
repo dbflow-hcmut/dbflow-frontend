@@ -32,3 +32,6 @@ export const PROXY_CHAT_CONVERSATION_DETAIL = (conversationId: string) => `${PRO
 export const PROXY_CHAT_CONVERSATION_MESSAGES = (conversationId: string) => `${PROXY_CHAT_CONVERSATIONS}/${conversationId}/messages`;
 export const PROXY_CHAT_CONVERSATION_PROJECT = (conversationId: string) => `${PROXY_CHAT_CONVERSATIONS}/${conversationId}/project`;
 export const PROXY_CHAT_PROJECT_CONVERSATIONS = (projectId: string) => `${PROXY_CHAT_CONVERSATIONS}/project/${projectId}`;
+
+// Comments API endpoints
+export const PROXY_SCHEMA_COMMENTS = (projectId: string, schemaId: string) => `${PROXY_BASE}/projects/${projectId}/schemas/${schemaId}/comments`;

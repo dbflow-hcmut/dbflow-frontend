@@ -26,6 +26,8 @@ interface ChatBoxProps {
     onClose: () => void;
     projectId?: string;
     schemaId?: string;
+    /** Current schema level: "conceptual" | "logical" | "physical" */
+    schemaLevel?: string;
     /** If provided, load this thread's history and continue from it */
     initialThreadId?: string;
     /** Callback when AI generates a model JSON (for applying to diagram) */
@@ -37,6 +39,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
     onClose,
     projectId: propProjectId,
     schemaId: propSchemaId,
+    schemaLevel,
     initialThreadId,
     onModelGenerated,
 }) => {
@@ -365,10 +368,11 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                 }
             },
             abortController.signal,
+            schemaLevel,
         );
         if (returnedRunId) runIdRef.current = returnedRunId;
         abortControllerRef.current = null;
-    }, [isLoading, threadId, conversationCreated, projectId, schemaId, onModelGenerated]);
+    }, [isLoading, threadId, conversationCreated, projectId, schemaId, schemaLevel, onModelGenerated]);
 
     const handleRetry = useCallback(() => {
         if (!lastUserMessageRef.current) return;

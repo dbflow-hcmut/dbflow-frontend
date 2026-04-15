@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { NodeResizer, Position, useNodeId, useStore, useReactFlow } from "reactflow";
 import classNames from "classnames";
 import {
@@ -9,7 +9,7 @@ import {
     DatabaseSchemaTableCell,
 } from "@/components/database-schema-node";
 import { LabeledHandle } from "@/components/labeled-handle";
-import { KeyRound } from "lucide-react";
+import { KeyRound, Link2 } from "lucide-react";
 
 type RelationColumn = {
     name: string;
@@ -26,8 +26,21 @@ export type RelationTableData = {
 const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
     const nodeId = useNodeId();
     const node = useStore((store) => store.nodeInternals.get(nodeId!));
+    const edges = useStore((store) => store.edges);
     const isSelected = node?.selected;
     const [isHovered, setIsHovered] = useState(false);
+
+    // Derive FK columns from edges: a column is FK if it's the source of an FK edge
+    const fkColumnNames = useMemo(() => {
+        const names = new Set<string>();
+        for (const e of edges) {
+            if (e.type === 'relation-table-edge' && e.source === nodeId && e.sourceHandle) {
+                names.add(e.sourceHandle);
+            }
+        }
+        return names;
+    }, [edges, nodeId]);
+
     const [isEditingName, setIsEditingName] = useState(false);
     const [localName, setLocalName] = useState(data.name);
     const { setNodes } = useReactFlow();
@@ -253,7 +266,7 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
                     {data.columns?.length ? (
                         data.columns.map((col, idx) => (
                             <DatabaseSchemaTableRow key={idx} style={{ whiteSpace: 'nowrap' }}>
-                                <DatabaseSchemaTableCell className="font-light flex-1 flex justify-start" style={{ paddingLeft: 0, paddingRight: '24px' }}>
+                                <DatabaseSchemaTableCell className="font-light flex-1 flex items-center gap-1 justify-start" style={{ paddingLeft: 0, paddingRight: '24px' }}>
 
                                     <LabeledHandle
                                         id={col.name}
@@ -266,7 +279,10 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
                                         isHovered={isHovered}
                                     />
                                     {col.isPrimary && (
-                                        <KeyRound size={14} className="text-gray-500" />
+                                        <KeyRound size={14} className="text-amber-500" />
+                                    )}
+                                    {fkColumnNames.has(col.name) && (
+                                        <Link2 size={14} className="text-blue-500" />
                                     )}
                                 </DatabaseSchemaTableCell>
                                 <DatabaseSchemaTableCell className="font-thin flex-1 flex justify-end" style={{ paddingRight: 0, paddingLeft: '12px' }}>
