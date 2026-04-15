@@ -266,10 +266,10 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
                                             isHovered={isHovered}
                                         />
                                         {col.isKey && (
-                                            <KeyRound size={14} className="text-amber-500" title="Primary Key" />
+                                            <KeyRound size={14} className="text-amber-500" />
                                         )}
                                         {isFK && (
-                                            <Link2 size={14} className="text-blue-500" title="Foreign Key" />
+                                            <Link2 size={14} className="text-blue-500" />
                                         )}
                                     </DatabaseSchemaTableCell>
                                     <DatabaseSchemaTableCell className="font-thin flex-1 flex justify-end" style={{ paddingRight: 0, paddingLeft: '12px' }}>
