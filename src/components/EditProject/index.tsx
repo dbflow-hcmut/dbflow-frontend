@@ -31,6 +31,9 @@ import EntityNode from "@/components/erds-notations/entity";
 import ConstraintNode from "@/components/erds-notations/constraint";
 import RelationTableNode, { type RelationTableData } from "@/components/erds-notations/relation-table";
 import LogicalTableNode, { type LogicalTableData } from "@/components/erds-notations/logical-table";
+import StickyNoteNode, { type StickyNoteData } from "@/components/erds-notations/sticky-note";
+import TextLabelNode, { type TextLabelData } from "@/components/erds-notations/text-label";
+import DrawingPathNode, { type DrawingPathData } from "@/components/erds-notations/drawing-path";
 import ErdEdge from "@/components/erd-edge";
 import RelationTableEdge from "@/components/relation-table-edge";
 import LogicalTableEdge from "@/components/logical-table-edge";
@@ -38,10 +41,13 @@ import SearchModal from "./components/SearchModal";
 import NotationsSidebar from "./components/NotationsSidebar";
 import PropertiesPanel from "./components/PropertiesPanel";
 import Header from "./components/Header";
-import Footer from "./components/Footer";
+import Footer, { type ToolMode } from "./components/Footer";
 import ChatBox from "./components/ChatBox";
+import DrawingOverlay from "./components/DrawingOverlay";
 import ExportModal, { ExportSettings, ExportFormat, ExportScope } from "./components/ExportModal";
 import DDLExportModal from "./components/DDLExportModal";
+import DDLImportModal from "./components/DDLImportModal";
+import HTMLDocsExportModal from "./components/HTMLDocsExportModal";
 import VersionHistoryDrawer from "./components/VersionHistoryDrawer";
 import CommentPin, { type CommentData, type MentionableUser } from "./components/CommentPin";
 import CommentPanel from "./components/CommentPanel";
@@ -109,7 +115,7 @@ export type AttributeData = {
 
 type ConstraintData = { symbol: 'd' | 'o' | 'u' };
 
-export type NodeData = EntityData | RelationshipData | AttributeData | ConstraintData | RelationTableData;
+export type NodeData = EntityData | RelationshipData | AttributeData | ConstraintData | RelationTableData | StickyNoteData | TextLabelData | DrawingPathData;
 
 const initialNodes: Node<NodeData>[] = [];
 const initialEdges: Edge[] = [];
@@ -166,6 +172,21 @@ const EditProject = (props: IPropsEditProject) => {
     const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
     const [draftComment, setDraftComment] = useState<{ x: number; y: number; nodeId: string | null } | null>(null);
     const [mentionUsers, setMentionUsers] = useState<MentionableUser[]>([]);
+
+    // Tool mode state (sticky-note, text-label, pen)
+    const [activeToolMode, setActiveToolMode] = useState<ToolMode>('none');
+    const [ghostPos, setGhostPos] = useState<{ x: number; y: number } | null>(null);
+
+    // Track mouse for placement ghost preview
+    useEffect(() => {
+        if (activeToolMode !== 'sticky-note' && activeToolMode !== 'text-label') {
+            setGhostPos(null);
+            return;
+        }
+        const handler = (e: MouseEvent) => setGhostPos({ x: e.clientX, y: e.clientY });
+        window.addEventListener('mousemove', handler);
+        return () => window.removeEventListener('mousemove', handler);
+    }, [activeToolMode]);
 
     // Undo/Redo hook - lớp trung gian quản lý state
     // maxHistorySize: 0 = không giới hạn
@@ -310,6 +331,8 @@ const EditProject = (props: IPropsEditProject) => {
     const [isAddPageOpen, setIsAddPageOpen] = useState(false);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
     const [isDDLExportOpen, setIsDDLExportOpen] = useState(false);
+    const [isDDLImportOpen, setIsDDLImportOpen] = useState(false);
+    const [isHTMLDocsExportOpen, setIsHTMLDocsExportOpen] = useState(false);
     const [isVersionHistoryOpen, setIsVersionHistoryOpen] = useState(false);
     const [isShareProjectOpen, setIsShareProjectOpen] = useState(false);
     const [exportInitialConfig, setExportInitialConfig] = useState<{ format: ExportFormat; scope: ExportScope }>({ format: 'png', scope: 'all' });
@@ -648,6 +671,9 @@ const EditProject = (props: IPropsEditProject) => {
             constraint: ConstraintNode,
             relation: RelationTableNode,
             "logical-table": LogicalTableNode,
+            "sticky-note": StickyNoteNode,
+            "text-label": TextLabelNode,
+            "drawing-path": DrawingPathNode,
         }),
         []
     );
@@ -798,6 +824,41 @@ const EditProject = (props: IPropsEditProject) => {
             handlePlaceComment(canvasPos.x, canvasPos.y);
             return;
         }
+        // Place sticky note or text label on click
+        if ((activeToolMode === 'sticky-note' || activeToolMode === 'text-label') && reactFlowInstanceRef.current) {
+            const canvasPos = reactFlowInstanceRef.current.screenToFlowPosition({
+                x: event.clientX,
+                y: event.clientY,
+            });
+            const id = generateDiagramId();
+            if (activeToolMode === 'sticky-note') {
+                setNodes((nds) => [
+                    ...nds.map((n) => ({ ...n, selected: false })),
+                    {
+                        id,
+                        type: 'sticky-note',
+                        position: canvasPos,
+                        data: { text: '', color: '#fef08a' } as StickyNoteData,
+                        style: { width: 200, height: 150 },
+                        selected: true,
+                    },
+                ]);
+            } else {
+                setNodes((nds) => [
+                    ...nds.map((n) => ({ ...n, selected: false })),
+                    {
+                        id,
+                        type: 'text-label',
+                        position: canvasPos,
+                        data: { text: '', fontSize: 14 } as TextLabelData,
+                        style: { width: 150, height: 30 },
+                        selected: true,
+                    },
+                ]);
+            }
+            setActiveToolMode('none');
+            return;
+        }
         // Close draft if clicking on empty canvas
         if (draftComment) {
             setDraftComment(null);
@@ -805,7 +866,37 @@ const EditProject = (props: IPropsEditProject) => {
         setNodes((existingNodes) => existingNodes.map((node) => ({ ...node, selected: false })));
         setEdges((existingEdges) => existingEdges.map((edge) => ({ ...edge, selected: false })));
         setActiveCommentId(null);
-    }, [setNodes, setEdges, commentMode, handlePlaceComment, draftComment]);
+    }, [setNodes, setEdges, commentMode, handlePlaceComment, draftComment, activeToolMode]);
+
+    // Convert completed pen stroke to a drawing-path node
+    const handleStrokeComplete = useCallback(
+        (rawPoints: { x: number; y: number }[], color: string, strokeWidth: number) => {
+            if (rawPoints.length < 2) return;
+            // Compute bounding box
+            let minX = Infinity, minY = Infinity;
+            for (const p of rawPoints) {
+                if (p.x < minX) minX = p.x;
+                if (p.y < minY) minY = p.y;
+            }
+            // Normalize points relative to bounding box origin
+            const normalizedPoints = rawPoints.map((p) => ({
+                x: p.x - minX,
+                y: p.y - minY,
+            }));
+            const id = generateDiagramId();
+            setNodes((nds) => [
+                ...nds.map((n) => ({ ...n, selected: false })),
+                {
+                    id,
+                    type: "drawing-path",
+                    position: { x: minX, y: minY },
+                    data: { points: normalizedPoints, color, strokeWidth } as DrawingPathData,
+                    selected: true,
+                },
+            ]);
+        },
+        [setNodes]
+    );
 
     useEffect(() => {
         const handleGlobalFindShortcut = (event: KeyboardEvent) => {
@@ -1445,8 +1536,12 @@ const EditProject = (props: IPropsEditProject) => {
                     onDownload={handleDownload}
                     onExportJson={handleExportJson}
                     onExportDDL={isPhysicalSchema ? () => setIsDDLExportOpen(true) : undefined}
+                    onImportDDL={isPhysicalSchema ? () => setIsDDLImportOpen(true) : undefined}
+                    onExportHTMLDocs={() => setIsHTMLDocsExportOpen(true)}
                     onVersionHistory={() => setIsVersionHistoryOpen(true)}
                     onShareClick={() => setIsShareProjectOpen(true)}
+                    commentMode={commentMode}
+                    onToggleCommentMode={() => { setCommentMode(!commentMode); setActiveToolMode('none'); }}
                 />
                 <ShareProject
                     projectId={projectData?.id}
@@ -1465,6 +1560,31 @@ const EditProject = (props: IPropsEditProject) => {
                     isOpen={isDDLExportOpen}
                     onClose={() => setIsDDLExportOpen(false)}
                     model={_physicalModelData}
+                    diagramName={diagramName}
+                />
+                <DDLImportModal
+                    isOpen={isDDLImportOpen}
+                    onClose={() => setIsDDLImportOpen(false)}
+                    onImport={(model) => {
+                        if (physicalMutateModel) {
+                            physicalMutateModel(() => model);
+                        }
+                    }}
+                    diagramName={diagramName}
+                />
+                <HTMLDocsExportModal
+                    isOpen={isHTMLDocsExportOpen}
+                    onClose={() => setIsHTMLDocsExportOpen(false)}
+                    model={
+                        isConceptualSchema ? _conceptualModelData
+                        : isLogicalSchema ? _logicalModelData
+                        : _physicalModelData
+                    }
+                    schemaKind={
+                        isConceptualSchema ? "conceptual"
+                        : isLogicalSchema ? "logical"
+                        : "physical"
+                    }
                     diagramName={diagramName}
                 />
                 <VersionHistoryDrawer
@@ -1760,9 +1880,41 @@ const EditProject = (props: IPropsEditProject) => {
                                 .comment-cursor-mode .react-flow__node,
                                 .comment-cursor-mode .react-flow__edge,
                                 .comment-cursor-mode .react-flow__renderer {
-                                    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32' fill='none'%3E%3Cpath d='M16 3C8.82 3 3 7.92 3 14c0 3.37 1.78 6.39 4.58 8.5L6 27l5.64-2.82C13.04 24.72 14.49 25 16 25c7.18 0 13-4.92 13-11S23.18 3 16 3z' fill='%2342A5F5' stroke='white' stroke-width='1.5'/%3E%3C/svg%3E") 6 24, crosshair !important;
+                                    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2342A5F5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7.9 20A9 9 0 1 0 4 16.1L2 22Z'/%3E%3Cpath d='M8 12h.01'/%3E%3Cpath d='M12 12h.01'/%3E%3Cpath d='M16 12h.01'/%3E%3C/svg%3E") 12 12, crosshair !important;
                                 }
                             `}</style>
+                        )}
+                        {/* Custom cursor for placement tools */}
+                        {(activeToolMode === 'sticky-note' || activeToolMode === 'text-label') && (
+                            <style>{`
+                                .react-flow__pane,
+                                .react-flow__renderer {
+                                    cursor: crosshair !important;
+                                }
+                            `}</style>
+                        )}
+                        {/* Ghost preview following cursor for placement tools */}
+                        {ghostPos && activeToolMode === 'sticky-note' && (
+                            <div
+                                className="fixed pointer-events-none z-[100]"
+                                style={{ left: ghostPos.x + 12, top: ghostPos.y + 12 }}
+                            >
+                                <div className="w-[140px] h-[100px] rounded-md shadow-lg opacity-60"
+                                    style={{ backgroundColor: '#fef08a' }}
+                                >
+                                    <div className="p-2 text-xs text-gray-500">Sticky Note</div>
+                                </div>
+                            </div>
+                        )}
+                        {ghostPos && activeToolMode === 'text-label' && (
+                            <div
+                                className="fixed pointer-events-none z-[100]"
+                                style={{ left: ghostPos.x + 12, top: ghostPos.y + 12 }}
+                            >
+                                <div className="px-2 py-1 rounded bg-white/80 border border-dashed border-gray-400 opacity-70">
+                                    <span className="text-sm text-gray-500">Text</span>
+                                </div>
+                            </div>
                         )}
                         <ReactFlow
                             nodes={nodes}
@@ -1809,16 +1961,16 @@ const EditProject = (props: IPropsEditProject) => {
                                 }
                             }}
                             onMove={(_, viewportState) => handleViewportChange(viewportState)}
-                            selectionOnDrag={interactionMode === 'default'}
-                            panOnDrag={interactionMode === 'panning' ? true : [1, 2]}
+                            selectionOnDrag={interactionMode === 'default' && activeToolMode === 'none' && !commentMode}
+                            panOnDrag={activeToolMode !== 'none' ? [1, 2] : interactionMode === 'panning' ? true : [1, 2]}
                             panOnScroll={true}
                             selectionMode={SelectionMode.Partial}
                             multiSelectionKeyCode={["Shift", "Meta"]}
                             autoPanOnNodeDrag
                             
-                            elementsSelectable={interactionMode === 'default'}
-                            nodesDraggable={canEdit && interactionMode === 'default'}
-                            nodesConnectable={canEdit && interactionMode === 'default'}
+                            elementsSelectable={interactionMode === 'default' && activeToolMode === 'none'}
+                            nodesDraggable={canEdit && interactionMode === 'default' && activeToolMode === 'none'}
+                            nodesConnectable={canEdit && interactionMode === 'default' && activeToolMode === 'none'}
                             fitView={false}
                             defaultViewport={viewport ? { x: viewport.x, y: viewport.y, zoom: viewport.zoom } : undefined}
                             minZoom={0.1}
@@ -1838,6 +1990,10 @@ const EditProject = (props: IPropsEditProject) => {
                                 variant={BackgroundVariant.Dots}
                                 gap={16}
                                 size={1}
+                            />
+                            <DrawingOverlay
+                                active={activeToolMode === 'pen'}
+                                onStrokeComplete={handleStrokeComplete}
                             />
                         </ReactFlow>
                         {previewingVersionId && (
@@ -1954,10 +2110,12 @@ const EditProject = (props: IPropsEditProject) => {
                     isRightPanelOpen={isRightPanelOpen}
                     canEdit={canEdit}
                     commentMode={commentMode}
+                    activeToolMode={activeToolMode}
                     onToggleSidebar={() => setIsSidebarModalOpen(!isSidebarModalOpen)}
                     onToggleRightPanel={() => setIsRightPanelOpen(!isRightPanelOpen)}
                     onToggleChatBox={() => setIsChatBoxOpen(!isChatBoxOpen)}
-                    onToggleCommentMode={() => setCommentMode(!commentMode)}
+                    onToggleCommentMode={() => { setCommentMode(!commentMode); setActiveToolMode('none'); }}
+                    onToolModeChange={(mode) => { setActiveToolMode(mode); if (mode !== 'none') setCommentMode(false); }}
                     onUndo={handleUndo}
                     onRedo={handleRedo}
                     canUndo={canUndo()}

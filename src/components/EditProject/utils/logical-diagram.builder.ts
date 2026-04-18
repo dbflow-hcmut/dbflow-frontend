@@ -47,7 +47,7 @@ type DiagramNodeStyle = {
 
 export type StoredLogicalDiagramNode = {
     id: string;
-    type: "table" | "note";
+    type: "table" | "note" | "sticky-note" | "text-label" | "drawing-path" | string;
     position: { x: number; y: number };
     size: { w: number; h: number };
     zIndex?: number;
@@ -180,12 +180,26 @@ const mapNoteNode = (node: StoredLogicalNode): Node<NodeData> => {
     };
 };
 
+const ANNOTATION_NODE_TYPES = new Set(["sticky-note", "text-label", "drawing-path"]);
+
 const mapStoredNodeToReactNode = (node: StoredLogicalNode): Node<NodeData> => {
     // If node has tableId but no type, it's a table
     if (!node.type && node.tableId) {
         return mapLogicalTableNode(node);
     }
     
+    // Annotation nodes: preserve as-is
+    if (ANNOTATION_NODE_TYPES.has(node.type)) {
+        return {
+            id: node.id,
+            type: node.type,
+            position: ensurePosition(node),
+            data: (node.data ?? {}) as NodeData,
+            style: ensureStyle(node),
+            zIndex: node.zIndex,
+        };
+    }
+
     switch (node.type) {
         case "table":
             return mapLogicalTableNode(node);
@@ -241,7 +255,7 @@ const mapReactNodeToStoredNode = (node: Node<NodeData>): StoredLogicalNode => {
         default:
             return {
                 id: node.id,
-                type: "table",
+                type: ANNOTATION_NODE_TYPES.has(node.type!) ? node.type! : "table",
                 position: node.position,
                 size: getStoredNodeSize(node),
                 zIndex: node.zIndex,
@@ -253,7 +267,7 @@ const mapReactNodeToStoredNode = (node: Node<NodeData>): StoredLogicalNode => {
 
 export const mapReactNodesToStoredNodes = (reactNodes: Node<NodeData>[] = []): StoredLogicalNode[] => {
     return reactNodes
-        .filter((node) => node.type === "logical-table")
+        .filter((node) => node.type === "logical-table" || ANNOTATION_NODE_TYPES.has(node.type!))
         .map(mapReactNodeToStoredNode);
 };
 

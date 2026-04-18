@@ -39,3 +39,6 @@ export const PROXY_SCHEMA_COMMENTS = (projectId: string, schemaId: string) => `$
 // Schema version API endpoints
 export const PROXY_SCHEMA_VERSIONS = (projectId: string, schemaId: string) => `${PROXY_BASE}/projects/${projectId}/schemas/${schemaId}/versions`;
 export const PROXY_SCHEMA_VERSION_DETAIL = (projectId: string, schemaId: string, versionId: string) => `${PROXY_SCHEMA_VERSIONS(projectId, schemaId)}/${versionId}`;
+
+// Shared docs
+export const PROXY_SHARE_HTML = `${PROXY_BASE}/projects/shared-docs`;

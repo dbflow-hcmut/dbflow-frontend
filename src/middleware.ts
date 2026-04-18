@@ -9,6 +9,7 @@ export default auth((req) => {
   const isApiRoute = pathname.startsWith("/api");
   const isNotFoundRoute = pathname.startsWith("/not-found");
   const isPublicRoute = pathname.startsWith("/_next");
+  const isSharedDocsRoute = pathname.startsWith("/shared-docs");
 
   if (pathname === "/") {
     if (isLoggedIn) {
@@ -21,7 +22,7 @@ export default auth((req) => {
     return NextResponse.redirect(new URL("/ai-chat", req.url));
   }
 
-  if (!isLoggedIn && !isAuthRoute && !isApiRoute && !isNotFoundRoute && !isPublicRoute) {
+  if (!isLoggedIn && !isAuthRoute && !isApiRoute && !isNotFoundRoute && !isPublicRoute && !isSharedDocsRoute) {
     const signInUrl = new URL("/auth/signin", req.url);
     const callbackUrl = pathname + req.nextUrl.search;
     signInUrl.searchParams.set("callbackUrl", callbackUrl);

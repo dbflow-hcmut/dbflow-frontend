@@ -536,7 +536,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
     const drawerWidth = diffResult ? (diffView === "diagram" ? "90vw" : 1100) : 420;
 
     const renderLeftPanel = () => (
-        <div className="flex flex-col h-full w-full overflow-y-auto">
+        <div className="flex flex-col h-full w-full overflow-hidden">
             {/* ── Create Snapshot ────────────────────── */}
             <div className="mb-5 border border-gray-200 rounded-lg p-3">
                 <div className="text-sm font-medium mb-2">Create Snapshot</div>
@@ -562,7 +562,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
             </div>
 
             {/* ── Timeline ──────────────────────────── */}
-            <div className="mb-5 flex-1 min-h-0">
+            <div className="mb-5 flex-1 min-h-0 flex flex-col">
                 <div className="flex items-center justify-between mb-3">
                     <span className="text-sm font-medium">Versions</span>
                     {previewingVersionId && (
@@ -588,7 +588,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
                         <Skeleton active paragraph={{ rows: 4, width: ['60%', '80%', '50%', '70%'] }} title={false} />
                     </div>
                 ) : (
-                    <div className="overflow-y-auto pr-1 pl-1">
+                    <div className="overflow-y-auto flex-1 min-h-0 pr-1 pl-1">
                         <div className="relative pl-7 flex flex-col gap-1">
                             {/* Timeline line */}
                             <div className="absolute left-[11px] top-2 bottom-2 w-px bg-gray-200" />

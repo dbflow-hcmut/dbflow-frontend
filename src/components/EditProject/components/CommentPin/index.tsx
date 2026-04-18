@@ -292,7 +292,7 @@ const CommentPin: React.FC<CommentPinProps> = ({
             {isActive && (
                 <div
                     ref={popoverRef}
-                    className="absolute left-8 -top-2 w-72 bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden"
+                    className="absolute left-10 -top-2 w-72 bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden"
                     style={{ zIndex: 1001 }}
                     onClick={(e) => e.stopPropagation()}
                 >

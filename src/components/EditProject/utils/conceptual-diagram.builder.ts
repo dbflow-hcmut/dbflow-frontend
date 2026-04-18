@@ -297,7 +297,20 @@ const mapRelationNode = (node: StoredDiagramNode): Node<RelationTableData> => {
     };
 };
 
+const ANNOTATION_NODE_TYPES = new Set(["sticky-note", "text-label", "drawing-path"]);
+
 const mapFallbackNode = (node: StoredDiagramNode): Node<NodeData> => {
+    // Annotation nodes: preserve type and data as-is
+    if (ANNOTATION_NODE_TYPES.has(node.type!)) {
+        return {
+            id: node.id,
+            type: node.type!,
+            position: ensurePosition(node),
+            data: (node.data ?? {}) as NodeData,
+            style: ensureStyle(node),
+            zIndex: node.zIndex,
+        };
+    }
     return {
         id: node.id,
         type: "entity",

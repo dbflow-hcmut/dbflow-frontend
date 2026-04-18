@@ -39,13 +39,6 @@ export const TOUR_STEPS: TourStep[] = [
         placement: "right",
     },
     {
-        targetId: "tour-search-btn",
-        title: "Search",
-        description:
-            "Quickly find entities, tables, or attributes in your diagram. Shortcut: Ctrl/Cmd + F.",
-        placement: "bottom",
-    },
-    {
         targetId: "tour-download-btn",
         title: "Export",
         description:

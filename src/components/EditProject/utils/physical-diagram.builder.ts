@@ -49,7 +49,7 @@ type DiagramNodeStyle = {
 
 export type StoredPhysicalDiagramNode = {
     id: string;
-    type: "table" | "note";
+    type: "table" | "note" | "sticky-note" | "text-label" | "drawing-path" | string;
     position: { x: number; y: number };
     size: { w: number; h: number };
     zIndex?: number;
@@ -181,12 +181,26 @@ const mapNoteNode = (node: StoredPhysicalNode): Node<NodeData> => {
     };
 };
 
+const ANNOTATION_NODE_TYPES = new Set(["sticky-note", "text-label", "drawing-path"]);
+
 const mapStoredNodeToReactNode = (node: StoredPhysicalNode): Node<NodeData> => {
     // If node has tableId but no type, it's a table
     if (!node.type && node.tableId) {
         return mapRelationNode(node);
     }
     
+    // Annotation nodes: preserve as-is
+    if (ANNOTATION_NODE_TYPES.has(node.type)) {
+        return {
+            id: node.id,
+            type: node.type,
+            position: ensurePosition(node),
+            data: (node.data ?? {}) as NodeData,
+            style: ensureStyle(node),
+            zIndex: node.zIndex,
+        };
+    }
+
     switch (node.type) {
         case "table":
             return mapRelationNode(node);
@@ -246,7 +260,7 @@ const mapReactNodeToStoredNode = (node: Node<NodeData>): StoredPhysicalNode => {
         default:
             return {
                 id: node.id,
-                type: "table",
+                type: ANNOTATION_NODE_TYPES.has(node.type!) ? node.type! : "table",
                 position: node.position,
                 size: getStoredNodeSize(node),
                 zIndex: node.zIndex,
@@ -258,7 +272,7 @@ const mapReactNodeToStoredNode = (node: Node<NodeData>): StoredPhysicalNode => {
 
 export const mapReactNodesToStoredNodes = (reactNodes: Node<NodeData>[] = []): StoredPhysicalNode[] => {
     return reactNodes
-        .filter((node) => node.type === "relation")
+        .filter((node) => node.type === "relation" || ANNOTATION_NODE_TYPES.has(node.type!))
         .map(mapReactNodeToStoredNode);
 };
 

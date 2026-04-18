@@ -1,19 +1,23 @@
 "use client";
 
 import React from "react";
-import { Button } from "antd";
+import { Button, Tooltip } from "antd";
 import { MousePointer2, Hand, StickyNote, Type, ArrowUpRight, PenTool, MessageCircleMore, Plus, X, PanelTopOpen, PanelBottomOpen, Undo, Redo } from "lucide-react";
 import ZoomControls from "../ZoomControls";
+
+export type ToolMode = 'none' | 'sticky-note' | 'text-label' | 'pen';
 
 type FooterProps = {
     isSidebarModalOpen: boolean;
     isRightPanelOpen: boolean;
     canEdit?: boolean;
     commentMode?: boolean;
+    activeToolMode?: ToolMode;
     onToggleSidebar: () => void;
     onToggleRightPanel: () => void;
     onToggleChatBox: () => void;
     onToggleCommentMode?: () => void;
+    onToolModeChange?: (mode: ToolMode) => void;
     onUndo?: () => void;
     onRedo?: () => void;
     canUndo?: boolean;
@@ -27,10 +31,12 @@ const Footer: React.FC<FooterProps> = ({
     isRightPanelOpen,
     canEdit = true,
     commentMode = false,
+    activeToolMode = 'none',
     onToggleSidebar,
     onToggleRightPanel,
     onToggleChatBox,
     onToggleCommentMode,
+    onToolModeChange,
     onUndo,
     onRedo,
     canUndo = false,
@@ -55,54 +61,72 @@ const Footer: React.FC<FooterProps> = ({
                         )}
                     </div>
                     <div id="tour-toolbar" className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 pl-8 py-2 h-12 ml-10" style={{ pointerEvents: canEdit ? 'auto' : 'none', opacity: canEdit ? 1 : 0.5 }}>                        
-                        <Button
-                            type={interactionMode === 'default' && !commentMode ? 'primary' : 'text'}
-                            className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
-                            onClick={() => { setInteractionMode('default'); if (onToggleCommentMode && commentMode) onToggleCommentMode(); }}
-                        >
-                            <MousePointer2 size={18} />
-                        </Button>
-                        <Button
-                            type={interactionMode === 'panning' && !commentMode ? 'primary' : 'text'}
-                            className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
-                            onClick={() => { setInteractionMode('panning'); if (onToggleCommentMode && commentMode) onToggleCommentMode(); }}
-                        >
-                            <Hand size={18} />
-                        </Button>
-                        <Button
-                            type="text"
-                            className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
-                        >
-                            <StickyNote size={18} />
-                        </Button>
-                        <Button
-                            type="text"
-                            className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
-                        >
-                            <Type size={18} />
-                        </Button>
-                        <Button
-                            type="text"
-                            className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
-                        >
-                            <ArrowUpRight size={18} />
-                        </Button>
-                        <Button
-                            type="text"
-                            className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
-                        >
-                            <PenTool size={18} />
-                        </Button>
-                        <Button
-                            type={commentMode ? 'primary' : 'text'}
-                            className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
-                            onClick={() => {
-                                if (onToggleCommentMode) onToggleCommentMode();
-                                if (!commentMode) setInteractionMode('default');
-                            }}
-                        >
-                            <MessageCircleMore size={18} />
-                        </Button>
+                        <Tooltip title="Select" placement="top">
+                            <Button
+                                type={interactionMode === 'default' && !commentMode && activeToolMode === 'none' ? 'primary' : 'text'}
+                                className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
+                                onClick={() => { setInteractionMode('default'); if (onToggleCommentMode && commentMode) onToggleCommentMode(); if (onToolModeChange) onToolModeChange('none'); }}
+                            >
+                                <MousePointer2 size={18} />
+                            </Button>
+                        </Tooltip>
+                        <Tooltip title="Pan" placement="top">
+                            <Button
+                                type={interactionMode === 'panning' && !commentMode && activeToolMode === 'none' ? 'primary' : 'text'}
+                                className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
+                                onClick={() => { setInteractionMode('panning'); if (onToggleCommentMode && commentMode) onToggleCommentMode(); if (onToolModeChange) onToolModeChange('none'); }}
+                            >
+                                <Hand size={18} />
+                            </Button>
+                        </Tooltip>
+                        <Tooltip title="Sticky Note" placement="top">
+                            <Button
+                                type={activeToolMode === 'sticky-note' ? 'primary' : 'text'}
+                                className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
+                                onClick={() => {
+                                    if (onToolModeChange) onToolModeChange(activeToolMode === 'sticky-note' ? 'none' : 'sticky-note');
+                                    if (onToggleCommentMode && commentMode) onToggleCommentMode();
+                                }}
+                            >
+                                <StickyNote size={18} />
+                            </Button>
+                        </Tooltip>
+                        <Tooltip title="Text" placement="top">
+                            <Button
+                                type={activeToolMode === 'text-label' ? 'primary' : 'text'}
+                                className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
+                                onClick={() => {
+                                    if (onToolModeChange) onToolModeChange(activeToolMode === 'text-label' ? 'none' : 'text-label');
+                                    if (onToggleCommentMode && commentMode) onToggleCommentMode();
+                                }}
+                            >
+                                <Type size={18} />
+                            </Button>
+                        </Tooltip>
+                        <Tooltip title="Pen" placement="top">
+                            <Button
+                                type={activeToolMode === 'pen' ? 'primary' : 'text'}
+                                className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
+                                onClick={() => {
+                                    if (onToolModeChange) onToolModeChange(activeToolMode === 'pen' ? 'none' : 'pen');
+                                    if (onToggleCommentMode && commentMode) onToggleCommentMode();
+                                }}
+                            >
+                                <PenTool size={18} />
+                            </Button>
+                        </Tooltip>
+                        <Tooltip title="Comment" placement="top">
+                            <Button
+                                type={commentMode ? 'primary' : 'text'}
+                                className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
+                                onClick={() => {
+                                    if (onToggleCommentMode) onToggleCommentMode();
+                                    if (!commentMode) setInteractionMode('default');
+                                }}
+                            >
+                                <MessageCircleMore size={18} />
+                            </Button>
+                        </Tooltip>
                     </div>
                 </div>
 
@@ -160,17 +184,19 @@ const Footer: React.FC<FooterProps> = ({
                 </div>
                 <div id="tour-zoom-controls" className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12">
                     <ZoomControls />
-                    <Button
-                        type="text"
-                        className="!px-2"
-                        onClick={onToggleRightPanel}
-                    >
-                        {isRightPanelOpen ? (
-                            <PanelBottomOpen size={18} />
-                        ) : (
-                            <PanelTopOpen size={18} />
-                        )}
-                    </Button>
+                    <Tooltip title={isRightPanelOpen ? "Hide Properties" : "Show Properties"} placement="top">
+                        <Button
+                            type="text"
+                            className="!px-2"
+                            onClick={onToggleRightPanel}
+                        >
+                            {isRightPanelOpen ? (
+                                <PanelBottomOpen size={18} />
+                            ) : (
+                                <PanelTopOpen size={18} />
+                            )}
+                        </Button>
+                    </Tooltip>
                 </div>
             </div>
         </div>

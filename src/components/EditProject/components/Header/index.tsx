@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { Avatar, Button, Tooltip, Dropdown } from "antd";
-import { Download, MessageCircle, History, Search, Send, TvMinimal, Smile, ThumbsUp, PartyPopper, Database } from "lucide-react";
+import { Download, MessageCircleMore, History, Send, Smile, ThumbsUp, PartyPopper, PlugZap, HardDriveUpload } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { RemoteCollaborator } from "../../hooks/useCollaborationAwareness";
@@ -19,8 +19,12 @@ type HeaderProps = {
     onDownload: () => void;
     onExportJson: () => void;
     onExportDDL?: () => void;
+    onImportDDL?: () => void;
+    onExportHTMLDocs?: () => void;
     onVersionHistory?: () => void;
     onShareClick: () => void;
+    commentMode?: boolean;
+    onToggleCommentMode?: () => void;
 };
 
 const Header: React.FC<HeaderProps> = ({
@@ -35,8 +39,12 @@ const Header: React.FC<HeaderProps> = ({
     onDownload,
     onExportJson,
     onExportDDL,
+    onImportDDL,
+    onExportHTMLDocs,
     onVersionHistory,
     onShareClick,
+    commentMode = false,
+    onToggleCommentMode,
 }) => {
     const inputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
@@ -81,8 +89,15 @@ const Header: React.FC<HeaderProps> = ({
                 onClick: () => onExportDDL(),
             });
         }
+        if (onExportHTMLDocs) {
+            items.push({
+                key: 'export-html-docs',
+                label: 'Export HTML Documentation',
+                onClick: () => onExportHTMLDocs(),
+            });
+        }
         return items;
-    }, [onDownload, onExportJson, onExportDDL]);
+    }, [onDownload, onExportJson, onExportDDL, onExportHTMLDocs]);
 
     return (
         <div className="pt-4 bg-transparent flex items-center justify-between px-4 fixed top-0 z-10 w-full">
@@ -112,28 +127,33 @@ const Header: React.FC<HeaderProps> = ({
                         }}
                     />
                 )}
-                <Button
-                    id="tour-search-btn"
-                    type="text"
-                    className="!px-2"
-                    onClick={onOpenSearchModal}
-                >
-                    <Search size={18} />
-                </Button>
                 <Dropdown 
                     menu={{ items: downloadItems }} 
                     trigger={['click']} 
                     placement="bottom"
                     align={{ offset: [0, 10] }}
                 >
-                    <Button
-                        id="tour-download-btn"
-                        type="text"
-                        className="!px-2"
-                    >
-                        <Download size={18} />
-                    </Button>
+                    <Tooltip title="Export" placement="bottom">
+                        <Button
+                            id="tour-download-btn"
+                            type="text"
+                            className="!px-2"
+                        >
+                            <Download size={18} />
+                        </Button>
+                    </Tooltip>
                 </Dropdown>
+                {onImportDDL && (
+                    <Tooltip title="Import SQL (DDL)" placement="bottom">
+                        <Button
+                            type="text"
+                            className="!px-2"
+                            onClick={onImportDDL}
+                        >
+                            <HardDriveUpload size={18} />
+                        </Button>
+                    </Tooltip>
+                )}
                 <Button
                     id="tour-share-btn"
                     type="primary"
@@ -145,30 +165,25 @@ const Header: React.FC<HeaderProps> = ({
                 </Button>
             </div>
             <div className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12">
-                <Button
-                    type="text"
-                    className="!px-2"
-                >
-                    <div className="flex items-center">
-                        <Smile size={18} />
-                        <ThumbsUp size={18} />
-                        <PartyPopper size={18} />
-                    </div>
-                </Button>
-                <Button
-                    id="tour-version-history"
-                    type="text"
-                    className="!px-2"
-                    onClick={onVersionHistory}
-                >
-                    <History size={18} />
-                </Button>
-                <Button
-                    type="text"
-                    className="!px-2"
-                >
-                    <MessageCircle size={18} />
-                </Button>
+                <Tooltip title="Version History" placement="bottom">
+                    <Button
+                        id="tour-version-history"
+                        type="text"
+                        className="!px-2"
+                        onClick={onVersionHistory}
+                    >
+                        <History size={18} />
+                    </Button>
+                </Tooltip>
+                <Tooltip title="Comment" placement="bottom">
+                    <Button
+                        type={commentMode ? 'primary' : 'text'}
+                        className="!px-2"
+                        onClick={onToggleCommentMode}
+                    >
+                        <MessageCircleMore size={18} />
+                    </Button>
+                </Tooltip>
                 {collaborators.length > 0 && (
                 <div className="rounded-xl py-1 h-10 flex items-center">
                     <Avatar.Group
@@ -209,8 +224,8 @@ const Header: React.FC<HeaderProps> = ({
                     type="primary"
                     className="!px-3 gap-2 flex items-center"
                 >
-                    <TvMinimal className="text-white" size={18} />
-                    <span className="font-semibold">Present</span>
+                    <PlugZap className="text-white" size={18} />
+                    <span className="font-semibold">Connect to Database</span>
                 </Button>
             </div>
         </div>
