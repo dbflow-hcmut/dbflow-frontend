@@ -1146,6 +1146,14 @@ const EditProject = (props: IPropsEditProject) => {
         savedEdgesBeforePreviewRef.current = null;
     }, [setNodesState, setEdgesState]);
 
+    const handleRestoreVersion = useCallback(() => {
+        // The previewed nodes/edges are already set as the current state.
+        // Just clear the preview refs so the current state becomes permanent.
+        setPreviewingVersionId(null);
+        savedNodesBeforePreviewRef.current = null;
+        savedEdgesBeforePreviewRef.current = null;
+    }, []);
+
     const handleVersionHistoryClose = useCallback(() => {
         setIsVersionHistoryOpen(false);
     }, []);
@@ -1473,6 +1481,7 @@ const EditProject = (props: IPropsEditProject) => {
                     liveEdges={savedEdgesBeforePreviewRef.current ?? edges}
                     onPreviewVersion={handlePreviewVersion}
                     onExitPreview={handleExitPreview}
+                    onRestoreVersion={handleRestoreVersion}
                     previewingVersionId={previewingVersionId}
                 />
                 <div className="flex h-full overflow-hidden">

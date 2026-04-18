@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Drawer, Button, Tag, Empty, Input, Select, Segmented, Tooltip, Skeleton } from "antd";
-import { Plus, GitCompare, Copy, Download, ArrowLeft } from "lucide-react";
+import { Plus, GitCompare, Copy, Download, ArrowLeft, RotateCcw } from "lucide-react";
 import ReactFlow, { Node, Edge, ReactFlowProvider, Background, BackgroundVariant, EdgeTypes, type NodeTypes } from "reactflow";
 import { apiGet, apiPost } from "@/lib/clientFetch";
 import { PROXY_SCHEMA_VERSIONS, PROXY_SCHEMA_VERSION_DETAIL } from "@/api";
@@ -77,6 +77,7 @@ interface VersionHistoryDrawerProps {
     liveEdges?: Edge[];
     onPreviewVersion?: (storedNodes: unknown[], storedEdges: unknown[], version: VersionSummary) => void;
     onExitPreview?: () => void;
+    onRestoreVersion?: () => void;
     previewingVersionId?: string | null;
 }
 
@@ -291,6 +292,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
     diagramType,
     onPreviewVersion,
     onExitPreview,
+    onRestoreVersion,
     previewingVersionId,
 }) => {
     const isPhysical = diagramType === SchemaType.PHYSICAL;
@@ -300,6 +302,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
     const [creating, setCreating] = useState(false);
     const [loadingPreview, setLoadingPreview] = useState<string | null>(null);
     const [newLabel, setNewLabel] = useState("");
+    const [restoring, setRestoring] = useState(false);
 
     // Compare
     const [compareFrom, setCompareFrom] = useState<string | null>(null);
@@ -407,6 +410,32 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
             setCreating(false);
         }
     }, [projectId, schemaId, newLabel, fetchVersions]);
+
+    // ── Restore version ──────────────────────────────────────────
+
+    const handleRestoreVersion = useCallback(async () => {
+        if (!projectId || !schemaId || !previewingVersionId || !onRestoreVersion) return;
+        setRestoring(true);
+        try {
+            const restoredVersion = versions.find(v => v.id === previewingVersionId);
+
+            // Save the current (live) state as a snapshot first so it's not lost
+            await apiPost(PROXY_SCHEMA_VERSIONS(projectId, schemaId), {
+                label: `Before restore to v${restoredVersion?.version ?? "?"}`,
+            });
+
+            // Make the previewed state permanent in the parent
+            onRestoreVersion();
+
+            notificationProvider.open({ type: "success", message: "Version restored. A backup of your previous state was saved." });
+            await fetchVersions();
+        } catch (err) {
+            notificationProvider.open({ type: "error", message: "Failed to restore version" });
+            console.error(err);
+        } finally {
+            setRestoring(false);
+        }
+    }, [projectId, schemaId, previewingVersionId, onRestoreVersion, versions, fetchVersions]);
 
     // ── Compare ──────────────────────────────────────────────────
 
@@ -537,9 +566,21 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
                 <div className="flex items-center justify-between mb-3">
                     <span className="text-sm font-medium">Versions</span>
                     {previewingVersionId && (
-                        <Button size="small" type="link" onClick={onExitPreview} className="text-xs !px-0">
-                            Exit preview
-                        </Button>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                size="small"
+                                type="primary"
+                                icon={<RotateCcw size={12} />}
+                                loading={restoring}
+                                onClick={handleRestoreVersion}
+                                className="text-xs"
+                            >
+                                Restore
+                            </Button>
+                            <Button size="small" type="link" onClick={onExitPreview} className="text-xs !px-0">
+                                Exit preview
+                            </Button>
+                        </div>
                     )}
                 </div>
                 {loading ? (
