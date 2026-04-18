@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import { Button, Collapse, Dropdown } from "antd";
 import { Plus, Table2, MoreVertical, Edit, Trash2, ChevronDown } from "lucide-react";
 import type { MenuProps } from "antd";
@@ -61,6 +61,11 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
     const [schemaToDelete, setSchemaToDelete] = useState<ProjectSchemasResponse | null>(null);
     const [renameModalOpen, setRenameModalOpen] = useState(false);
     const [schemaToRename, setSchemaToRename] = useState<ProjectSchemasResponse | null>(null);
+
+    const onDragStart = useCallback((event: React.DragEvent, nodeType: string) => {
+        event.dataTransfer.setData("application/dbflow-node-type", nodeType);
+        event.dataTransfer.effectAllowed = "move";
+    }, []);
     
     
     const {
@@ -139,6 +144,7 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
     ];
     return (
         <div
+            id="tour-sidebar"
             className={`absolute h-[calc(100vh-160px)] top-1/2 -translate-y-1/2 left-4 flex flex-col items-center gap-2 bg-white z-10 rounded-lg shadow-md transition-all duration-300 ease-in-out ${isOpen
                 ? 'opacity-100 translate-x-0 pointer-events-auto'
                 : 'opacity-0 -translate-x-full pointer-events-none'
@@ -247,6 +253,7 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                                         label: <div className="font-bold">Conceptual Schema</div>,
                                         children: (
                                             <div className="grid grid-cols-5 gap-2">
+                                                <div draggable onDragStart={(e) => onDragStart(e, "entity")} className="cursor-grab flex items-center justify-center">
                                                 <Button
                                                     type="text"
                                                     icon={
@@ -259,6 +266,8 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                                                     }
                                                     onClick={onAddEntity}
                                                 />
+                                                </div>
+                                                <div draggable onDragStart={(e) => onDragStart(e, "double-entity")} className="cursor-grab flex items-center justify-center">
                                                 <Button
                                                     type="text"
                                                     icon={
@@ -271,6 +280,8 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                                                     }
                                                     onClick={onAddDoubleEntity}
                                                 />
+                                                </div>
+                                                <div draggable onDragStart={(e) => onDragStart(e, "attribute")} className="cursor-grab flex items-center justify-center">
                                                 <Button
                                                     type="text"
                                                     icon={
@@ -285,6 +296,8 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                                                     }
                                                     onClick={onAddAttribute}
                                                 />
+                                                </div>
+                                                <div draggable onDragStart={(e) => onDragStart(e, "multivalued-attribute")} className="cursor-grab flex items-center justify-center">
                                                 <Button
                                                     type="text"
                                                     icon={
@@ -299,6 +312,8 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                                                     }
                                                     onClick={onAddMultivaluedAttribute}
                                                 />
+                                                </div>
+                                                <div draggable onDragStart={(e) => onDragStart(e, "dashed-attribute")} className="cursor-grab flex items-center justify-center">
                                                 <Button
                                                     type="text"
                                                     icon={
@@ -313,6 +328,8 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                                                     }
                                                     onClick={onAddDashedAttribute}
                                                 />
+                                                </div>
+                                                <div draggable onDragStart={(e) => onDragStart(e, "relationship")} className="cursor-grab flex items-center justify-center">
                                                 <Button
                                                     type="text"
                                                     icon={
@@ -326,6 +343,8 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                                                     }
                                                     onClick={onAddRelationship}
                                                 />
+                                                </div>
+                                                <div draggable onDragStart={(e) => onDragStart(e, "double-relationship")} className="cursor-grab flex items-center justify-center">
                                                 <Button
                                                     type="text"
                                                     icon={
@@ -340,21 +359,28 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                                                     }
                                                     onClick={onAddDoubleRelationship}
                                                 />
+                                                </div>
+                                                <div draggable onDragStart={(e) => onDragStart(e, "constraint-d")} className="cursor-grab flex items-center justify-center">
                                                 <Button
                                                     type="text"
                                                     icon={<div className="w-6 h-6 rounded-full border border-gray-800 flex items-center justify-center text-[12px] font-bold">d</div>}
                                                     onClick={() => onAddConstraint('d')}
                                                 />
+                                                </div>
+                                                <div draggable onDragStart={(e) => onDragStart(e, "constraint-o")} className="cursor-grab flex items-center justify-center">
                                                 <Button
                                                     type="text"
                                                     icon={<div className="w-6 h-6 rounded-full border border-gray-800 flex items-center justify-center text-[12px] font-bold">o</div>}
                                                     onClick={() => onAddConstraint('o')}
                                                 />
+                                                </div>
+                                                <div draggable onDragStart={(e) => onDragStart(e, "constraint-u")} className="cursor-grab flex items-center justify-center">
                                                 <Button
                                                     type="text"
                                                     icon={<div className="w-6 h-6 rounded-full border border-gray-800 flex items-center justify-center text-[12px] font-bold">u</div>}
                                                     onClick={() => onAddConstraint('u')}
                                                 />
+                                                </div>
                                             </div>
                                         ),
                                     },
@@ -376,6 +402,7 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                                         label: <div className="font-bold">Logical Schema</div>,
                                         children: (
                                             <div className="grid grid-cols-5 gap-2">
+                                                <div draggable onDragStart={(e) => onDragStart(e, "logical-table")} className="cursor-grab flex items-center justify-center">
                                                 <Button
                                                     type="text"
                                                     icon={
@@ -385,6 +412,7 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                                                     }
                                                     onClick={onAddRelationTable}
                                                 />
+                                                </div>
                                             </div>
                                         ),
                                     },
@@ -406,6 +434,7 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                                         label: <div className="font-bold">Physical Schema</div>,
                                         children: (
                                             <div className="grid grid-cols-5 gap-2">
+                                                <div draggable onDragStart={(e) => onDragStart(e, "physical-table")} className="cursor-grab flex items-center justify-center">
                                                 <Button
                                                     type="text"
                                                     icon={
@@ -415,6 +444,7 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                                                     }
                                                     onClick={onAddRelationTable}
                                                 />
+                                                </div>
                                             </div>
                                         ),
                                     },

@@ -2,6 +2,8 @@ import type { StoredPhysicalDiagramEdge, StoredPhysicalDiagramNode, StoredPhysic
 import type { NodeData } from "../index";
 import { computeELKTableLayout, type LayoutTable } from "./auto-layout";
 
+import type { FKAction, IndexType, ColumnSortOrder } from "./dbms-config";
+
 const generatePid = () => {
     if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
         return `pid_${crypto.randomUUID()}`;
@@ -14,23 +16,40 @@ type ModelColumn = {
     id: string;
     name: string;
     dataType?: string;
+    length?: string;
     nullable: boolean;
     unique: boolean;
+    autoIncrement?: boolean;
+    defaultValue?: string;
     roles?: {
         primaryKey?: boolean;
         foreignKey?: {
             refTableId: string;
             refColumnId: string;
+            onDelete?: FKAction;
+            onUpdate?: FKAction;
         };
         candidateKey?: boolean;
     };
     notes?: string;
 };
 
+export type ModelIndex = {
+    id: string;
+    name: string;
+    type: IndexType;
+    columns: Array<{
+        columnName: string;
+        order: ColumnSortOrder;
+    }>;
+    isUnique: boolean;
+};
+
 type ModelTable = {
     id: string;
     name: string;
     columns: ModelColumn[];
+    indexes?: ModelIndex[];
     functionalDependencies?: ModelFunctionalDependency[];
     notes?: string;
 };
@@ -92,8 +111,8 @@ const buildPhysicalModel = ({
     // Build a map of table nodes by ID
     const tableNodeMap = new Map(tableNodes.map((node) => [node.tableId!, node]));
 
-    // Build a map of FK relationships: tableId -> columnIndex -> { refTableId, refColumnId }
-    const fkMap = new Map<string, Map<number, { refTableId: string; refColumnId: string }>>();
+    // Build a map of FK relationships: tableId -> columnIndex -> { refTableId, refColumnId, onDelete, onUpdate }
+    const fkMap = new Map<string, Map<number, { refTableId: string; refColumnId: string; onDelete?: FKAction; onUpdate?: FKAction }>>();
 
     storedEdges
         .filter((edge) => edge.type === "fk" && edge.fkRef)
@@ -118,21 +137,26 @@ const buildPhysicalModel = ({
             fkMap.get(sourceTableId)!.set(columnIndex, {
                 refTableId: targetTableNode.tableId!,
                 refColumnId: pkColumn.columnId,
+                onDelete: edge.fkRef.onDelete,
+                onUpdate: edge.fkRef.onUpdate,
             });
         });
 
     // Build tables with columns
     // Get column data from stored node data (RelationTableData)
-    const tableDataMap = new Map<string, { name: string; columns: Array<{ name: string; type?: string; isPrimary?: boolean; isNullable?: boolean }> }>();
+    type ActualColumnData = { name: string; type?: string; length?: string; isPrimary?: boolean; isNullable?: boolean; isUnique?: boolean; isAutoIncrement?: boolean; defaultValue?: string };
+    type ActualTableData = { name: string; columns: ActualColumnData[]; indexes?: Array<{ id: string; name: string; type: string; columns: Array<{ columnName: string; order: string }>; isUnique: boolean }> };
+    const tableDataMap = new Map<string, ActualTableData>();
     
     tableNodes.forEach((tableNode) => {
         if (tableNode.tableId) {
             // Get column data from node data (RelationTableData)
-            const nodeData = tableNode.data as { name?: string; columns?: Array<{ name: string; type?: string; isPrimary?: boolean; isNullable?: boolean }> } | undefined;
+            const nodeData = tableNode.data as ActualTableData | undefined;
             if (nodeData && nodeData.columns) {
                 tableDataMap.set(tableNode.tableId, {
                     name: nodeData.name || tableNode.name || tableNode.tableId,
                     columns: nodeData.columns,
+                    indexes: nodeData.indexes,
                 });
             }
         }
@@ -160,8 +184,12 @@ const buildPhysicalModel = ({
                   const column: ModelColumn = {
                       id: columnId,
                       name: columnName,
+                      dataType: actualCol.type,
+                      length: actualCol.length,
                       nullable: actualCol.isNullable ?? true,
-                      unique: false,
+                      unique: actualCol.isUnique ?? false,
+                      autoIncrement: actualCol.isAutoIncrement,
+                      defaultValue: actualCol.defaultValue,
                       roles: {
                           primaryKey: isPrimaryKey,
                           ...(fkInfo
@@ -169,6 +197,8 @@ const buildPhysicalModel = ({
                                     foreignKey: {
                                         refTableId: fkInfo.refTableId,
                                         refColumnId: fkInfo.refColumnId,
+                                        onDelete: fkInfo.onDelete,
+                                        onUpdate: fkInfo.onUpdate,
                                     },
                                 }
                               : {}),
@@ -197,6 +227,8 @@ const buildPhysicalModel = ({
                                     foreignKey: {
                                         refTableId: fkInfo.refTableId,
                                         refColumnId: fkInfo.refColumnId,
+                                        onDelete: fkInfo.onDelete,
+                                        onUpdate: fkInfo.onUpdate,
                                     },
                                 }
                               : {}),
@@ -206,10 +238,20 @@ const buildPhysicalModel = ({
                   return column;
               });
 
+        // Build indexes from tableData
+        const indexes: ModelIndex[] = (tableData?.indexes ?? []).map((idx) => ({
+            id: idx.id,
+            name: idx.name,
+            type: idx.type as ModelIndex['type'],
+            columns: idx.columns.map(c => ({ columnName: c.columnName, order: c.order as 'ASC' | 'DESC' })),
+            isUnique: idx.isUnique,
+        }));
+
         return {
             id: tableId,
             name: tableName,
             columns,
+            indexes: indexes.length > 0 ? indexes : undefined,
             functionalDependencies: [], // TODO: Extract from diagram if needed
             notes: undefined,
         };
@@ -249,7 +291,7 @@ const buildPhysicalSizeLookup = (existingNodes?: StoredPhysicalNode[]) => {
     return map;
 };
 
-const computeTableSize = (columns: Array<{ name: string; dataType?: string; nullable?: boolean; roles?: { primaryKey?: boolean; foreignKey?: unknown } }>) => {
+const computeTableSize = (columns: Array<{ name: string; dataType?: string; length?: string; nullable?: boolean; unique?: boolean; autoIncrement?: boolean; roles?: { primaryKey?: boolean; foreignKey?: unknown } }>) => {
     const columnCount = columns.length;
     // Estimate width based on longest row content
     let maxRowWidth = 200; // minimum
@@ -357,8 +399,19 @@ export const buildDiagramFromPhysicalModel = async ({
                 columns: (table.columns ?? []).map((col) => ({
                     name: col.name,
                     type: col.dataType ?? "varchar",
+                    length: col.length,
                     isPrimary: col.roles?.primaryKey ?? false,
                     isNullable: col.nullable ?? true,
+                    isUnique: col.unique ?? false,
+                    isAutoIncrement: col.autoIncrement ?? false,
+                    defaultValue: col.defaultValue,
+                })),
+                indexes: (table.indexes ?? []).map((idx) => ({
+                    id: idx.id,
+                    name: idx.name,
+                    type: idx.type,
+                    columns: idx.columns,
+                    isUnique: idx.isUnique,
                 })),
             } as NodeData,
         });
@@ -386,6 +439,8 @@ export const buildDiagramFromPhysicalModel = async ({
                     foreignKeyIndex: colIdx,
                     sourceColumnName: col.name,
                     targetColumnName: targetColName,
+                    onDelete: fk.onDelete,
+                    onUpdate: fk.onUpdate,
                 },
             });
         });
@@ -409,3 +464,4 @@ export const buildDiagramFromPhysicalModel = async ({
 };
 
 export { buildPhysicalModel };
+export type { ModelColumn, ModelTable };

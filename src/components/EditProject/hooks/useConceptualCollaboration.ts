@@ -15,7 +15,7 @@ import {
     mapReactNodesToStoredNodes,
     mapReactEdgesToStoredEdges,
 } from "../utils/conceptual-diagram.builder";
-import { buildDiagramFromModel, createEmptyConceptualModel } from "../utils/conceptual-model.builder";
+import { buildDiagramFromModel, buildConceptualModel, createEmptyConceptualModel } from "../utils/conceptual-model.builder";
 import type { ConceptualModelPayload } from "../utils/conceptual-model.builder";
 
 export type MutateModelFn = (
@@ -34,6 +34,7 @@ type UseConceptualCollaborationParams = {
     setNodes: Dispatch<SetStateAction<Node<NodeData>[]>>;
     setEdges: Dispatch<SetStateAction<Edge[]>>;
     diagramName: string;
+    onDiagramReady?: () => void;
 };
 
 export const useConceptualCollaboration = ({
@@ -47,6 +48,7 @@ export const useConceptualCollaboration = ({
     setNodes,
     setEdges,
     diagramName,
+    onDiagramReady,
 }: UseConceptualCollaborationParams) => {
     const providerRef = useRef<HocuspocusProvider | null>(null);
     const ydocRef = useRef<Y.Doc | null>(null);
@@ -78,6 +80,9 @@ export const useConceptualCollaboration = ({
     const edgesRef = useRef(edges);
     edgesRef.current = edges;
 
+    const onDiagramReadyRef = useRef(onDiagramReady);
+    onDiagramReadyRef.current = onDiagramReady;
+
     useEffect(() => {
         if (!enabled) {
             lastSyncedDiagramStringRef.current = null;
@@ -87,6 +92,7 @@ export const useConceptualCollaboration = ({
             hasLoadedInitialDataRef.current = false;
             initialSyncDoneRef.current = false;
             isGeneratingDiagramRef.current = false;
+            modelDataRef.current = null;
             currentSchemaIdRef.current = null;
             return;
         }
@@ -98,6 +104,7 @@ export const useConceptualCollaboration = ({
         hasLoadedInitialDataRef.current = false;
         initialSyncDoneRef.current = false;
         isGeneratingDiagramRef.current = false;
+        modelDataRef.current = null;
         currentSchemaIdRef.current = schema?.id ?? null;
     }, [enabled, schema?.id]);
 
@@ -198,6 +205,7 @@ export const useConceptualCollaboration = ({
             console.log("[Conceptual Collaboration] Setting nodes and edges to state");
             setNodes(reactNodes);
             setEdges(reactEdges);
+            onDiagramReadyRef.current?.();
 
             setTimeout(() => {
                 isSyncingFromYjsRef.current = false;
@@ -209,10 +217,10 @@ export const useConceptualCollaboration = ({
         };
 
         /** Try to load diagram from Yjs. Returns `true` if data existed and was applied. */
-        const loadDiagramFromYjs = (): boolean => {
+        const loadDiagramFromYjs = (): { loaded: boolean; nodeCount: number } => {
             const diagramDataString = diagramMap.get('data');
             if (!diagramDataString || typeof diagramDataString !== 'string') {
-                return false;
+                return { loaded: false, nodeCount: 0 };
             }
 
             try {
@@ -225,13 +233,14 @@ export const useConceptualCollaboration = ({
                 };
 
                 if (parsedData.diagram) {
+                    const nodeCount = (parsedData.diagram.nodes ?? []).length;
                     applyDiagramFromYjs(parsedData.diagram, diagramDataString);
-                    return true;
+                    return { loaded: true, nodeCount };
                 }
             } catch (error) {
                 console.error('Error parsing diagram data from Yjs:', error);
             }
-            return false;
+            return { loaded: false, nodeCount: 0 };
         };
 
         // ── Generate diagram from model (model-as-truth) ──────────────────
@@ -314,6 +323,10 @@ export const useConceptualCollaboration = ({
                 const parsedModel = JSON.parse(modelDataString);
                 modelDataRef.current = parsedModel;
                 lastSyncedModelStringRef.current = modelDataString;
+                // Mark initial model as "applied" so the Y.Map observer
+                // does not mistake it for an external change and regenerate
+                // the diagram (which would overwrite saved positions).
+                lastAppliedModelStringRef.current = modelDataString;
             } catch (error) {
                 console.error('Error parsing model data from Yjs:', error);
             }
@@ -366,8 +379,12 @@ export const useConceptualCollaboration = ({
                 // at least one React render cycle).  During initial sync the
                 // saved diagram (with user's positions) takes priority.
                 if (initialSyncDoneRef.current) {
-                    console.log('[Conceptual Collaboration] External model change — regenerating diagram from model (preserving positions)');
-                    void applyModelToDiagramInternal(newModel, modelDataString);
+                    if (isSyncingFromYjsRef.current) {
+                        lastAppliedModelStringRef.current = modelDataString;
+                    } else {
+                        console.log('[Conceptual Collaboration] External model change — regenerating diagram from model (preserving positions)');
+                        void applyModelToDiagramInternal(newModel, modelDataString);
+                    }
                 } else {
                     console.log('[Conceptual Collaboration] Model change during initial sync — storing model ref only');
                 }
@@ -383,7 +400,7 @@ export const useConceptualCollaboration = ({
                 loadModelFromYjs();
 
                 // 2. Try loading diagram (has layout / positions)
-                const diagramLoaded = loadDiagramFromYjs();
+                const { loaded: diagramLoaded, nodeCount } = loadDiagramFromYjs();
 
                 // 3. If no diagram exists, or diagram is empty but model has
                 //    entities (e.g. AI-generated model saved before first
@@ -391,24 +408,25 @@ export const useConceptualCollaboration = ({
                 const hasModel = modelDataRef.current &&
                     (modelDataRef.current.entities?.length > 0 ||
                      ('tables' in modelDataRef.current && Array.isArray((modelDataRef.current as Record<string, unknown>).tables) && ((modelDataRef.current as Record<string, unknown>).tables as unknown[]).length > 0));
-                const diagramIsEmpty = diagramLoaded && nodesRef.current.length === 0;
+                // Use parsed nodeCount instead of nodesRef (React state hasn't rendered yet)
+                const diagramHasContent = diagramLoaded && nodeCount > 0;
 
-                if ((!diagramLoaded || diagramIsEmpty) && hasModel) {
+                if (!diagramHasContent && hasModel) {
                     console.log('[Conceptual Collaboration] No diagram (or empty) with model data — generating from model');
                     void applyModelToDiagramInternal(modelDataRef.current!, lastSyncedModelStringRef.current)
                         .finally(() => {
-                            // Mark initial sync done only AFTER the async
-                            // model→diagram build completes AND a render
-                            // cycle has passed.
                             setTimeout(() => {
                                 initialSyncDoneRef.current = true;
                                 console.log('[Conceptual Collaboration] Initial sync complete — model changes will now regenerate diagram');
                             }, 50);
                         });
                 } else {
-                    // Diagram already existed — mark sync done after one
-                    // render cycle so the sync useEffect doesn't
-                    // immediately patch the model.
+                    if (diagramHasContent) {
+                        lastAppliedModelStringRef.current = lastSyncedModelStringRef.current;
+                    } else {
+                        // No diagram and no model — empty canvas, turn off loading
+                        onDiagramReadyRef.current?.();
+                    }
                     setTimeout(() => {
                         initialSyncDoneRef.current = true;
                         console.log('[Conceptual Collaboration] Initial sync complete — model changes will now regenerate diagram');
@@ -428,7 +446,10 @@ export const useConceptualCollaboration = ({
 
         const initialDiagramData = diagramMap.get('data');
         if (initialDiagramData && typeof initialDiagramData === 'string') {
-            loadDiagramFromYjs();
+            const { loaded, nodeCount } = loadDiagramFromYjs();
+            if (loaded && nodeCount > 0) {
+                lastAppliedModelStringRef.current = lastSyncedModelStringRef.current;
+            }
         } else if (modelDataRef.current) {
             // Model exists but no diagram yet — generate diagram from model
             void applyModelToDiagramInternal(modelDataRef.current, lastSyncedModelStringRef.current);
@@ -454,6 +475,9 @@ export const useConceptualCollaboration = ({
         }
         if (isSyncingFromYjsRef.current) {
             console.log("[Conceptual Collaboration] Skipping sync - currently syncing from Yjs");
+            return;
+        }
+        if (isGeneratingDiagramRef.current) {
             return;
         }
 
@@ -557,18 +581,27 @@ export const useConceptualCollaboration = ({
      */
     const mutateModel: MutateModelFn = useCallback(
         async (mutator, opts) => {
+            // Rebuild model from current diagram state so diagram-only edits
+            // (node add/delete, attribute changes, etc.) are captured before
+            // applying the mutation.
+            const existingStoredNodesForModel = mapReactNodesToStoredNodes(nodesRef.current);
+            const existingStoredEdgesForModel = mapReactEdgesToStoredEdges(edgesRef.current, nodesRef.current);
             const current =
-                modelDataRef.current ??
-                createEmptyConceptualModel(schema?.id ?? undefined, schema?.name ?? undefined);
+                existingStoredNodesForModel.length > 0
+                    ? buildConceptualModel({
+                          storedNodes: existingStoredNodesForModel,
+                          storedEdges: existingStoredEdgesForModel,
+                          schemaId: schema?.id ?? undefined,
+                          schemaName: schema?.name ?? undefined,
+                      })
+                    : (modelDataRef.current ??
+                      createEmptyConceptualModel(schema?.id ?? undefined, schema?.name ?? undefined));
             const next = mutator(current);
-
-            const existingStoredNodes = mapReactNodesToStoredNodes(nodesRef.current);
-            const existingStoredEdges = mapReactEdgesToStoredEdges(edgesRef.current, nodesRef.current);
 
             const { nodes: storedNodes, edges: storedEdges } = await buildDiagramFromModel({
                 model: next,
-                existingNodes: existingStoredNodes,
-                existingEdges: existingStoredEdges,
+                existingNodes: existingStoredNodesForModel,
+                existingEdges: existingStoredEdgesForModel,
                 preserveUnmodeledNodes: true,
             });
 

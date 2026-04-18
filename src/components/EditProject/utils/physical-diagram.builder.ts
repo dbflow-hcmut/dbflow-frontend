@@ -3,9 +3,13 @@ import type { NodeData } from "../index";
 import type { RelationTableData } from "@/components/erds-notations/relation-table";
 import { generateDiagramId } from "./functions";
 
+import type { FKAction } from "./dbms-config";
+
 type RelationTableEdgeData = {
     label?: string;
     controlPoints?: Array<{ x: number; y: number }>;
+    onDelete?: FKAction;
+    onUpdate?: FKAction;
 };
 
 export const getViewportStorageKey = (schemaId?: string | null) =>
@@ -79,6 +83,8 @@ export type StoredPhysicalDiagramEdge = {
         foreignKeyIndex: number;
         sourceColumnName?: string; // Lưu column name để map lại handle
         targetColumnName?: string; // Lưu column name để map lại handle
+        onDelete?: FKAction;
+        onUpdate?: FKAction;
     };
     labels?: {
         text?: string;
@@ -157,6 +163,7 @@ const mapRelationNode = (node: StoredPhysicalNode): Node<RelationTableData> => {
         data: {
             name: node.name ?? dataSource?.name ?? node.tableId ?? node.id,
             columns,
+            indexes: dataSource?.indexes,
         },
         style: ensureStyle(node),
         zIndex: node.zIndex,
@@ -211,6 +218,8 @@ const mapReactRelationNode = (node: Node<RelationTableData>): StoredPhysicalNode
         },
     }));
 
+    const indexes = (node.data as RelationTableData)?.indexes;
+
     return {
         id: node.id,
         type: "table",
@@ -225,6 +234,7 @@ const mapReactRelationNode = (node: Node<RelationTableData>): StoredPhysicalNode
         data: {
             name,
             columns,
+            ...(indexes && indexes.length > 0 ? { indexes } : {}),
         } as RelationTableData,
     };
 };
@@ -298,6 +308,8 @@ const mapReactEdgeToStoredEdge = (
             foreignKeyIndex: sourceColumnIndex,
             sourceColumnName, // Lưu column name để map lại handle (giống conceptual lưu portId)
             targetColumnName, // Lưu column name để map lại handle
+            onDelete: edge.data?.onDelete,
+            onUpdate: edge.data?.onUpdate,
         },
         labels: edge.data?.label
             ? {
@@ -367,6 +379,8 @@ const mapSchemaEdgeToReactEdge = (
     const data: RelationTableEdgeData = {
         label: edge.labels?.text,
         controlPoints: edge.points?.map((p) => ({ x: p.x, y: p.y })),
+        onDelete: edge.fkRef?.onDelete,
+        onUpdate: edge.fkRef?.onUpdate,
     };
 
     const reactEdge: Edge<RelationTableEdgeData> = {

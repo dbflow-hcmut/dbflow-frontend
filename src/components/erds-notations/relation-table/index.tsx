@@ -9,18 +9,34 @@ import {
     DatabaseSchemaTableCell,
 } from "@/components/database-schema-node";
 import { LabeledHandle } from "@/components/labeled-handle";
-import { KeyRound, Link2 } from "lucide-react";
+import { KeyRound, Link2, Fingerprint, Zap } from "lucide-react";
 
-type RelationColumn = {
+export type RelationColumn = {
     name: string;
     type?: string;
+    length?: string;
     isPrimary?: boolean;
     isNullable?: boolean;
+    isUnique?: boolean;
+    isAutoIncrement?: boolean;
+    defaultValue?: string;
+};
+
+export type TableIndex = {
+    id: string;
+    name: string;
+    type: 'BTREE' | 'HASH' | 'GIN' | 'GIST' | 'BRIN';
+    columns: Array<{
+        columnName: string;
+        order: 'ASC' | 'DESC';
+    }>;
+    isUnique: boolean;
 };
 
 export type RelationTableData = {
     name: string;
     columns: RelationColumn[];
+    indexes?: TableIndex[];
 };
 
 const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
@@ -264,7 +280,9 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
 
                 <DatabaseSchemaNodeBody>
                     {data.columns?.length ? (
-                        data.columns.map((col, idx) => (
+                        data.columns.map((col, idx) => {
+                            const typeDisplay = col.length ? `${col.type || 'varchar'}(${col.length})` : (col.type || 'varchar');
+                            return (
                             <DatabaseSchemaTableRow key={idx} style={{ whiteSpace: 'nowrap' }}>
                                 <DatabaseSchemaTableCell className="font-light flex-1 flex items-center gap-1 justify-start" style={{ paddingLeft: 0, paddingRight: '24px' }}>
 
@@ -284,6 +302,12 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
                                     {fkColumnNames.has(col.name) && (
                                         <Link2 size={14} className="text-blue-500" />
                                     )}
+                                    {col.isUnique && !col.isPrimary && (
+                                        <Fingerprint size={14} className="text-purple-500" />
+                                    )}
+                                    {col.isAutoIncrement && (
+                                        <Zap size={12} className="text-green-500" />
+                                    )}
                                 </DatabaseSchemaTableCell>
                                 <DatabaseSchemaTableCell className="font-thin flex-1 flex justify-end" style={{ paddingRight: 0, paddingLeft: '12px' }}>
                                     {col.isNullable === false && (
@@ -291,7 +315,7 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
                                     )}
                                     <LabeledHandle
                                         id={col.name}
-                                        title={col.type || 'varchar'}
+                                        title={typeDisplay}
                                         type="source"
                                         position={Position.Right}
                                         isConnectable={!isSelected}
@@ -303,7 +327,8 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
                                     />
                                 </DatabaseSchemaTableCell>
                             </DatabaseSchemaTableRow>
-                        ))
+                        );
+                        })
                     ) : (
                         <DatabaseSchemaTableRow>
                             <DatabaseSchemaTableCell className="text-gray-500">

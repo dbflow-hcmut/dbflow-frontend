@@ -41,6 +41,8 @@ import Header from "./components/Header";
 import Footer from "./components/Footer";
 import ChatBox from "./components/ChatBox";
 import ExportModal, { ExportSettings, ExportFormat, ExportScope } from "./components/ExportModal";
+import DDLExportModal from "./components/DDLExportModal";
+import VersionHistoryDrawer from "./components/VersionHistoryDrawer";
 import CommentPin, { type CommentData, type MentionableUser } from "./components/CommentPin";
 import CommentPanel from "./components/CommentPanel";
 import { fetchComments, createComment, updateComment, deleteComment } from "./api/comments";
@@ -59,6 +61,7 @@ import { useCollaborationAwareness } from "./hooks/useCollaborationAwareness";
 import type { RemoteCollaborator } from "./hooks/useCollaborationAwareness";
 import { useProjectAwareness } from "./hooks/useProjectAwareness";
 import { RemoteCursorsOverlay } from "./components/RemoteCursorsOverlay";
+import TourGuide from "./components/TourGuide";
 import { useAuth } from "@/providers/AuthProvider";
 import { checkSchemaExistence, getProjectPermissions } from "@/api/projects/client";
 import { useUndoRedo } from "./hooks/useUndoRedo";
@@ -66,6 +69,17 @@ import ShareProject from "@/components/ShareProject";
 import type { ConceptualModelPayload } from "./utils/conceptual-model.builder";
 import type { LogicalModelPayload } from "./utils/logical-model.builder";
 import type { PhysicalModelPayload } from "./utils/physical-model.builder";
+import { mapStoredNodesToReactNodes, mapStoredEdgesToReactEdges } from "./utils/physical-diagram.builder";
+import type { StoredPhysicalNode, StoredPhysicalDiagramEdge } from "./utils/physical-diagram.builder";
+import {
+    mapStoredNodesToReactNodes as mapLogicalStoredToReact,
+    mapStoredEdgesToReactEdges as mapLogicalEdgesStoredToReact,
+} from "./utils/logical-diagram.builder";
+import {
+    mapStoredNodesToReactNodes as mapConceptualStoredToReact,
+    mapStoredEdgesToReactEdges as mapConceptualEdgesStoredToReact,
+} from "./utils/conceptual-diagram.builder";
+import type { StoredDiagramNode as StoredConceptualNode, StoredDiagramEdge as StoredConceptualEdge } from "./utils/conceptual-diagram.builder";
 
 export type EntityField = {
     id: string;
@@ -194,8 +208,13 @@ const EditProject = (props: IPropsEditProject) => {
         checkPerms();
     }, [projectData?.id, router]);
 
-    // Check if user can edit (owner or editor)
-    const canEdit = userPermission === 'owner' || userPermission === 'editor';
+    // Version preview state
+    const [previewingVersionId, setPreviewingVersionId] = useState<string | null>(null);
+    const savedNodesBeforePreviewRef = useRef<Node<NodeData>[] | null>(null);
+    const savedEdgesBeforePreviewRef = useRef<Edge[] | null>(null);
+
+    // Check if user can edit (owner or editor) — disabled during version preview
+    const canEdit = (userPermission === 'owner' || userPermission === 'editor') && !previewingVersionId;
 
     // Prevent delete/backspace when user is viewer
     useEffect(() => {
@@ -290,6 +309,8 @@ const EditProject = (props: IPropsEditProject) => {
     const [sessionId, setSessionId] = useState<string | null>(null);
     const [isAddPageOpen, setIsAddPageOpen] = useState(false);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+    const [isDDLExportOpen, setIsDDLExportOpen] = useState(false);
+    const [isVersionHistoryOpen, setIsVersionHistoryOpen] = useState(false);
     const [isShareProjectOpen, setIsShareProjectOpen] = useState(false);
     const [exportInitialConfig, setExportInitialConfig] = useState<{ format: ExportFormat; scope: ExportScope }>({ format: 'png', scope: 'all' });
 
@@ -387,26 +408,32 @@ const EditProject = (props: IPropsEditProject) => {
         resetHistory();
     }, [selectedSchema?.id, setNodesState, setEdgesState, resetHistory]);
 
-    // Tắt loading khi có data hoặc sau một khoảng thời gian
+    // Tắt loading khi collaboration hook đã build xong nodes,
+    // hoặc sau timeout nếu diagram trống
+    const diagramReadyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const handleDiagramReady = useCallback(() => {
+        if (diagramReadyTimeoutRef.current) {
+            clearTimeout(diagramReadyTimeoutRef.current);
+            diagramReadyTimeoutRef.current = null;
+        }
+        setIsLoadingDiagram(false);
+    }, []);
+
     useEffect(() => {
         if (!isLoadingDiagram) return;
 
-        // Nếu có nodes hoặc edges, tắt loading
-        if (nodes.length > 0 || edges.length > 0) {
-            // Delay một chút để đảm bảo data đã được render
-            const timer = setTimeout(() => {
-                setIsLoadingDiagram(false);
-            }, 100);
-            return () => clearTimeout(timer);
-        }
-
-        // Nếu không có data sau 500ms, tắt loading (có thể diagram trống)
-        const timeout = setTimeout(() => {
+        // Fallback: nếu không có data sau 5s, tắt loading (diagram trống hoặc lỗi)
+        diagramReadyTimeoutRef.current = setTimeout(() => {
             setIsLoadingDiagram(false);
-        }, 500);
+        }, 5000);
 
-        return () => clearTimeout(timeout);
-    }, [nodes, edges, isLoadingDiagram]);
+        return () => {
+            if (diagramReadyTimeoutRef.current) {
+                clearTimeout(diagramReadyTimeoutRef.current);
+                diagramReadyTimeoutRef.current = null;
+            }
+        };
+    }, [isLoadingDiagram]);
 
     // Load comments when schema changes
     const loadComments = useCallback(async () => {
@@ -601,6 +628,9 @@ const EditProject = (props: IPropsEditProject) => {
         addRelationTableColumn,
         removeRelationTableColumn,
         updateRelationTableColumn,
+        addTableIndex,
+        removeTableIndex,
+        updateTableIndex,
         addLogicalTableAttribute,
         removeLogicalTableAttribute,
         updateLogicalTableAttribute,
@@ -867,6 +897,7 @@ const EditProject = (props: IPropsEditProject) => {
         setNodes,
         setEdges,
         diagramName,
+        onDiagramReady: handleDiagramReady,
     });
 
     const {
@@ -885,6 +916,7 @@ const EditProject = (props: IPropsEditProject) => {
         setNodes,
         setEdges,
         diagramName,
+        onDiagramReady: handleDiagramReady,
     });
 
     const {
@@ -903,6 +935,7 @@ const EditProject = (props: IPropsEditProject) => {
         setNodes,
         setEdges,
         diagramName,
+        onDiagramReady: handleDiagramReady,
     });
 
     const awareness = isConceptualSchema ? conceptualAwareness : isLogicalSchema ? logicalAwareness : isPhysicalSchema ? physicalAwareness : null;
@@ -942,6 +975,180 @@ const EditProject = (props: IPropsEditProject) => {
         [isPhysicalSchema, physicalMutateModel, setNodes, getViewportCenter],
     );
     const effectiveAddRelationTable = physicalModelAwareCreators?.addRelationTable ?? addRelationTable;
+
+    // ── Drag-and-drop from sidebar ───────────────────────────────
+    const handleDragOver = useCallback((event: React.DragEvent) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+    }, []);
+
+    const handleDrop = useCallback(
+        (event: React.DragEvent) => {
+            event.preventDefault();
+            const nodeType = event.dataTransfer.getData("application/dbflow-node-type");
+            if (!nodeType || !reactFlowInstanceRef.current) return;
+
+            const position = reactFlowInstanceRef.current.screenToFlowPosition({
+                x: event.clientX,
+                y: event.clientY,
+            });
+
+            // Conceptual: model-first via mutateModel
+            if (isConceptualSchema && conceptualMutateModel) {
+                const id = generateDiagramId();
+                switch (nodeType) {
+                    case "entity":
+                        conceptualMutateModel(
+                            (m) => ({ ...m, entities: [...m.entities, { id, name: `ent_${m.entities.length + 1}`, kind: "strong" as const, attributes: [] }] }),
+                            { selectedNodeId: id, positionHint: position },
+                        );
+                        return;
+                    case "double-entity":
+                        conceptualMutateModel(
+                            (m) => ({ ...m, entities: [...m.entities, { id, name: `ent_${m.entities.length + 1}`, kind: "weak" as const, attributes: [] }] }),
+                            { selectedNodeId: id, positionHint: position },
+                        );
+                        return;
+                    case "relationship":
+                        conceptualMutateModel(
+                            (m) => ({ ...m, relationships: [...m.relationships, { id, name: `rel_${m.relationships.length + 1}`, type: "association" as const, ends: [] }] }),
+                            { selectedNodeId: id, positionHint: position },
+                        );
+                        return;
+                    case "double-relationship":
+                        conceptualMutateModel(
+                            (m) => ({ ...m, relationships: [...m.relationships, { id, name: `rel_${m.relationships.length + 1}`, type: "identifying" as const, ends: [] }] }),
+                            { selectedNodeId: id, positionHint: position },
+                        );
+                        return;
+                }
+            }
+
+            // Logical: model-first via logicalMutateModel
+            if (isLogicalSchema && logicalMutateModel && nodeType === "logical-table") {
+                const id = generateDiagramId();
+                logicalMutateModel(
+                    (m) => ({
+                        ...m,
+                        tables: [...(m.tables ?? []), { id, name: `table_${(m.tables ?? []).length + 1}`, columns: [{ id: `lid_${id}_col_0`, name: "column_1", nullable: true, unique: false, roles: {} }] }],
+                    }),
+                    { selectedNodeId: id, positionHint: position },
+                );
+                return;
+            }
+
+            // Physical: model-first via physicalMutateModel
+            if (isPhysicalSchema && physicalMutateModel && nodeType === "physical-table") {
+                const id = generateDiagramId();
+                physicalMutateModel(
+                    (m) => ({
+                        ...m,
+                        tables: [...(m.tables ?? []), { id, name: `table_${(m.tables ?? []).length + 1}`, columns: [{ id: `pid_${id}_col_0`, name: "column_1", dataType: "varchar", nullable: true, unique: false, roles: {} }] }],
+                    }),
+                    { selectedNodeId: id, positionHint: position },
+                );
+                return;
+            }
+
+            // Fallback: direct node creation (attributes, constraints, or non-model schemas)
+            setNodes((existingNodes) => {
+                const id = generateDiagramId();
+                const deselected = existingNodes.map((n) => ({ ...n, selected: false }));
+                let newNode: Node<NodeData> | null = null;
+
+                switch (nodeType) {
+                    case "entity":
+                        newNode = { id, type: "entity", position, data: { name: `ent_${existingNodes.length + 1}`, fields: [], variant: "single" }, style: { width: 70, height: 30 }, selected: true };
+                        break;
+                    case "double-entity":
+                        newNode = { id, type: "entity", position, data: { name: `ent_${existingNodes.length + 1}`, fields: [], variant: "double" }, style: { width: 70, height: 30 }, selected: true };
+                        break;
+                    case "attribute":
+                        newNode = { id, type: "attribute", position, data: { name: `attr_${existingNodes.length + 1}`, variant: "single" }, style: { width: 70, height: 30 }, selected: true };
+                        break;
+                    case "multivalued-attribute":
+                        newNode = { id, type: "attribute", position, data: { name: `attr_${existingNodes.length + 1}`, variant: "double" }, style: { width: 70, height: 30 }, selected: true };
+                        break;
+                    case "dashed-attribute":
+                        newNode = { id, type: "attribute", position, data: { name: `attr_${existingNodes.length + 1}`, variant: "dashed" }, style: { width: 70, height: 30 }, selected: true };
+                        break;
+                    case "relationship":
+                        newNode = { id, type: "relationship", position, data: { name: `rel_${existingNodes.length + 1}`, variant: "single" }, style: { width: 70, height: 40 }, selected: true };
+                        break;
+                    case "double-relationship":
+                        newNode = { id, type: "relationship", position, data: { name: `rel_${existingNodes.length + 1}`, variant: "double" }, style: { width: 70, height: 40 }, selected: true };
+                        break;
+                    case "constraint-d":
+                        newNode = { id, type: "constraint", position, data: { symbol: "d" }, style: { width: 22, height: 22 }, selected: true };
+                        break;
+                    case "constraint-o":
+                        newNode = { id, type: "constraint", position, data: { symbol: "o" }, style: { width: 22, height: 22 }, selected: true };
+                        break;
+                    case "constraint-u":
+                        newNode = { id, type: "constraint", position, data: { symbol: "u" }, style: { width: 22, height: 22 }, selected: true };
+                        break;
+                    case "logical-table": {
+                        const cnt = existingNodes.filter((n) => n.type === "logical-table").length;
+                        const logicalData = { name: `table_${cnt + 1}`, columns: [{ name: "column_1", isKey: false }] };
+                        newNode = { id, type: "logical-table", position, data: logicalData as NodeData, style: { width: 200, height: 120 }, selected: true };
+                        break;
+                    }
+                    case "physical-table": {
+                        const cnt = existingNodes.filter((n) => n.type === "relation").length;
+                        newNode = { id, type: "relation", position, data: { name: `table_${cnt + 1}`, columns: [{ name: "column_1", type: "varchar", isPrimary: false, isNullable: true }] }, style: { width: 220, height: 120 }, selected: true };
+                        break;
+                    }
+                }
+
+                if (!newNode) return existingNodes;
+                return [...deselected, newNode];
+            });
+        },
+        [setNodes, isConceptualSchema, isLogicalSchema, isPhysicalSchema, conceptualMutateModel, logicalMutateModel, physicalMutateModel],
+    );
+
+    // ── Version preview handlers ─────────────────────────────────
+    const handlePreviewVersion = useCallback(
+        (storedNodes: unknown[], storedEdges: unknown[], version: { id: string }) => {
+            // Save current state before first preview
+            if (!savedNodesBeforePreviewRef.current) {
+                savedNodesBeforePreviewRef.current = nodes;
+                savedEdgesBeforePreviewRef.current = edges;
+            }
+            setPreviewingVersionId(version.id);
+
+            // Use the correct mapper based on current schema type
+            let reactNodes: Node<NodeData>[];
+            let reactEdges: Edge[];
+            if (isConceptualSchema) {
+                reactNodes = mapConceptualStoredToReact(storedNodes as StoredConceptualNode[]);
+                reactEdges = mapConceptualEdgesStoredToReact(storedEdges as (StoredConceptualEdge | Edge)[], reactNodes);
+            } else if (isLogicalSchema) {
+                reactNodes = mapLogicalStoredToReact(storedNodes as Parameters<typeof mapLogicalStoredToReact>[0]);
+                reactEdges = mapLogicalEdgesStoredToReact(storedEdges as Parameters<typeof mapLogicalEdgesStoredToReact>[0], reactNodes);
+            } else {
+                reactNodes = mapStoredNodesToReactNodes(storedNodes as StoredPhysicalNode[]);
+                reactEdges = mapStoredEdgesToReactEdges(storedEdges as StoredPhysicalDiagramEdge[], reactNodes);
+            }
+            setNodesState(reactNodes);
+            setEdgesState(reactEdges);
+        },
+        [nodes, edges, setNodesState, setEdgesState, isConceptualSchema, isLogicalSchema],
+    );
+
+    const handleExitPreview = useCallback(() => {
+        if (savedNodesBeforePreviewRef.current) {
+            setNodesState(savedNodesBeforePreviewRef.current);
+            setEdgesState(savedEdgesBeforePreviewRef.current ?? []);
+        }
+        setPreviewingVersionId(null);
+        savedNodesBeforePreviewRef.current = null;
+        savedEdgesBeforePreviewRef.current = null;
+    }, [setNodesState, setEdgesState]);
+
+    const handleVersionHistoryClose = useCallback(() => {
+        setIsVersionHistoryOpen(false);
+    }, []);
 
     // Callback for ChatBox: when AI generates a model JSON, apply it to the diagram
     const handleChatModelGenerated = useCallback((modelJson: Record<string, unknown>) => {
@@ -1229,6 +1436,8 @@ const EditProject = (props: IPropsEditProject) => {
                     onFollowUser={handleFollowUserViewport}
                     onDownload={handleDownload}
                     onExportJson={handleExportJson}
+                    onExportDDL={isPhysicalSchema ? () => setIsDDLExportOpen(true) : undefined}
+                    onVersionHistory={() => setIsVersionHistoryOpen(true)}
                     onShareClick={() => setIsShareProjectOpen(true)}
                 />
                 <ShareProject
@@ -1243,6 +1452,28 @@ const EditProject = (props: IPropsEditProject) => {
                     onExport={executeExport}
                     initialValues={exportInitialConfig}
                     hasSelection={nodes.some(n => n.selected)}
+                />
+                <DDLExportModal
+                    isOpen={isDDLExportOpen}
+                    onClose={() => setIsDDLExportOpen(false)}
+                    model={_physicalModelData}
+                    diagramName={diagramName}
+                />
+                <VersionHistoryDrawer
+                    open={isVersionHistoryOpen}
+                    onClose={handleVersionHistoryClose}
+                    projectId={projectData?.id ?? null}
+                    schemaId={selectedSchema?.id ?? null}
+                    schemaName={selectedSchema?.name}
+                    diagramName={diagramName}
+                    diagramType={selectedSchema?.type}
+                    nodes={nodes}
+                    edges={edges}
+                    liveNodes={savedNodesBeforePreviewRef.current ?? nodes}
+                    liveEdges={savedEdgesBeforePreviewRef.current ?? edges}
+                    onPreviewVersion={handlePreviewVersion}
+                    onExitPreview={handleExitPreview}
+                    previewingVersionId={previewingVersionId}
                 />
                 <div className="flex h-full overflow-hidden">
                     <NotationsSidebar
@@ -1429,6 +1660,18 @@ const EditProject = (props: IPropsEditProject) => {
                         onAddRelationTableColumn={addRelationTableColumn}
                         onRemoveRelationTableColumn={removeRelationTableColumn}
                         onUpdateRelationTableColumn={updateRelationTableColumn}
+                        onAddTableIndex={addTableIndex}
+                        onRemoveTableIndex={removeTableIndex}
+                        onUpdateTableIndex={updateTableIndex}
+                        onUpdateFKAction={(edgeId, field, value) => {
+                            setEdges((existingEdges) =>
+                                existingEdges.map((edge) =>
+                                    edge.id === edgeId
+                                        ? { ...edge, data: { ...edge.data, [field]: value } }
+                                        : edge
+                                )
+                            );
+                        }}
                         onAddLogicalTableAttribute={addLogicalTableAttribute}
                         onRemoveLogicalTableAttribute={removeLogicalTableAttribute}
                         onUpdateLogicalTableAttribute={updateLogicalTableAttribute}
@@ -1497,6 +1740,8 @@ const EditProject = (props: IPropsEditProject) => {
                             reactFlowWrapperRef.current = el;
                             setDiagramWrapperEl(el);
                         }}
+                        onDragOver={handleDragOver}
+                        onDrop={handleDrop}
                     >
                         {/* Custom cursor style for comment mode — must override ReactFlow's internal pane cursor */}
                         {commentMode && (
@@ -1586,6 +1831,17 @@ const EditProject = (props: IPropsEditProject) => {
                                 size={1}
                             />
                         </ReactFlow>
+                        {previewingVersionId && (
+                            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 bg-primary-500 text-white px-4 py-1.5 rounded-full shadow-lg flex items-center gap-2 text-sm font-medium pointer-events-auto">
+                                <span>Previewing version snapshot</span>
+                                <button
+                                    onClick={handleExitPreview}
+                                    className="ml-1 bg-white/20 hover:bg-white/30 rounded-full px-2 py-0.5 text-xs transition-colors cursor-pointer"
+                                >
+                                    Exit
+                                </button>
+                            </div>
+                        )}
                         <RemoteCursorsOverlay
                             cursors={remoteCursors}
                             containerRef={diagramWrapperEl}
@@ -1716,6 +1972,7 @@ const EditProject = (props: IPropsEditProject) => {
                     initialThreadId={chatThreadId}
                     onModelGenerated={handleChatModelGenerated}
                 />
+                <TourGuide />
             </div>
         </ReactFlowProvider>
     );

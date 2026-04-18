@@ -15,7 +15,7 @@ import {
     mapReactNodesToStoredNodes,
     mapReactEdgesToStoredEdges,
 } from "../utils/physical-diagram.builder";
-import { buildDiagramFromPhysicalModel, createEmptyPhysicalModel } from "../utils/physical-model.builder";
+import { buildDiagramFromPhysicalModel, buildPhysicalModel, createEmptyPhysicalModel } from "../utils/physical-model.builder";
 import type { PhysicalModelPayload, MutatePhysicalModelFn } from "../utils/physical-model.builder";
 
 export type { MutatePhysicalModelFn };
@@ -31,6 +31,7 @@ type UsePhysicalCollaborationParams = {
     setNodes: Dispatch<SetStateAction<Node<NodeData>[]>>;
     setEdges: Dispatch<SetStateAction<Edge[]>>;
     diagramName: string;
+    onDiagramReady?: () => void;
 };
 
 export const usePhysicalCollaboration = ({
@@ -44,6 +45,7 @@ export const usePhysicalCollaboration = ({
     setNodes,
     setEdges,
     diagramName,
+    onDiagramReady,
 }: UsePhysicalCollaborationParams) => {
     const providerRef = useRef<HocuspocusProvider | null>(null);
     const ydocRef = useRef<Y.Doc | null>(null);
@@ -56,6 +58,7 @@ export const usePhysicalCollaboration = ({
     const pendingDiagramUpdateRef = useRef<(() => void) | null>(null);
     const pendingModelUpdateRef = useRef<(() => void) | null>(null);
     const modelDataRef = useRef<PhysicalModelPayload | null>(null);
+    const [modelDataState, setModelDataState] = useState<PhysicalModelPayload | null>(null);
     const [awareness, setAwareness] = useState<CollaborationAwareness | null>(null);
     const currentSchemaIdRef = useRef<string | null>(null);
     const initialSyncDoneRef = useRef(false);
@@ -65,6 +68,8 @@ export const usePhysicalCollaboration = ({
     nodesRef.current = nodes;
     const edgesRef = useRef(edges);
     edgesRef.current = edges;
+    const onDiagramReadyRef = useRef(onDiagramReady);
+    onDiagramReadyRef.current = onDiagramReady;
 
     // ── Reset refs when schema or enabled changes ────────────────────────
     useEffect(() => {
@@ -76,6 +81,7 @@ export const usePhysicalCollaboration = ({
             hasLoadedInitialDataRef.current = false;
             initialSyncDoneRef.current = false;
             isGeneratingDiagramRef.current = false;
+            modelDataRef.current = null;
             currentSchemaIdRef.current = null;
             return;
         }
@@ -87,6 +93,7 @@ export const usePhysicalCollaboration = ({
         hasLoadedInitialDataRef.current = false;
         initialSyncDoneRef.current = false;
         isGeneratingDiagramRef.current = false;
+        modelDataRef.current = null;
         currentSchemaIdRef.current = schema?.id ?? null;
     }, [enabled, schema?.id]);
 
@@ -170,6 +177,7 @@ export const usePhysicalCollaboration = ({
             hasLoadedInitialDataRef.current = true;
             setNodes(reactNodes);
             setEdges(reactEdges);
+            onDiagramReadyRef.current?.();
 
             setTimeout(() => {
                 isSyncingFromYjsRef.current = false;
@@ -234,6 +242,7 @@ export const usePhysicalCollaboration = ({
             lastAppliedModelStringRef.current = modelStr;
             lastSyncedModelStringRef.current = modelStr;
             modelDataRef.current = modelPayload;
+            setModelDataState(modelPayload);
 
             const diagStr = JSON.stringify({
                 diagram: { nodes: storedNodes, edges: storedEdges },
@@ -261,9 +270,13 @@ export const usePhysicalCollaboration = ({
             try {
                 const parsedModel = JSON.parse(modelDataString);
                 modelDataRef.current = parsedModel;
+                setModelDataState(parsedModel);
                 lastSyncedModelStringRef.current = modelDataString;
-                // NOTE: Do NOT set lastAppliedModelStringRef here.
-                // Matches conceptual/logical pattern exactly.
+                // Mark initial model as "applied" so the Y.Map observer
+                // does not mistake it for an external change and regenerate
+                // the diagram (which would overwrite saved positions with
+                // auto-layout).
+                lastAppliedModelStringRef.current = modelDataString;
             } catch (error) {
                 console.error("[Physical] Error parsing model from Yjs:", error);
             }
@@ -296,11 +309,19 @@ export const usePhysicalCollaboration = ({
             try {
                 const newModel = JSON.parse(modelDataString) as PhysicalModelPayload;
                 modelDataRef.current = newModel;
+                setModelDataState(newModel);
                 lastSyncedModelStringRef.current = modelDataString;
 
                 if (initialSyncDoneRef.current) {
-                    console.log("[Physical] External model change → regenerating diagram");
-                    applyModelToDiagramInternal(newModel, modelDataString);
+                    // If a diagram is currently being applied from Yjs
+                    // (same sync batch), this model is initial data — not
+                    // an external change.  Mark it and skip regeneration.
+                    if (isSyncingFromYjsRef.current) {
+                        lastAppliedModelStringRef.current = modelDataString;
+                    } else {
+                        console.log("[Physical] External model change → regenerating diagram");
+                        applyModelToDiagramInternal(newModel, modelDataString);
+                    }
                 }
             } catch (error) {
                 console.error("[Physical] Error in handleModelChange:", error);
@@ -327,6 +348,9 @@ export const usePhysicalCollaboration = ({
                     modelDataRef.current!,
                     lastSyncedModelStringRef.current,
                 );
+            } else {
+                // No diagram and no model — empty canvas, turn off loading
+                onDiagramReadyRef.current?.();
             }
 
             setTimeout(() => {
@@ -439,6 +463,7 @@ export const usePhysicalCollaboration = ({
             setNodes(reactNodes);
             setEdges(reactEdges);
             modelDataRef.current = modelPayload;
+            setModelDataState(modelPayload);
 
             const modelStr = JSON.stringify(modelPayload);
             lastAppliedModelStringRef.current = modelStr;
@@ -455,21 +480,32 @@ export const usePhysicalCollaboration = ({
     // ── Incremental model mutation ───────────────────────────────────
     const mutateModel: MutatePhysicalModelFn = useCallback(
         async (mutator, opts) => {
-            const current =
-                modelDataRef.current ??
-                createEmptyPhysicalModel(schema?.id ?? undefined, schema?.name ?? undefined);
-            const next = mutator(current);
-
-            const existingStoredNodes = mapReactNodesToStoredNodes(nodesRef.current);
-            const existingStoredEdges = mapReactEdgesToStoredEdges(
+            // Rebuild model from current diagram state so diagram-only edits
+            // (column add/delete, table delete, index changes, etc.) are captured
+            // before applying the mutation.  Without this the stale
+            // modelDataRef would overwrite those changes when the diagram is
+            // regenerated from the model.
+            const existingStoredNodesForModel = mapReactNodesToStoredNodes(nodesRef.current);
+            const existingStoredEdgesForModel = mapReactEdgesToStoredEdges(
                 edgesRef.current,
                 nodesRef.current,
             );
+            const current =
+                existingStoredNodesForModel.length > 0
+                    ? buildPhysicalModel({
+                          storedNodes: existingStoredNodesForModel,
+                          storedEdges: existingStoredEdgesForModel,
+                          schemaId: schema?.id ?? undefined,
+                          schemaName: schema?.name ?? undefined,
+                      })
+                    : (modelDataRef.current ??
+                      createEmptyPhysicalModel(schema?.id ?? undefined, schema?.name ?? undefined));
+            const next = mutator(current);
 
             const { nodes: storedNodes, edges: storedEdges } = await buildDiagramFromPhysicalModel({
                 model: next,
-                existingNodes: existingStoredNodes,
-                existingEdges: existingStoredEdges,
+                existingNodes: existingStoredNodesForModel,
+                existingEdges: existingStoredEdgesForModel,
                 preserveUnmodeledNodes: true,
             });
 
@@ -491,6 +527,7 @@ export const usePhysicalCollaboration = ({
             setNodes(reactNodes);
             setEdges(reactEdges);
             modelDataRef.current = next;
+            setModelDataState(next);
 
             const modelStr = JSON.stringify(next);
             lastAppliedModelStringRef.current = modelStr;
@@ -508,6 +545,6 @@ export const usePhysicalCollaboration = ({
         awareness,
         applyModelPayload,
         mutateModel,
-        modelData: modelDataRef.current,
+        modelData: modelDataState,
     };
 };

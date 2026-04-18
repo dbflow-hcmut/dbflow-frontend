@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { Avatar, Button, Tooltip, Dropdown } from "antd";
-import { Download, MessageCircle, History, Search, Send, TvMinimal, Smile, ThumbsUp, PartyPopper } from "lucide-react";
+import { Download, MessageCircle, History, Search, Send, TvMinimal, Smile, ThumbsUp, PartyPopper, Database } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { RemoteCollaborator } from "../../hooks/useCollaborationAwareness";
@@ -18,6 +18,8 @@ type HeaderProps = {
     onFollowUser: (user: RemoteCollaborator) => void;
     onDownload: () => void;
     onExportJson: () => void;
+    onExportDDL?: () => void;
+    onVersionHistory?: () => void;
     onShareClick: () => void;
 };
 
@@ -32,6 +34,8 @@ const Header: React.FC<HeaderProps> = ({
     onFollowUser,
     onDownload,
     onExportJson,
+    onExportDDL,
+    onVersionHistory,
     onShareClick,
 }) => {
     const inputRef = useRef<HTMLInputElement>(null);
@@ -57,18 +61,28 @@ const Header: React.FC<HeaderProps> = ({
 
     const avatarItems = useMemo(() => collaborators.slice(0, 4), [collaborators]);
 
-    const downloadItems = useMemo(() => [
-        {
-            key: 'export',
-            label: 'Export Diagram to PNG/SVG',
-            onClick: () => onDownload(),
-        },
-        {
-            key: 'export-json',
-            label: 'Export Diagram to JSON',
-            onClick: () => onExportJson(),
-        },
-    ], [onDownload, onExportJson]);
+    const downloadItems = useMemo(() => {
+        const items = [
+            {
+                key: 'export',
+                label: 'Export Diagram to PNG/SVG',
+                onClick: () => onDownload(),
+            },
+            {
+                key: 'export-json',
+                label: 'Export Diagram to JSON',
+                onClick: () => onExportJson(),
+            },
+        ];
+        if (onExportDDL) {
+            items.push({
+                key: 'export-ddl',
+                label: 'Export SQL (DDL)',
+                onClick: () => onExportDDL(),
+            });
+        }
+        return items;
+    }, [onDownload, onExportJson, onExportDDL]);
 
     return (
         <div className="pt-4 bg-transparent flex items-center justify-between px-4 fixed top-0 z-10 w-full">
@@ -99,6 +113,7 @@ const Header: React.FC<HeaderProps> = ({
                     />
                 )}
                 <Button
+                    id="tour-search-btn"
                     type="text"
                     className="!px-2"
                     onClick={onOpenSearchModal}
@@ -112,6 +127,7 @@ const Header: React.FC<HeaderProps> = ({
                     align={{ offset: [0, 10] }}
                 >
                     <Button
+                        id="tour-download-btn"
                         type="text"
                         className="!px-2"
                     >
@@ -119,6 +135,7 @@ const Header: React.FC<HeaderProps> = ({
                     </Button>
                 </Dropdown>
                 <Button
+                    id="tour-share-btn"
                     type="primary"
                     className="!px-3 gap-2 flex items-center"
                     onClick={onShareClick}
@@ -139,8 +156,10 @@ const Header: React.FC<HeaderProps> = ({
                     </div>
                 </Button>
                 <Button
+                    id="tour-version-history"
                     type="text"
                     className="!px-2"
+                    onClick={onVersionHistory}
                 >
                     <History size={18} />
                 </Button>

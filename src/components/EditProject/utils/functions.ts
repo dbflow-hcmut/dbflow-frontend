@@ -1,7 +1,7 @@
 import React from "react";
 import { Node } from "reactflow";
 import type { EntityData, RelationshipData, AttributeData, NodeData } from "../index";
-import type { RelationTableData } from "@/components/erds-notations/relation-table";
+import type { RelationTableData, RelationColumn, TableIndex } from "@/components/erds-notations/relation-table";
 import type { LogicalTableData } from "@/components/erds-notations/logical-table";
 import type { MutateModelFn } from "../hooks/useConceptualCollaboration";
 import type { MutateLogicalModelFn } from "../hooks/useLogicalCollaboration";
@@ -448,7 +448,7 @@ export const createUpdateFunctions = (
 
     const updateRelationTableColumn = (
         columnIndex: number,
-        updates: Partial<{ name: string; type: string; isPrimary: boolean; isNullable: boolean }>
+        updates: Partial<RelationColumn>
     ) => {
         if (!selectedNode || selectedNode.type !== 'relation') return;
         const tableData = selectedNode.data as RelationTableData;
@@ -462,6 +462,69 @@ export const createUpdateFunctions = (
                             columns: tableData.columns?.map((col, idx) =>
                                 idx === columnIndex ? { ...col, ...updates } : col
                             ) || [],
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
+    const addTableIndex = () => {
+        if (!selectedNode || selectedNode.type !== 'relation') return;
+        const tableData = selectedNode.data as RelationTableData;
+        const newIndex: TableIndex = {
+            id: `idx_${Date.now().toString(16)}`,
+            name: `idx_${(tableData.indexes?.length ?? 0) + 1}`,
+            type: 'BTREE',
+            columns: [],
+            isUnique: false,
+        };
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            indexes: [...(tableData.indexes ?? []), newIndex],
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
+    const removeTableIndex = (indexId: string) => {
+        if (!selectedNode || selectedNode.type !== 'relation') return;
+        const tableData = selectedNode.data as RelationTableData;
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            indexes: (tableData.indexes ?? []).filter(idx => idx.id !== indexId),
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
+    const updateTableIndex = (indexId: string, updates: Partial<TableIndex>) => {
+        if (!selectedNode || selectedNode.type !== 'relation') return;
+        const tableData = selectedNode.data as RelationTableData;
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            indexes: (tableData.indexes ?? []).map(idx =>
+                                idx.id === indexId ? { ...idx, ...updates } : idx
+                            ),
                         },
                     }
                     : n
@@ -560,6 +623,9 @@ export const createUpdateFunctions = (
         addRelationTableColumn,
         removeRelationTableColumn,
         updateRelationTableColumn,
+        addTableIndex,
+        removeTableIndex,
+        updateTableIndex,
         addLogicalTableAttribute,
         removeLogicalTableAttribute,
         updateLogicalTableAttribute,

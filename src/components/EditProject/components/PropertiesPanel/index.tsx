@@ -3,9 +3,10 @@ import { Input, Checkbox, Select, Button } from "antd";
 import { X, Plus, Trash2, GripVertical } from "lucide-react";
 import { Node, Edge } from "reactflow";
 import type { AttributeData, NodeData, RelationshipData, EntityData } from "../../index";
-import type { RelationTableData } from "@/components/erds-notations/relation-table";
+import type { RelationTableData, RelationColumn, TableIndex } from "@/components/erds-notations/relation-table";
 import type { LogicalTableData } from "@/components/erds-notations/logical-table";
 import type { ErdEdgeData } from "../../utils/functions";
+import { GENERIC_DATA_TYPES, type FKAction, type DataTypeOption } from "../../utils/dbms-config";
 
 type PropertiesPanelProps = {
     isOpen: boolean;
@@ -28,8 +29,13 @@ type PropertiesPanelProps = {
     onRemoveRelationTableColumn?: (columnIndex: number) => void;
     onUpdateRelationTableColumn?: (
         columnIndex: number,
-        updates: Partial<{ name: string; type: string; isPrimary: boolean; isNullable: boolean }>
+        updates: Partial<RelationColumn>
     ) => void;
+    onAddTableIndex?: () => void;
+    onRemoveTableIndex?: (indexId: string) => void;
+    onUpdateTableIndex?: (indexId: string, updates: Partial<TableIndex>) => void;
+    onUpdateFKAction?: (edgeId: string, field: 'onDelete' | 'onUpdate', value: FKAction) => void;
+    dataTypeOptions?: DataTypeOption[];
     onAddLogicalTableAttribute?: () => void;
     onRemoveLogicalTableAttribute?: (attributeIndex: number) => void;
     onUpdateLogicalTableAttribute?: (
@@ -61,6 +67,11 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     onAddRelationTableColumn,
     onRemoveRelationTableColumn,
     onUpdateRelationTableColumn,
+    onAddTableIndex,
+    onRemoveTableIndex,
+    onUpdateTableIndex,
+    onUpdateFKAction,
+    dataTypeOptions,
     onAddLogicalTableAttribute,
     onRemoveLogicalTableAttribute,
     onUpdateLogicalTableAttribute,
@@ -107,6 +118,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     }, [selectedNode, nodes, edges]);
     return (
         <div
+            id="tour-properties-panel"
             className={`absolute h-[calc(100vh-160px)] top-1/2 -translate-y-1/2 right-4 flex flex-col items-center gap-2 bg-white z-10 rounded-lg shadow-md transition-all duration-300 ease-in-out ${isOpen
                     ? 'opacity-100 translate-x-0 pointer-events-auto'
                     : 'opacity-0 translate-x-full pointer-events-none'
@@ -122,7 +134,8 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                     />
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 min-h-0" style={{ pointerEvents: canEdit ? 'auto' : 'none', opacity: canEdit ? 1 : 0.6 }}>
+                <div className="flex-1 overflow-y-auto p-4 min-h-0" style={{ opacity: canEdit ? 1 : 0.6 }}>
+                    <div style={{ pointerEvents: canEdit ? 'auto' : 'none' }}>
                     {selectedNode ? (
                         <div className="flex flex-col gap-4">
                             {selectedNode.type === 'attribute' && (
@@ -275,7 +288,10 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                             )}
                                         </div>
                                         <div className="flex flex-col gap-2">
-                                            {(selectedNode.data as RelationTableData).columns?.map((col, idx) => (
+                                            {(selectedNode.data as RelationTableData).columns?.map((col, idx) => {
+                                                const typeOptions = dataTypeOptions ?? GENERIC_DATA_TYPES;
+                                                const selectedTypeConfig = typeOptions.find(t => t.value === col.type);
+                                                return (
                                                 <div key={idx} className="border border-gray-200 rounded p-2 space-y-2">
                                                     <div className="flex items-center gap-2">
                                                         <Input
@@ -300,40 +316,32 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                                         <Select
                                                             value={col.type || 'varchar'}
                                                             onChange={(value) =>
-                                                                onUpdateRelationTableColumn?.(idx, { type: value })
+                                                                onUpdateRelationTableColumn?.(idx, { type: value, length: undefined })
                                                             }
                                                             placeholder="Type"
                                                             style={{ flex: 1 }}
-                                                            options={[
-                                                                { label: 'VARCHAR', value: 'varchar' },
-                                                                { label: 'INT', value: 'int' },
-                                                                { label: 'INTEGER', value: 'integer' },
-                                                                { label: 'BIGINT', value: 'bigint' },
-                                                                { label: 'SMALLINT', value: 'smallint' },
-                                                                { label: 'DECIMAL', value: 'decimal' },
-                                                                { label: 'NUMERIC', value: 'numeric' },
-                                                                { label: 'FLOAT', value: 'float' },
-                                                                { label: 'DOUBLE', value: 'double' },
-                                                                { label: 'BOOLEAN', value: 'boolean' },
-                                                                { label: 'DATE', value: 'date' },
-                                                                { label: 'TIME', value: 'time' },
-                                                                { label: 'TIMESTAMP', value: 'timestamp' },
-                                                                { label: 'DATETIME', value: 'datetime' },
-                                                                { label: 'TEXT', value: 'text' },
-                                                                { label: 'CHAR', value: 'char' },
-                                                                { label: 'BLOB', value: 'blob' },
-                                                                { label: 'UUID', value: 'uuid' },
-                                                            ]}
+                                                            showSearch
+                                                            options={typeOptions.map(t => ({ label: t.label, value: t.value }))}
                                                         />
+                                                        {(selectedTypeConfig?.hasLength || selectedTypeConfig?.hasPrecision) && (
+                                                            <Input
+                                                                value={col.length || ''}
+                                                                onChange={(e) =>
+                                                                    onUpdateRelationTableColumn?.(idx, { length: e.target.value || undefined })
+                                                                }
+                                                                placeholder={selectedTypeConfig.hasPrecision ? '10,2' : '255'}
+                                                                style={{ width: 70 }}
+                                                            />
+                                                        )}
                                                     </div>
-                                                    <div className="flex items-center gap-2">
+                                                    <div className="flex items-center gap-2 flex-wrap">
                                                         <Checkbox
                                                             checked={col.isPrimary || false}
                                                             onChange={(e) =>
                                                                 onUpdateRelationTableColumn?.(idx, { isPrimary: e.target.checked })
                                                             }
                                                         >
-                                                            Primary Key
+                                                            PK
                                                         </Checkbox>
                                                         <Checkbox
                                                             checked={col.isNullable !== false}
@@ -343,12 +351,159 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                                         >
                                                             Nullable
                                                         </Checkbox>
+                                                        <Checkbox
+                                                            checked={col.isUnique || false}
+                                                            onChange={(e) =>
+                                                                onUpdateRelationTableColumn?.(idx, { isUnique: e.target.checked })
+                                                            }
+                                                        >
+                                                            Unique
+                                                        </Checkbox>
+                                                        <Checkbox
+                                                            checked={col.isAutoIncrement || false}
+                                                            onChange={(e) =>
+                                                                onUpdateRelationTableColumn?.(idx, { isAutoIncrement: e.target.checked })
+                                                            }
+                                                        >
+                                                            Auto++
+                                                        </Checkbox>
+                                                    </div>
+                                                    <div>
+                                                        <Input
+                                                            value={col.defaultValue || ''}
+                                                            onChange={(e) =>
+                                                                onUpdateRelationTableColumn?.(idx, { defaultValue: e.target.value || undefined })
+                                                            }
+                                                            placeholder="Default value"
+                                                            size="small"
+                                                        />
                                                     </div>
                                                 </div>
-                                            ))}
+                                                );
+                                            })}
                                             {!(selectedNode.data as RelationTableData).columns?.length && (
                                                 <div className="text-sm text-gray-500 py-2 text-center">
                                                     No columns. Click &quot;Add Column&quot; to add one.
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Indexes Section */}
+                                    <div>
+                                        <div className="flex items-center justify-between mb-2">
+                                            <label className="block text-sm font-medium">Indexes</label>
+                                            {onAddTableIndex && (
+                                                <Button
+                                                    type="default"
+                                                    size="small"
+                                                    icon={<Plus size={14} />}
+                                                    onClick={onAddTableIndex}
+                                                    className="h-8!"
+                                                >
+                                                    Add Index
+                                                </Button>
+                                            )}
+                                        </div>
+                                        <div className="flex flex-col gap-2">
+                                            {(selectedNode.data as RelationTableData).indexes?.map((index) => {
+                                                const tableColumns = (selectedNode.data as RelationTableData).columns ?? [];
+                                                return (
+                                                    <div key={index.id} className="border border-gray-200 rounded p-2 space-y-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <Input
+                                                                value={index.name}
+                                                                onChange={(e) =>
+                                                                    onUpdateTableIndex?.(index.id, { name: e.target.value })
+                                                                }
+                                                                placeholder="Index name"
+                                                                size="small"
+                                                                style={{ flex: 1 }}
+                                                            />
+                                                            {onRemoveTableIndex && (
+                                                                <Button
+                                                                    type="text"
+                                                                    danger
+                                                                    size="small"
+                                                                    icon={<Trash2 size={14} />}
+                                                                    onClick={() => onRemoveTableIndex(index.id)}
+                                                                />
+                                                            )}
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <Select
+                                                                value={index.type}
+                                                                onChange={(value) =>
+                                                                    onUpdateTableIndex?.(index.id, { type: value })
+                                                                }
+                                                                size="small"
+                                                                style={{ width: 90 }}
+                                                                options={[
+                                                                    { label: 'BTREE', value: 'BTREE' },
+                                                                    { label: 'HASH', value: 'HASH' },
+                                                                    { label: 'GIN', value: 'GIN' },
+                                                                    { label: 'GIST', value: 'GIST' },
+                                                                    { label: 'BRIN', value: 'BRIN' },
+                                                                ]}
+                                                            />
+                                                            <Checkbox
+                                                                checked={index.isUnique}
+                                                                onChange={(e) =>
+                                                                    onUpdateTableIndex?.(index.id, { isUnique: e.target.checked })
+                                                                }
+                                                            >
+                                                                Unique
+                                                            </Checkbox>
+                                                        </div>
+                                                        <div>
+                                                            <Select
+                                                                mode="multiple"
+                                                                value={index.columns.map(c => c.columnName)}
+                                                                onChange={(selectedCols: string[]) => {
+                                                                    const newCols = selectedCols.map(name => {
+                                                                        const existing = index.columns.find(c => c.columnName === name);
+                                                                        return existing ?? { columnName: name, order: 'ASC' as const };
+                                                                    });
+                                                                    onUpdateTableIndex?.(index.id, { columns: newCols });
+                                                                }}
+                                                                placeholder="Select columns"
+                                                                size="small"
+                                                                style={{ width: '100%' }}
+                                                                options={tableColumns.map(col => ({
+                                                                    label: col.name,
+                                                                    value: col.name,
+                                                                }))}
+                                                            />
+                                                        </div>
+                                                        {index.columns.length > 0 && (
+                                                            <div className="flex flex-col gap-1">
+                                                                {index.columns.map((idxCol, ci) => (
+                                                                    <div key={ci} className="flex items-center gap-1 text-xs">
+                                                                        <span className="flex-1 truncate">{idxCol.columnName}</span>
+                                                                        <Select
+                                                                            value={idxCol.order}
+                                                                            onChange={(val) => {
+                                                                                const newCols = [...index.columns];
+                                                                                newCols[ci] = { ...newCols[ci], order: val };
+                                                                                onUpdateTableIndex?.(index.id, { columns: newCols });
+                                                                            }}
+                                                                            size="small"
+                                                                            style={{ width: 70 }}
+                                                                            options={[
+                                                                                { label: 'ASC', value: 'ASC' },
+                                                                                { label: 'DESC', value: 'DESC' },
+                                                                            ]}
+                                                                        />
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                            {!(selectedNode.data as RelationTableData).indexes?.length && (
+                                                <div className="text-sm text-gray-500 py-1 text-center">
+                                                    No indexes
                                                 </div>
                                             )}
                                         </div>
@@ -499,6 +654,16 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
                                 const srcCard: string = (selectedEdge.data as Record<string, unknown>)?.sourceCardinality as string || 'N';
                                 const tgtCard: string = (selectedEdge.data as Record<string, unknown>)?.targetCardinality as string || '1';
+                                const edgeOnDelete: FKAction = (selectedEdge.data as Record<string, unknown>)?.onDelete as FKAction || 'NO ACTION';
+                                const edgeOnUpdate: FKAction = (selectedEdge.data as Record<string, unknown>)?.onUpdate as FKAction || 'NO ACTION';
+
+                                const fkActionOptions = [
+                                    { label: 'NO ACTION', value: 'NO ACTION' },
+                                    { label: 'CASCADE', value: 'CASCADE' },
+                                    { label: 'SET NULL', value: 'SET NULL' },
+                                    { label: 'SET DEFAULT', value: 'SET DEFAULT' },
+                                    { label: 'RESTRICT', value: 'RESTRICT' },
+                                ];
 
                                 return (
                                     <div className="flex flex-col gap-4">
@@ -523,7 +688,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                         </div>
 
                                         {/* Source side */}
-                                        <div className="border border-gray-200 rounded-lg p-3">
+                                        {/* <div className="border border-gray-200 rounded-lg p-3">
                                             <div className="text-xs font-semibold mb-2 text-gray-500">
                                                 {srcCard} — Source
                                             </div>
@@ -541,13 +706,13 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                                     </span>
                                                 </div>
                                             </div>
-                                        </div>
+                                        </div> */}
 
                                         {/* Arrow */}
-                                        <div className="flex justify-center text-gray-400 text-lg">→</div>
+                                        {/* <div className="flex justify-center text-gray-400 text-lg">→</div> */}
 
                                         {/* Target side */}
-                                        <div className="border border-gray-200 rounded-lg p-3">
+                                        {/* <div className="border border-gray-200 rounded-lg p-3">
                                             <div className="text-xs font-semibold mb-2 text-gray-500">
                                                 {tgtCard} — Target
                                             </div>
@@ -565,6 +730,26 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                                     </span>
                                                 </div>
                                             </div>
+                                        </div> */}
+
+                                        {/* FK Actions */}
+                                        <div>
+                                            <label className="block text-sm font-medium mb-2">ON DELETE</label>
+                                            <Select
+                                                value={edgeOnDelete}
+                                                onChange={(val: FKAction) => onUpdateFKAction?.(selectedEdge.id, 'onDelete', val)}
+                                                className="w-full"
+                                                options={fkActionOptions}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium mb-2">ON UPDATE</label>
+                                            <Select
+                                                value={edgeOnUpdate}
+                                                onChange={(val: FKAction) => onUpdateFKAction?.(selectedEdge.id, 'onUpdate', val)}
+                                                className="w-full"
+                                                options={fkActionOptions}
+                                            />
                                         </div>
                                     </div>
                                 );
@@ -615,6 +800,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                             Select a node or edge to edit properties
                         </div>
                     )}
+                    </div>
                 </div>
             </div>
         </div>

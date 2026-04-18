@@ -15,7 +15,7 @@ import {
     mapReactNodesToStoredNodes,
     mapReactEdgesToStoredEdges,
 } from "../utils/logical-diagram.builder";
-import { buildDiagramFromLogicalModel, createEmptyLogicalModel } from "../utils/logical-model.builder";
+import { buildDiagramFromLogicalModel, buildLogicalModel, createEmptyLogicalModel } from "../utils/logical-model.builder";
 import type { LogicalModelPayload, MutateLogicalModelFn } from "../utils/logical-model.builder";
 
 export type { MutateLogicalModelFn };
@@ -31,6 +31,7 @@ type UseLogicalCollaborationParams = {
     setNodes: Dispatch<SetStateAction<Node<NodeData>[]>>;
     setEdges: Dispatch<SetStateAction<Edge[]>>;
     diagramName: string;
+    onDiagramReady?: () => void;
 };
 
 export const useLogicalCollaboration = ({
@@ -44,6 +45,7 @@ export const useLogicalCollaboration = ({
     setNodes,
     setEdges,
     diagramName,
+    onDiagramReady,
 }: UseLogicalCollaborationParams) => {
     const providerRef = useRef<HocuspocusProvider | null>(null);
     const ydocRef = useRef<Y.Doc | null>(null);
@@ -65,6 +67,8 @@ export const useLogicalCollaboration = ({
     nodesRef.current = nodes;
     const edgesRef = useRef(edges);
     edgesRef.current = edges;
+    const onDiagramReadyRef = useRef(onDiagramReady);
+    onDiagramReadyRef.current = onDiagramReady;
 
     // ── Reset refs when schema or enabled changes ────────────────────────
     useEffect(() => {
@@ -76,6 +80,7 @@ export const useLogicalCollaboration = ({
             hasLoadedInitialDataRef.current = false;
             initialSyncDoneRef.current = false;
             isGeneratingDiagramRef.current = false;
+            modelDataRef.current = null;
             currentSchemaIdRef.current = null;
             return;
         }
@@ -87,6 +92,7 @@ export const useLogicalCollaboration = ({
         hasLoadedInitialDataRef.current = false;
         initialSyncDoneRef.current = false;
         isGeneratingDiagramRef.current = false;
+        modelDataRef.current = null;
         currentSchemaIdRef.current = schema?.id ?? null;
     }, [enabled, schema?.id]);
 
@@ -172,6 +178,7 @@ export const useLogicalCollaboration = ({
             hasLoadedInitialDataRef.current = true;
             setNodes(reactNodes);
             setEdges(reactEdges);
+            onDiagramReadyRef.current?.();
 
             setTimeout(() => {
                 isSyncingFromYjsRef.current = false;
@@ -267,8 +274,10 @@ export const useLogicalCollaboration = ({
                 const parsedModel = JSON.parse(modelDataString);
                 modelDataRef.current = parsedModel;
                 lastSyncedModelStringRef.current = modelDataString;
-                // NOTE: Do NOT set lastAppliedModelStringRef here.
-                // Matches conceptual pattern exactly.
+                // Mark initial model as "applied" so the Y.Map observer
+                // does not mistake it for an external change and regenerate
+                // the diagram (which would overwrite saved positions).
+                lastAppliedModelStringRef.current = modelDataString;
             } catch (error) {
                 console.error("[Logical] Error parsing model from Yjs:", error);
             }
@@ -306,8 +315,12 @@ export const useLogicalCollaboration = ({
 
                 // Only regenerate for external changes AFTER initial sync
                 if (initialSyncDoneRef.current) {
-                    console.log("[Logical] External model change → regenerating diagram");
-                    applyModelToDiagramInternal(newModel, modelDataString);
+                    if (isSyncingFromYjsRef.current) {
+                        lastAppliedModelStringRef.current = modelDataString;
+                    } else {
+                        console.log("[Logical] External model change → regenerating diagram");
+                        applyModelToDiagramInternal(newModel, modelDataString);
+                    }
                 }
             } catch (error) {
                 console.error("[Logical] Error in handleModelChange:", error);
@@ -340,6 +353,9 @@ export const useLogicalCollaboration = ({
                     modelDataRef.current!,
                     lastSyncedModelStringRef.current,
                 );
+            } else {
+                // No diagram and no model — empty canvas, turn off loading
+                onDiagramReadyRef.current?.();
             }
 
             // Mark initial sync done after one render cycle
@@ -470,21 +486,30 @@ export const useLogicalCollaboration = ({
     // ── Incremental model mutation ───────────────────────────────────
     const mutateModel: MutateLogicalModelFn = useCallback(
         async (mutator, opts) => {
-            const current =
-                modelDataRef.current ??
-                createEmptyLogicalModel(schema?.id ?? undefined, schema?.name ?? undefined);
-            const next = mutator(current);
-
-            const existingStoredNodes = mapReactNodesToStoredNodes(nodesRef.current);
-            const existingStoredEdges = mapReactEdgesToStoredEdges(
+            // Rebuild model from current diagram state so diagram-only edits
+            // (column add/delete, table delete, etc.) are captured before
+            // applying the mutation.
+            const existingStoredNodesForModel = mapReactNodesToStoredNodes(nodesRef.current);
+            const existingStoredEdgesForModel = mapReactEdgesToStoredEdges(
                 edgesRef.current,
                 nodesRef.current,
             );
+            const current =
+                existingStoredNodesForModel.length > 0
+                    ? buildLogicalModel({
+                          storedNodes: existingStoredNodesForModel,
+                          storedEdges: existingStoredEdgesForModel,
+                          schemaId: schema?.id ?? undefined,
+                          schemaName: schema?.name ?? undefined,
+                      })
+                    : (modelDataRef.current ??
+                      createEmptyLogicalModel(schema?.id ?? undefined, schema?.name ?? undefined));
+            const next = mutator(current);
 
             const { nodes: storedNodes, edges: storedEdges } = await buildDiagramFromLogicalModel({
                 model: next,
-                existingNodes: existingStoredNodes,
-                existingEdges: existingStoredEdges,
+                existingNodes: existingStoredNodesForModel,
+                existingEdges: existingStoredEdgesForModel,
                 preserveUnmodeledNodes: true,
             });
 

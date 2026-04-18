@@ -43,6 +43,7 @@ const Footer: React.FC<FooterProps> = ({
             <div className="flex items-center gap-2">
                 <div className="relative flex items-center justify-center">
                     <div
+                        id="tour-sidebar-toggle"
                         onClick={onToggleSidebar}
                         className="bg-primary-700 h-16 w-16 rounded-full absolute left-0 z-20 flex items-center justify-center cursor-pointer transition-transform duration-300"
                         style={{ transform: isSidebarModalOpen ? 'rotate(45deg)' : 'rotate(0deg)' }}
@@ -53,7 +54,7 @@ const Footer: React.FC<FooterProps> = ({
                             <Plus size={24} className="text-white" />
                         )}
                     </div>
-                    <div className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 pl-8 py-2 h-12 ml-10" style={{ pointerEvents: canEdit ? 'auto' : 'none', opacity: canEdit ? 1 : 0.5 }}>                        
+                    <div id="tour-toolbar" className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 pl-8 py-2 h-12 ml-10" style={{ pointerEvents: canEdit ? 'auto' : 'none', opacity: canEdit ? 1 : 0.5 }}>                        
                         <Button
                             type={interactionMode === 'default' && !commentMode ? 'primary' : 'text'}
                             className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
@@ -106,6 +107,7 @@ const Footer: React.FC<FooterProps> = ({
                 </div>
 
                 <div 
+                    id="tour-ai-chatbox"
                     onClick={onToggleChatBox}
                     className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12 w-12 justify-center cursor-pointer hover:bg-gray-50 transition-colors"
                 >                        
@@ -137,6 +139,7 @@ const Footer: React.FC<FooterProps> = ({
             </div>
             <div className="flex items-center gap-2">
                 <div 
+                    id="tour-undo"
                     onClick={canEdit ? onUndo : undefined}
                     className={`flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12 w-12 justify-center transition-opacity ${
                         canEdit && canUndo ? 'hover:bg-gray-50 opacity-100 cursor-pointer' : 'opacity-40 cursor-not-allowed'
@@ -146,6 +149,7 @@ const Footer: React.FC<FooterProps> = ({
                     <Undo size={24} />
                 </div>
                 <div 
+                    id="tour-redo"
                     onClick={canEdit ? onRedo : undefined}
                     className={`flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12 w-12 justify-center transition-opacity ${
                         canEdit && canRedo ? 'hover:bg-gray-50 opacity-100 cursor-pointer' : 'opacity-40 cursor-not-allowed'
@@ -154,7 +158,7 @@ const Footer: React.FC<FooterProps> = ({
                 >                        
                     <Redo size={24} />
                 </div>
-                <div className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12">
+                <div id="tour-zoom-controls" className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12">
                     <ZoomControls />
                     <Button
                         type="text"
