@@ -25,11 +25,11 @@ const navItems: NavItem[] = [
     icon: <Sparkles className="w-5 h-5" />,
     path: "/ai-chat",
   },
-  {
-    label: "History",
-    icon: <History className="w-5 h-5" />,
-    path: "/history",
-  },
+  // {
+  //   label: "History",
+  //   icon: <History className="w-5 h-5" />,
+  //   path: "/history",
+  // },
   {
     label: "Projects",
     icon: <LayoutGrid className="w-5 h-5" />,

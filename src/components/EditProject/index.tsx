@@ -1536,7 +1536,6 @@ const EditProject = (props: IPropsEditProject) => {
                     onDownload={handleDownload}
                     onExportJson={handleExportJson}
                     onExportDDL={isPhysicalSchema ? () => setIsDDLExportOpen(true) : undefined}
-                    onImportDDL={isPhysicalSchema ? () => setIsDDLImportOpen(true) : undefined}
                     onExportHTMLDocs={() => setIsHTMLDocsExportOpen(true)}
                     onVersionHistory={() => setIsVersionHistoryOpen(true)}
                     onShareClick={() => setIsShareProjectOpen(true)}

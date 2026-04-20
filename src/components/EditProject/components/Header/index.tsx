@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { Avatar, Button, Tooltip, Dropdown } from "antd";
-import { Download, MessageCircleMore, History, Send, Smile, ThumbsUp, PartyPopper, PlugZap, HardDriveUpload } from "lucide-react";
+import { Download, MessageCircleMore, History, Send, Smile, ThumbsUp, PartyPopper, PlugZap } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { RemoteCollaborator } from "../../hooks/useCollaborationAwareness";
@@ -19,7 +19,6 @@ type HeaderProps = {
     onDownload: () => void;
     onExportJson: () => void;
     onExportDDL?: () => void;
-    onImportDDL?: () => void;
     onExportHTMLDocs?: () => void;
     onVersionHistory?: () => void;
     onShareClick: () => void;
@@ -39,7 +38,6 @@ const Header: React.FC<HeaderProps> = ({
     onDownload,
     onExportJson,
     onExportDDL,
-    onImportDDL,
     onExportHTMLDocs,
     onVersionHistory,
     onShareClick,
@@ -143,17 +141,7 @@ const Header: React.FC<HeaderProps> = ({
                         </Button>
                     </Tooltip>
                 </Dropdown>
-                {onImportDDL && (
-                    <Tooltip title="Import SQL (DDL)" placement="bottom">
-                        <Button
-                            type="text"
-                            className="!px-2"
-                            onClick={onImportDDL}
-                        >
-                            <HardDriveUpload size={18} />
-                        </Button>
-                    </Tooltip>
-                )}
+
                 <Button
                     id="tour-share-btn"
                     type="primary"

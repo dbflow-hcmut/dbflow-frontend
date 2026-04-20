@@ -2,14 +2,18 @@
 
 import React, { useState, useMemo, useEffect, startTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Filter, Grid3x3, List, Plus, Calendar, Trash2 } from "lucide-react";
-import { Input, Button, Avatar, Badge, Pagination, Skeleton, Modal } from "antd";
+import { Search, Filter, Grid3x3, List, Plus, Calendar, Trash2, Database, FileCode2, PlugZap, ChevronDown } from "lucide-react";
+import { Input, Button, Avatar, Badge, Pagination, Skeleton, Modal, Dropdown } from "antd";
 import { formatDateTimeVN } from "@/utils/functions";
 import { useProjects, deleteProject } from "@/api/projects/client";
 import { getUserMe } from "@/api/users/client";
 import { Project, ProjectsListProps } from "@/types/projects.type";
 import { UserResponse } from "@/types/user.type";
 import { notificationProvider } from "@/providers/notification";
+import ImportDDLModal from "@/components/ImportDDLModal";
+import DBConnectionModal from "../DBConnectionModal";
+import IntrospectSchemaModal from "@/components/IntrospectSchemaModal";
+import type { DBConnection } from "@/types/db-connection.type";
 
 
 export default function ProjectsList({ initialProjects = [], initialPagination }: ProjectsListProps) {
@@ -20,6 +24,10 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
     const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
     const [currentUser, setCurrentUser] = useState<UserResponse | null>(null);
     const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
+    const [isDBConnectionOpen, setIsDBConnectionOpen] = useState(false);
+    const [isImportDDLOpen, setIsImportDDLOpen] = useState(false);
+    const [isIntrospectOpen, setIsIntrospectOpen] = useState(false);
+    const [pendingConnId, setPendingConnId] = useState<string | undefined>(undefined);
 
     const currentPage = parseInt(searchParams.get("page") || "1", 10);
     const currentLimit = parseInt(searchParams.get("limit") || "9", 10);
@@ -162,10 +170,6 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                         className="flex-1 max-w-md"
                         allowClear
                     />
-                    <Button
-                        icon={<Filter className="w-4 h-4" />}
-                        className="flex items-center"
-                    />
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -190,6 +194,56 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                         </button>
                     </div>
 
+                    <Dropdown
+                        menu={{
+                            items: [
+                                {
+                                    key: "import-ddl",
+                                    icon: <FileCode2 className="w-4 h-4" />,
+                                    label: (
+                                        <div>
+                                            <div className="font-medium">Import from DDL</div>
+                                            <div className="text-xs text-gray-400 font-normal">Paste SQL and auto-create a project</div>
+                                        </div>
+                                    ),
+                                    onClick: () => setIsImportDDLOpen(true),
+                                },
+                                {
+                                    key: "connect-directly",
+                                    icon: <PlugZap className="w-4 h-4" />,
+                                    label: (
+                                        <div>
+                                            <div className="font-medium">Connect Directly</div>
+                                            <div className="text-xs text-gray-400 font-normal">TCP, SSH tunnel or local agent</div>
+                                        </div>
+                                    ),
+                                    onClick: () => setIsDBConnectionOpen(true),
+                                },
+                                {
+                                    key: "use-saved",
+                                    icon: <Database className="w-4 h-4" />,
+                                    label: (
+                                        <div>
+                                            <div className="font-medium">Use Saved Connection</div>
+                                            <div className="text-xs text-gray-400 font-normal">Import schema from an existing connection</div>
+                                        </div>
+                                    ),
+                                    onClick: () => { setPendingConnId(undefined); setIsIntrospectOpen(true); },
+                                },
+                            ],
+                        }}
+                        trigger={["click"]}
+                        placement="bottomRight"
+                    >
+                        <Button
+                            icon={<Database className="w-4 h-4" />}
+                            className="flex items-center gap-1"
+                        >
+                            Connect to Database
+                            <ChevronDown className="w-3 h-3" />
+                        </Button>
+                    </Dropdown>
+
                     <Button
                         type="primary"
                         icon={<Plus className="w-4 h-4" />}
@@ -199,6 +253,25 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                     </Button>
                 </div>
             </div>
+
+            <DBConnectionModal
+                open={isDBConnectionOpen}
+                onClose={() => setIsDBConnectionOpen(false)}
+                onSaved={(conn: DBConnection) => {
+                    setIsDBConnectionOpen(false);
+                    setPendingConnId(conn.id);
+                    setIsIntrospectOpen(true);
+                }}
+            />
+            <IntrospectSchemaModal
+                open={isIntrospectOpen}
+                onClose={() => { setIsIntrospectOpen(false); setPendingConnId(undefined); }}
+                initialConnectionId={pendingConnId}
+            />
+            <ImportDDLModal
+                open={isImportDDLOpen}
+                onClose={() => setIsImportDDLOpen(false)}
+            />
 
             {isLoading ? (
                 viewMode === "grid" ? (

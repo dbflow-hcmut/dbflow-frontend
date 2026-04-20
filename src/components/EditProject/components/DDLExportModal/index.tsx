@@ -19,7 +19,6 @@ const DBMS_OPTIONS: { label: string; value: DBMSType }[] = [
     { label: "PostgreSQL", value: "postgresql" },
     { label: "MySQL", value: "mysql" },
     { label: "SQL Server", value: "sqlserver" },
-    { label: "SQLite", value: "sqlite" },
 ];
 
 const DDLExportModal: React.FC<DDLExportModalProps> = ({

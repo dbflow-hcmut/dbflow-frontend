@@ -11,7 +11,6 @@ const DBMS_OPTIONS: { label: string; value: DBMSType }[] = [
     { label: "PostgreSQL", value: "postgresql" },
     { label: "MySQL", value: "mysql" },
     { label: "SQL Server", value: "sqlserver" },
-    { label: "SQLite", value: "sqlite" },
 ];
 
 const SAMPLE_DDL: Record<DBMSType, string> = {
@@ -67,24 +66,6 @@ CREATE TABLE posts (
     user_id INT NOT NULL,
     created_at DATETIME DEFAULT GETDATE(),
     CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE INDEX idx_posts_user_id ON posts(user_id);
-`,
-    sqlite: `-- SQLite DDL
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT NOT NULL UNIQUE,
-    name TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE posts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    body TEXT,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_posts_user_id ON posts(user_id);

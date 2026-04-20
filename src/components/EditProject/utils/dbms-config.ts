@@ -4,7 +4,7 @@ export type IndexType = 'BTREE' | 'HASH' | 'GIN' | 'GIST' | 'BRIN';
 
 export type ColumnSortOrder = 'ASC' | 'DESC';
 
-export type DBMSType = 'mysql' | 'postgresql' | 'sqlserver' | 'sqlite';
+export type DBMSType = 'mysql' | 'postgresql' | 'sqlserver';
 
 export type DataTypeOption = {
     value: string;
@@ -178,31 +178,10 @@ const sqlserverConfig: DBMSConfig = {
     defaultType: 'varchar',
 };
 
-const sqliteConfig: DBMSConfig = {
-    name: 'SQLite',
-    quoteChar: ['"', '"'],
-    serialTypes: { serial: 'INTEGER', bigserial: 'INTEGER' },
-    nowFunction: "datetime('now')",
-    supportsIfNotExists: true,
-    supportsIndexUsing: false,
-    dataTypes: [
-        { value: 'integer', label: 'INTEGER', category: 'numeric' },
-        { value: 'real', label: 'REAL', category: 'numeric' },
-        { value: 'text', label: 'TEXT', category: 'string' },
-        { value: 'blob', label: 'BLOB', category: 'binary' },
-        { value: 'numeric', label: 'NUMERIC', category: 'numeric' },
-    ],
-    indexTypes: ['BTREE'],
-    fkActions: COMMON_FK_ACTIONS,
-    autoIncrementKeyword: 'AUTOINCREMENT',
-    defaultType: 'text',
-};
-
 export const DBMS_CONFIGS: Record<DBMSType, DBMSConfig> = {
     mysql: mysqlConfig,
     postgresql: postgresqlConfig,
     sqlserver: sqlserverConfig,
-    sqlite: sqliteConfig,
 };
 
 export const getDBMSConfig = (dbms?: DBMSType | string): DBMSConfig => {

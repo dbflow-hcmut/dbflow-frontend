@@ -330,12 +330,6 @@ export const generateDDL = (
         }
     }
 
-    // DBMS-specific warnings
-    if (options.dbms === "sqlite") {
-        if (allFKs.some((fk) => fk.onDelete === "SET DEFAULT" || fk.onUpdate === "SET DEFAULT")) {
-            warnings.push("SQLite has limited support for SET DEFAULT in foreign key actions.");
-        }
-    }
     if (!config.supportsIfNotExists && options.includeIfNotExists) {
         warnings.push(`${config.name} does not support IF NOT EXISTS for CREATE TABLE.`);
     }
