@@ -38,7 +38,7 @@ function isRoutingJson(text: string): boolean {
   if (text.startsWith("{") && text.endsWith("}")) {
     try {
       const parsed = JSON.parse(text);
-      if (parsed.intent !== undefined || parsed.reasoning !== undefined || parsed.detected_level !== undefined) {
+      if (parsed.intent !== undefined || parsed.reasoning !== undefined || parsed.detected_level !== undefined || parsed.effective_level !== undefined) {
         return true;
       }
     } catch {
@@ -49,7 +49,7 @@ function isRoutingJson(text: string): boolean {
   // Check for partial/streaming JSON that looks like routing output
   // e.g. '{ "intent"', '{ "intent": "chat",\n  "detected_level"', etc.
   if (text.startsWith("{")) {
-    const routingPattern = /^\s*\{\s*"(intent|detected_level|reasoning)"/;
+    const routingPattern = /^\s*\{\s*"(intent|detected_level|effective_level|reasoning)"/;
     if (routingPattern.test(text)) {
       return true;
     }
@@ -61,6 +61,7 @@ function isRoutingJson(text: string): boolean {
 export interface RoutingInfo {
   intent?: string;
   detected_level?: string | null;
+  effective_level?: string | null;
   reasoning?: string;
 }
 
@@ -260,11 +261,17 @@ export async function streamChatToLangGraph(
 ): Promise<string | null> {
   let runId: string | null = null;
   try {
-    // Create thread in parallel (non-blocking) if needed
+    // Ensure thread exists before streaming — must await to avoid race condition
     if (ensureThread) {
-      createThread(threadId).catch((error) => {
-        console.warn("Thread creation warning (may already exist):", error);
-      });
+      try {
+        await createThread(threadId);
+      } catch (error) {
+        // 409 / duplicate thread is fine — thread already exists
+        const msg = error instanceof Error ? error.message : String(error);
+        if (!msg.includes("409") && !msg.toLowerCase().includes("already exist")) {
+          throw error;
+        }
+      }
     }
 
     const url = LANGGRAPH_STREAM(threadId);
@@ -352,8 +359,8 @@ export async function streamChatToLangGraph(
           }
         }
 
-        // Process messages/partial events
-        if (eventType === "messages/partial" && eventData) {
+        // Process messages/partial and messages/complete events
+        if ((eventType === "messages/partial" || eventType === "messages/complete") && eventData) {
           try {
             const data = JSON.parse(eventData);
             
@@ -395,7 +402,8 @@ export async function streamChatToLangGraph(
                 }
 
                 // Found a valid non-routing AI message
-                if (content) {
+                // Skip whitespace-only chunks (e.g. "\n" from Gemini thinking phase)
+                if (content && content.trim()) {
                   foundRealContent = true;
                   onChunk(content);
                 }

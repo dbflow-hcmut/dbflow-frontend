@@ -227,13 +227,18 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
         }
 
         const level = detectedLevelRef.current
-          // For engineering intents without explicit level, infer from model structure
+          // For engineering intents without explicit level, infer from model structure.
+          // All levels have a "model" metadata key — check entity/table arrays instead.
+          // Then distinguish logical (lid_) vs physical (pid_) by the model.id prefix.
           ?? (extracted.modelJson
-            ? (extracted.modelJson.model
-                ? "physical"
-                : extracted.modelJson.entities
-                  ? "conceptual"
-                  : "logical")
+            ? (extracted.modelJson.entities
+                ? "conceptual"
+                : extracted.modelJson.tables
+                  ? (typeof (extracted.modelJson.model as Record<string, unknown>)?.id === "string" &&
+                     ((extracted.modelJson.model as Record<string, unknown>).id as string).startsWith("pid_")
+                       ? "physical"
+                       : "logical")
+                  : "physical")
             : null);
         const schemaType =
           level === "logical"
@@ -290,7 +295,11 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
       (chunk: string) => {
         if (redirectTriggeredRef.current) return;
         finalAssistantContent = chunk;
-        setReasoningInfo(null);
+
+        // Only clear reasoning indicator when we have real visible content
+        if (chunk.trim()) {
+          setReasoningInfo(null);
+        }
 
         const isDiagramIntent =
           currentIntentRef.current === "create" ||
@@ -369,7 +378,9 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
         if (info.intent) {
           currentIntentRef.current = info.intent;
         }
-        if (info.detected_level) {
+        if (info.effective_level) {
+          detectedLevelRef.current = info.effective_level;
+        } else if (info.detected_level) {
           detectedLevelRef.current = info.detected_level;
         }
       },

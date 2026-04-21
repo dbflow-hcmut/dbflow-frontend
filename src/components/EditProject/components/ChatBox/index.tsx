@@ -281,7 +281,11 @@ const ChatBox: React.FC<ChatBoxProps> = ({
             // onChunk
             (chunk: string) => {
                 finalContent = chunk;
-                setReasoningText(undefined);
+
+                // Only clear reasoning indicator when we have real visible content
+                if (chunk.trim()) {
+                    setReasoningText(undefined);
+                }
 
                 const isDiagramIntent =
                     currentIntentRef.current === "create" ||
@@ -304,17 +308,16 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                         )
                     );
 
-                    // If model JSON is complete, apply / create schema (only once)
-                    if (extracted.isJsonComplete && extracted.modelJson && onModelGenerated && !modelAlreadyApplied) {
-                        // Compute effective target level: use router-detected level or infer from intent
-                        const effectiveTargetLevel = detectedLevelRef.current
-                            ?? (currentIntentRef.current === "forward_engineer"
-                                ? (schemaLevel === "conceptual" ? "logical" : schemaLevel === "logical" ? "physical" : undefined)
-                                : currentIntentRef.current === "reverse_engineer"
-                                    ? (schemaLevel === "physical" ? "logical" : schemaLevel === "logical" ? "conceptual" : undefined)
-                                    : undefined);
-                        onModelGenerated(extracted.modelJson, effectiveTargetLevel);
-                        modelAlreadyApplied = true;
+                    // If model JSON is complete, mark it but DON'T apply yet —
+                    // wait for onComplete so the validator has a chance to reject it.
+                    if (extracted.isJsonComplete && extracted.modelJson) {
+                        setMessages((prev) =>
+                            prev.map((msg) =>
+                                msg.id === aiMessageId
+                                    ? { ...msg, isStreaming: false }
+                                    : msg
+                            )
+                        );
                     }
                 } else {
                     setMessages((prev) =>
@@ -363,7 +366,9 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                         )
                     );
 
-                    // Apply final model JSON (only if not already applied during streaming)
+                    // Apply final model JSON — only here in onComplete, after validator has run.
+                    // During streaming, we intentionally don't apply to avoid creating
+                    // schema that the validator will reject and retry.
                     if (extracted.modelJson && onModelGenerated && !modelAlreadyApplied) {
                         const effectiveTargetLevel = detectedLevelRef.current
                             ?? (currentIntentRef.current === "forward_engineer"
@@ -422,7 +427,9 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                 if (info.intent) {
                     currentIntentRef.current = info.intent;
                 }
-                if (info.detected_level) {
+                if (info.effective_level) {
+                    detectedLevelRef.current = info.effective_level;
+                } else if (info.detected_level) {
                     detectedLevelRef.current = info.detected_level;
                 }
             },
