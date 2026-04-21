@@ -5,6 +5,8 @@ import { ArrowUp, Loader2, RefreshCw, Square } from "lucide-react";
 import { Input } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
 import { useRouter } from "next/navigation";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import LogoHeader from "@/components/LogoHeader";
 import {
   streamChatToLangGraph,
@@ -224,7 +226,15 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
           setCreatedProjectId(project.id);
         }
 
-        const level = detectedLevelRef.current;
+        const level = detectedLevelRef.current
+          // For engineering intents without explicit level, infer from model structure
+          ?? (extracted.modelJson
+            ? (extracted.modelJson.model
+                ? "physical"
+                : extracted.modelJson.entities
+                  ? "conceptual"
+                  : "logical")
+            : null);
         const schemaType =
           level === "logical"
             ? SchemaType.LOGICAL
@@ -283,7 +293,10 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
         setReasoningInfo(null);
 
         const isDiagramIntent =
-          currentIntentRef.current === "create" || currentIntentRef.current === "edit";
+          currentIntentRef.current === "create" ||
+          currentIntentRef.current === "edit" ||
+          currentIntentRef.current === "forward_engineer" ||
+          currentIntentRef.current === "reverse_engineer";
 
         if (isDiagramIntent) {
           // Show only text description while streaming, hide JSON block
@@ -309,7 +322,10 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
         setReasoningInfo(null);
 
         const isDiagramIntent =
-          currentIntentRef.current === "create" || currentIntentRef.current === "edit";
+          currentIntentRef.current === "create" ||
+          currentIntentRef.current === "edit" ||
+          currentIntentRef.current === "forward_engineer" ||
+          currentIntentRef.current === "reverse_engineer";
 
         if (isDiagramIntent && finalAssistantContent) {
           // Keep loading state while creating project + saving to S3
@@ -478,8 +494,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
                   }`}
                 >
                   <div className="max-w-[80%]">
-                    <div
-                      className={`${
+                      <div className={`${
                         message.role === "user"
                           ? "bg-primary-500 text-white rounded-2xl rounded-tr-sm"
                           : message.isError
@@ -487,9 +502,24 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
                             : "bg-gray-100 text-gray-900 rounded-2xl rounded-tl-sm"
                       } px-5 py-3`}
                     >
-                      <div className="text-sm leading-relaxed whitespace-pre-wrap">
-                        {message.content}
-                      </div>
+                      {message.role === "user" ? (
+                        <div className="text-sm leading-relaxed whitespace-pre-wrap">
+                          {message.content}
+                        </div>
+                      ) : (
+                        <div className="text-sm leading-relaxed prose prose-sm max-w-none
+                          prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1
+                          prose-li:my-0 prose-pre:my-2 prose-blockquote:my-1
+                          prose-code:text-primary-700 prose-code:bg-primary-50
+                          prose-code:px-1 prose-code:rounded prose-code:text-xs
+                          prose-pre:bg-gray-900 prose-pre:text-gray-100
+                          prose-a:text-primary-600 prose-strong:text-gray-900
+                          prose-table:text-xs prose-th:bg-gray-200">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {message.content}
+                          </ReactMarkdown>
+                        </div>
+                      )}
                       <div
                         className={`text-xs mt-2 ${
                           message.role === "user"

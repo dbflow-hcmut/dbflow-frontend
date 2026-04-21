@@ -456,6 +456,68 @@ const buildCategories = (
     return categories;
 };
 
+/**
+ * Normalize a raw/legacy conceptual model JSON to the current `ConceptualModelPayload` format.
+ *
+ * Handles AI-generated models that may use old field names:
+ * - `identifier: true` → `isKey: true`
+ * - missing `kind` → defaults to `"simple"`
+ * - `fromEntity`/`toEntity`/`fromCardinality`/`toCardinality` → `ends: [...]`
+ */
+export function normalizeConceptualModel(raw: Record<string, unknown>): ConceptualModelPayload {
+    const entities = (Array.isArray(raw.entities) ? raw.entities as Record<string, unknown>[] : []).map((e) => {
+        const attributes = (Array.isArray(e.attributes) ? e.attributes as Record<string, unknown>[] : []).map((a) => ({
+            id: a.id as string,
+            name: a.name as string,
+            kind: (a.kind ?? "simple") as ModelAttribute["kind"],
+            isKey: Boolean((a.isKey as boolean | undefined) ?? (a.identifier as boolean | undefined) ?? false),
+            ...(Array.isArray(a.semantics) ? { semantics: a.semantics as string[] } : {}),
+            ...(Array.isArray(a.components) ? { components: a.components as ModelAttributeComponent[] } : {}),
+            ...(a.derivation ? { derivation: a.derivation as string } : {}),
+            ...(a.notes ? { notes: a.notes as string } : {}),
+        })) as ModelAttribute[];
+        return {
+            id: e.id as string,
+            name: e.name as string,
+            kind: ((e.kind ?? "strong") as "strong" | "weak"),
+            attributes,
+            ...(e.notes ? { notes: e.notes as string } : {}),
+        } as ModelEntity;
+    });
+
+    const relationships = (Array.isArray(raw.relationships) ? raw.relationships as Record<string, unknown>[] : []).map((r) => {
+        let ends: RelationshipEnd[];
+        if (Array.isArray(r.ends)) {
+            ends = r.ends as RelationshipEnd[];
+        } else {
+            // Legacy flat format: fromEntity/fromCardinality + toEntity/toCardinality
+            ends = [
+                ...(r.fromEntity ? [{ entityId: r.fromEntity as string, ...(r.fromCardinality ? { cardinality: r.fromCardinality as string } : {}) }] : []),
+                ...(r.toEntity ? [{ entityId: r.toEntity as string, ...(r.toCardinality ? { cardinality: r.toCardinality as string } : {}) }] : []),
+            ] as RelationshipEnd[];
+        }
+        return {
+            id: r.id as string,
+            name: r.name as string,
+            type: ((r.type ?? "association") as "association" | "identifying"),
+            ends,
+            ...(r.arity ? { arity: r.arity as number } : {}),
+            ...(r.semantics ? { semantics: r.semantics as string } : {}),
+            ...(r.notes ? { notes: r.notes as string } : {}),
+        } as ModelRelationship;
+    });
+
+    return {
+        model: (raw.model as ConceptualModelPayload["model"]) ?? { id: generateCid(), name: "Imported model", version: 1 },
+        entities,
+        relationships,
+        ...(Array.isArray(raw.generalizations) ? { generalizations: raw.generalizations as ModelGeneralization[] } : {}),
+        ...(Array.isArray(raw.categories) ? { categories: raw.categories as ModelCategory[] } : {}),
+        ...(raw.notes ? { notes: raw.notes as string } : {}),
+        ...(Array.isArray(raw.tags) ? { tags: raw.tags as string[] } : {}),
+    };
+}
+
 export const createEmptyConceptualModel = (modelId?: string, modelName?: string): ConceptualModelPayload => ({
     model: {
         id: modelId ?? generateCid(),

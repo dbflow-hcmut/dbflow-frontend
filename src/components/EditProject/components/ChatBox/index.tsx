@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { X, Minimize2, Maximize2, ExternalLink } from "lucide-react";
+import { X, Minimize2, Maximize2 } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { ChatContent, Message } from "./ChatContent";
 import {
@@ -28,10 +28,12 @@ interface ChatBoxProps {
     schemaId?: string;
     /** Current schema level: "conceptual" | "logical" | "physical" */
     schemaLevel?: string;
+    /** Serialized current schema model (for forward/reverse engineering context) */
+    currentModel?: Record<string, unknown> | null;
     /** If provided, load this thread's history and continue from it */
     initialThreadId?: string;
     /** Callback when AI generates a model JSON (for applying to diagram) */
-    onModelGenerated?: (modelJson: Record<string, unknown>) => void;
+    onModelGenerated?: (modelJson: Record<string, unknown>, detectedLevel?: string) => void;
 }
 
 const ChatBox: React.FC<ChatBoxProps> = ({
@@ -40,6 +42,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
     projectId: propProjectId,
     schemaId: propSchemaId,
     schemaLevel,
+    currentModel,
     initialThreadId,
     onModelGenerated,
 }) => {
@@ -63,6 +66,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
     const [conversationCreated, setConversationCreated] = useState(false);
     const [historyLoaded, setHistoryLoaded] = useState(false);
     const currentIntentRef = useRef<string | null>(null);
+    const detectedLevelRef = useRef<string | null>(null);
     const lastUserMessageRef = useRef<string>("");
     const abortControllerRef = useRef<AbortController | null>(null);
     const runIdRef = useRef<string | null>(null);
@@ -95,7 +99,25 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                 };
             });
 
+        const getWelcomeMessage = (): Message => {
+            const levelMessages: Record<string, string> = {
+                conceptual: "Hi! I'm your AI assistant for database design. I'm here to help you design your **conceptual schema** — create entities, define relationships, and structure your data model.\n\nYou can also ask me to **forward engineer** your conceptual schema into a logical schema.\n\nWhat would you like to build?",
+                logical: "Hi! I'm your AI assistant for database design. I'm here to help you work on your **logical schema** — define tables, columns, keys, and relationships.\n\nYou can ask me to **forward engineer** this into a physical schema, or **reverse engineer** from a DDL script.\n\nHow can I help?",
+                physical: "Hi! I'm your AI assistant for database design. I'm here to help you with your **physical schema** — manage tables, indexes, constraints, and generate DDL.\n\nYou can also ask me to **reverse engineer** a DDL script into a logical schema.\n\nWhat would you like to do?",
+            };
+            const text = (schemaLevel && levelMessages[schemaLevel])
+                ? levelMessages[schemaLevel]
+                : "Hi! I'm your AI assistant for database design. I can help you create, edit, and manage your database schemas, as well as perform **Forward Engineering** (model → DDL) and **Reverse Engineering** (DDL → model).\n\nWhat would you like to do?";
+            return {
+                id: "welcome-msg",
+                text,
+                sender: "ai" as const,
+                timestamp: new Date(),
+            };
+        };
+
         const loadHistory = async () => {
+            let hasMessages = false;
             try {
                 // If we have an initial thread ID (from URL param), load that conversation
                 if (initialThreadId) {
@@ -105,6 +127,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                         setMessages(toUiMessages(msgs));
                         setConversationCreated(true);
                         setThreadId(initialThreadId);
+                        hasMessages = true;
                     }
                 } else if (projectId) {
                     // Try to load the most recent conversation for this project
@@ -117,6 +140,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                             setMessages(toUiMessages(msgs));
                             setConversationCreated(true);
                             setThreadId(latestConv.id);
+                            hasMessages = true;
                         }
                     }
                 }
@@ -124,11 +148,14 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                 console.error("Failed to load chat history:", error);
             } finally {
                 setHistoryLoaded(true);
+                if (!hasMessages) {
+                    setMessages([getWelcomeMessage()]);
+                }
             }
         };
 
         loadHistory();
-    }, [isOpen, historyLoaded, initialThreadId, projectId]);
+    }, [isOpen, historyLoaded, initialThreadId, projectId, schemaLevel]);
 
     // Position calculation
     useEffect(() => {
@@ -207,6 +234,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
         setIsLoading(true);
         setReasoningText(undefined);
         currentIntentRef.current = null;
+        detectedLevelRef.current = null;
 
         // Create AbortController for this stream
         const abortController = new AbortController();
@@ -255,15 +283,19 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                 finalContent = chunk;
                 setReasoningText(undefined);
 
-                const isCreateOrEdit = currentIntentRef.current === "create" || currentIntentRef.current === "edit";
-                
-                if (isCreateOrEdit) {
-                    // For diagram responses, show text description only
+                const isDiagramIntent =
+                    currentIntentRef.current === "create" ||
+                    currentIntentRef.current === "edit" ||
+                    currentIntentRef.current === "forward_engineer" ||
+                    currentIntentRef.current === "reverse_engineer";
+
+                if (isDiagramIntent) {
+                    // For diagram responses, show text description only (hide JSON block)
                     const extracted = extractModelJsonFromContent(chunk);
                     setIsStreamingJson(extracted.hasDiagram && !extracted.isJsonComplete);
-                    const displayText = extracted.textDescription || 
-                        (extracted.hasDiagram ? "Generating diagram..." : chunk);
-                    
+                    const displayText = extracted.textDescription ||
+                        (extracted.hasDiagram ? "Generating schema..." : chunk);
+
                     setMessages((prev) =>
                         prev.map((msg) =>
                             msg.id === aiMessageId
@@ -272,9 +304,16 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                         )
                     );
 
-                    // If model JSON is complete, apply to diagram (only once)
+                    // If model JSON is complete, apply / create schema (only once)
                     if (extracted.isJsonComplete && extracted.modelJson && onModelGenerated && !modelAlreadyApplied) {
-                        onModelGenerated(extracted.modelJson);
+                        // Compute effective target level: use router-detected level or infer from intent
+                        const effectiveTargetLevel = detectedLevelRef.current
+                            ?? (currentIntentRef.current === "forward_engineer"
+                                ? (schemaLevel === "conceptual" ? "logical" : schemaLevel === "logical" ? "physical" : undefined)
+                                : currentIntentRef.current === "reverse_engineer"
+                                    ? (schemaLevel === "physical" ? "logical" : schemaLevel === "logical" ? "conceptual" : undefined)
+                                    : undefined);
+                        onModelGenerated(extracted.modelJson, effectiveTargetLevel);
                         modelAlreadyApplied = true;
                     }
                 } else {
@@ -294,18 +333,29 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                 setIsStreamingJson(false);
 
                 // Final update for diagram responses
-                const isCreateOrEdit = currentIntentRef.current === "create" || currentIntentRef.current === "edit";
-                if (isCreateOrEdit) {
+                const isDiagramIntentFinal =
+                    currentIntentRef.current === "create" ||
+                    currentIntentRef.current === "edit" ||
+                    currentIntentRef.current === "forward_engineer" ||
+                    currentIntentRef.current === "reverse_engineer";
+
+                if (isDiagramIntentFinal) {
                     const extracted = extractModelJsonFromContent(finalContent);
-                    const displayText = extracted.textDescription || "Diagram updated!";
+                    const isEngineering =
+                        currentIntentRef.current === "forward_engineer" ||
+                        currentIntentRef.current === "reverse_engineer";
+                    const displayText = extracted.textDescription ||
+                        (isEngineering ? "Schema generated!" : "Diagram updated!");
 
                     setMessages((prev) =>
                         prev.map((msg) =>
                             msg.id === aiMessageId
                                 ? {
                                     ...msg,
-                                    text: extracted.modelJson 
-                                        ? `${displayText}\n\nDiagram updated successfully!`
+                                    text: extracted.modelJson
+                                        ? (isEngineering
+                                            ? `${displayText}\n\nCreating new schema...`
+                                            : `${displayText}\n\nDiagram updated successfully!`)
                                         : displayText,
                                     isStreaming: false,
                                   }
@@ -313,9 +363,15 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                         )
                     );
 
-                    // Apply final model JSON to diagram (only if not already applied during streaming)
+                    // Apply final model JSON (only if not already applied during streaming)
                     if (extracted.modelJson && onModelGenerated && !modelAlreadyApplied) {
-                        onModelGenerated(extracted.modelJson);
+                        const effectiveTargetLevel = detectedLevelRef.current
+                            ?? (currentIntentRef.current === "forward_engineer"
+                                ? (schemaLevel === "conceptual" ? "logical" : schemaLevel === "logical" ? "physical" : undefined)
+                                : currentIntentRef.current === "reverse_engineer"
+                                    ? (schemaLevel === "physical" ? "logical" : schemaLevel === "logical" ? "conceptual" : undefined)
+                                    : undefined);
+                        onModelGenerated(extracted.modelJson, effectiveTargetLevel);
                         modelAlreadyApplied = true;
                     }
                 } else {
@@ -366,13 +422,17 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                 if (info.intent) {
                     currentIntentRef.current = info.intent;
                 }
+                if (info.detected_level) {
+                    detectedLevelRef.current = info.detected_level;
+                }
             },
             abortController.signal,
             schemaLevel,
+            currentModel,
         );
         if (returnedRunId) runIdRef.current = returnedRunId;
         abortControllerRef.current = null;
-    }, [isLoading, threadId, conversationCreated, projectId, schemaId, schemaLevel, onModelGenerated]);
+    }, [isLoading, threadId, conversationCreated, projectId, schemaId, schemaLevel, currentModel, onModelGenerated]);
 
     const handleRetry = useCallback(() => {
         if (!lastUserMessageRef.current) return;
@@ -441,15 +501,6 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                     <span className="text-white font-semibold text-sm">AI Assistant</span>
                 </div>
                 <div className="flex items-center gap-2">
-                    <button
-                        onClick={() => {
-                            window.open(`/ai-chat/c/${threadId}`, '_blank');
-                        }}
-                        className="text-white hover:bg-white/20 rounded p-1 transition-colors cursor-pointer"
-                        title="Open in AI Chat"
-                    >
-                        <ExternalLink size={16} />
-                    </button>
                     <button
                         onClick={() => setIsMinimized(!isMinimized)}
                         className="text-white hover:bg-white/20 rounded p-1 transition-colors cursor-pointer"

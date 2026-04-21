@@ -241,6 +241,8 @@ export async function cancelRun(threadId: string, runId: string): Promise<void> 
  * @param ensureThread - If true, will create thread if it doesn't exist (default: true)
  * @param onReasoning - Callback for routing/reasoning data from the router node
  * @param abortSignal - Optional AbortSignal to cancel the stream
+ * @param currentLevel - Optional current schema level hint
+ * @param currentModel - Optional current schema model (for forward/reverse engineering)
  * @returns The run_id if captured from metadata event, or null
  */
 export async function streamChatToLangGraph(
@@ -254,6 +256,7 @@ export async function streamChatToLangGraph(
   onReasoning?: (info: RoutingInfo) => void,
   abortSignal?: AbortSignal,
   currentLevel?: string,
+  currentModel?: Record<string, unknown> | null,
 ): Promise<string | null> {
   let runId: string | null = null;
   try {
@@ -271,6 +274,7 @@ export async function streamChatToLangGraph(
       input: {
         messages: messages,
         ...(currentLevel ? { current_level: currentLevel } : {}),
+        ...(currentModel ? { input_model: currentModel } : {}),
       },
       config: {
         configurable: {

@@ -21,7 +21,7 @@ import ReactFlow, {
     getViewportForBounds,
 } from "reactflow";
 import { toPng, toSvg } from 'html-to-image';
-import { message } from 'antd';
+import { notificationProvider } from "@/providers/notification";
 import { apiGet } from "@/lib/clientFetch";
 import { PROXY_PROJECT_DETAIL } from "@/api";
 import "reactflow/dist/style.css";
@@ -70,6 +70,7 @@ import { RemoteCursorsOverlay } from "./components/RemoteCursorsOverlay";
 import TourGuide from "./components/TourGuide";
 import { useAuth } from "@/providers/AuthProvider";
 import { checkSchemaExistence, getProjectPermissions } from "@/api/projects/client";
+import { createSchema, saveSchemaModel } from "./api/client";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import ShareProject from "@/components/ShareProject";
 import type { ConceptualModelPayload } from "./utils/conceptual-model.builder";
@@ -535,7 +536,7 @@ const EditProject = (props: IPropsEditProject) => {
                 });
                 await loadComments();
             } catch {
-                message.error("Failed to create comment");
+                notificationProvider.open({ type: "error", message: "Failed to create comment" });
             }
             setDraftComment(null);
             setCommentMode(false);
@@ -558,7 +559,7 @@ const EditProject = (props: IPropsEditProject) => {
             });
             await loadComments();
         } catch {
-            message.error("Failed to add reply");
+            notificationProvider.open({ type: "error", message: "Failed to add reply" });
         }
     }, [projectData?.id, selectedSchema?.id, comments, loadComments]);
 
@@ -569,7 +570,7 @@ const EditProject = (props: IPropsEditProject) => {
             await loadComments();
             setActiveCommentId(null);
         } catch {
-            message.error("Failed to resolve comment");
+            notificationProvider.open({ type: "error", message: "Failed to resolve comment" });
         }
     }, [projectData?.id, selectedSchema?.id, loadComments]);
 
@@ -580,7 +581,7 @@ const EditProject = (props: IPropsEditProject) => {
             await loadComments();
             setActiveCommentId(null);
         } catch {
-            message.error("Failed to delete comment");
+            notificationProvider.open({ type: "error", message: "Failed to delete comment" });
         }
     }, [projectData?.id, selectedSchema?.id, loadComments]);
 
@@ -1250,7 +1251,33 @@ const EditProject = (props: IPropsEditProject) => {
     }, []);
 
     // Callback for ChatBox: when AI generates a model JSON, apply it to the diagram
-    const handleChatModelGenerated = useCallback((modelJson: Record<string, unknown>) => {
+    const handleChatModelGenerated = useCallback(async (modelJson: Record<string, unknown>, detectedLevel?: string) => {
+        const currentLevel = isConceptualSchema ? "conceptual" : isLogicalSchema ? "logical" : isPhysicalSchema ? "physical" : undefined;
+
+        // If the AI generated a model for a different schema level, create a new schema
+        if (detectedLevel && currentLevel && detectedLevel !== currentLevel && projectData?.id) {
+            try {
+                const levelLabels: Record<string, string> = {
+                    conceptual: "Conceptual Schema",
+                    logical: "Logical Schema",
+                    physical: "Physical Schema",
+                };
+                const newSchema = await createSchema(projectData.id, {
+                    name: levelLabels[detectedLevel] || `${detectedLevel} Schema`,
+                    type: detectedLevel,
+                });
+                await saveSchemaModel(projectData.id, newSchema.id, modelJson);
+                notificationProvider.open({ type: "success", message: `Created new ${detectedLevel} schema — switching now` });
+                // Navigate to the new schema (page will re-render with updated schema list)
+                router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
+            } catch (error) {
+                console.error("Failed to create cross-schema from chat:", error);
+                notificationProvider.open({ type: "error", message: "Failed to create new schema. Please try again." });
+            }
+            return;
+        }
+
+        // Same level — apply to the current diagram
         if (isConceptualSchema && applyModelPayload) {
             try {
                 applyModelPayload(modelJson as ConceptualModelPayload);
@@ -1270,7 +1297,7 @@ const EditProject = (props: IPropsEditProject) => {
                 console.error("Failed to apply physical model from chat:", error);
             }
         }
-    }, [isConceptualSchema, isLogicalSchema, isPhysicalSchema, applyModelPayload, applyLogicalModelPayload, applyPhysicalModelPayload]);
+    }, [isConceptualSchema, isLogicalSchema, isPhysicalSchema, applyModelPayload, applyLogicalModelPayload, applyPhysicalModelPayload, projectData?.id, router]);
 
     const projectAwareness = useProjectAwareness({
         enabled: Boolean(projectData?.id && sessionId && hasPermission && isValidSchema === true && !!token),
@@ -1466,14 +1493,14 @@ const EditProject = (props: IPropsEditProject) => {
                 .then(downloadImage)
                 .catch((err) => {
                     console.error('Export failed:', err);
-                    message.error('Failed to export diagram.');
+                    notificationProvider.open({ type: "error", message: 'Failed to export diagram.' });
                 });
         } else {
             toSvg(viewport, options)
                 .then(downloadImage)
                 .catch((err) => {
                     console.error('Export failed:', err);
-                    message.error('Failed to export diagram.');
+                    notificationProvider.open({ type: "error", message: 'Failed to export diagram.' });
                 });
         }
     }, [nodes, edges, diagramName]);
@@ -2134,6 +2161,12 @@ const EditProject = (props: IPropsEditProject) => {
                         isLogicalSchema ? "logical" :
                         isPhysicalSchema ? "physical" :
                         undefined
+                    }
+                    currentModel={
+                        isConceptualSchema ? (_conceptualModelData as Record<string, unknown> | null ?? null)
+                        : isLogicalSchema ? (_logicalModelData as Record<string, unknown> | null ?? null)
+                        : isPhysicalSchema ? (_physicalModelData as Record<string, unknown> | null ?? null)
+                        : null
                     }
                     initialThreadId={chatThreadId}
                     onModelGenerated={handleChatModelGenerated}

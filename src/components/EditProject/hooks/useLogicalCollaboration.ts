@@ -271,7 +271,7 @@ export const useLogicalCollaboration = ({
             const modelDataString = modelMap.get("data");
             if (!modelDataString || typeof modelDataString !== "string") return;
             try {
-                const parsedModel = JSON.parse(modelDataString);
+                const parsedModel = JSON.parse(modelDataString) as LogicalModelPayload;
                 modelDataRef.current = parsedModel;
                 lastSyncedModelStringRef.current = modelDataString;
                 // Mark initial model as "applied" so the Y.Map observer

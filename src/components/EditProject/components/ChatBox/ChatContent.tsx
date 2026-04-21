@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Input, Button } from "antd";
 import { Send, Loader2, RefreshCw, Square } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 export interface Message {
     id: string;
@@ -82,7 +84,22 @@ export const ChatContent: React.FC<ChatContentProps> = ({
                                                 : "bg-white text-gray-800 border border-gray-200"
                                     }`}
                                 >
-                                    <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+                                    {message.sender === "user" ? (
+                                        <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+                                    ) : (
+                                        <div className="text-sm prose prose-sm max-w-none
+                                            prose-p:my-1 prose-headings:my-1 prose-ul:my-1 prose-ol:my-1
+                                            prose-li:my-0 prose-pre:my-1 prose-blockquote:my-1
+                                            prose-code:text-primary-700 prose-code:bg-primary-50
+                                            prose-code:px-1 prose-code:rounded prose-code:text-xs
+                                            prose-pre:bg-gray-900 prose-pre:text-gray-100
+                                            prose-a:text-primary-600 prose-strong:text-gray-900
+                                            prose-table:text-xs prose-th:bg-gray-100">
+                                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                                {message.text}
+                                            </ReactMarkdown>
+                                        </div>
+                                    )}
                                     <p className={`text-xs mt-1 ${message.isError ? "text-red-400" : "opacity-70"}`}>
                                         {message.timestamp.toLocaleTimeString([], {
                                             hour: "2-digit",
@@ -153,7 +170,7 @@ export const ChatContent: React.FC<ChatContentProps> = ({
                     {isLoading ? (
                         <Button
                             type="default"
-                            icon={<Square size={16} fill="white" color="white" />}
+                            icon={<Square size={16} className="text-blue-500" fill="currentColor" />}
                             onClick={onStop}
                             className="!h-10"
                         >

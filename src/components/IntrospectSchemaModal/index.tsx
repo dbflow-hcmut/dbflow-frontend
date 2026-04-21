@@ -421,7 +421,7 @@ export default function IntrospectSchemaModal({
                         {/* Search + select all */}
                         <div className="flex items-center gap-2 mb-2">
                             <Input
-                                prefix={<Search className="text-gray-400" />}
+                                prefix={<Search size={12} className="text-gray-400" />}
                                 placeholder="Filter tables..."
                                 value={searchText}
                                 onChange={(e) => setSearchText(e.target.value)}

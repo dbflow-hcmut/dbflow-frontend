@@ -15,7 +15,7 @@ import {
     mapReactNodesToStoredNodes,
     mapReactEdgesToStoredEdges,
 } from "../utils/conceptual-diagram.builder";
-import { buildDiagramFromModel, buildConceptualModel, createEmptyConceptualModel } from "../utils/conceptual-model.builder";
+import { buildDiagramFromModel, buildConceptualModel, createEmptyConceptualModel, normalizeConceptualModel } from "../utils/conceptual-model.builder";
 import type { ConceptualModelPayload } from "../utils/conceptual-model.builder";
 
 export type MutateModelFn = (
@@ -320,7 +320,7 @@ export const useConceptualCollaboration = ({
             }
 
             try {
-                const parsedModel = JSON.parse(modelDataString);
+                const parsedModel = normalizeConceptualModel(JSON.parse(modelDataString) as Record<string, unknown>);
                 modelDataRef.current = parsedModel;
                 lastSyncedModelStringRef.current = modelDataString;
                 // Mark initial model as "applied" so the Y.Map observer
@@ -540,10 +540,11 @@ export const useConceptualCollaboration = ({
      */
     const applyModelPayload = useCallback(
         async (modelPayload: ConceptualModelPayload) => {
+            const normalized = normalizeConceptualModel(modelPayload as unknown as Record<string, unknown>);
             const existingStoredNodes = mapReactNodesToStoredNodes(nodesRef.current);
             const existingStoredEdges = mapReactEdgesToStoredEdges(edgesRef.current, nodesRef.current);
             const { nodes: storedNodes, edges: storedEdges } = await buildDiagramFromModel({
-                model: modelPayload,
+                model: normalized,
                 existingNodes: existingStoredNodes,
                 existingEdges: existingStoredEdges,
                 preserveUnmodeledNodes: true,
@@ -555,10 +556,10 @@ export const useConceptualCollaboration = ({
             hasLoadedInitialDataRef.current = true;
             setNodes(reactNodes);
             setEdges(reactEdges);
-            modelDataRef.current = modelPayload;
+            modelDataRef.current = normalized;
 
             // Persist model to Yjs so it survives page refresh / reconnect
-            const modelStr = JSON.stringify(modelPayload);
+            const modelStr = JSON.stringify(normalized);
             lastAppliedModelStringRef.current = modelStr;
             lastSyncedModelStringRef.current = modelStr;
             if (ydocRef.current) {
