@@ -4,12 +4,10 @@ import React from "react";
 import {
     EdgeLabelRenderer,
     EdgeProps,
-    useStore,
     getSmoothStepPath,
     useReactFlow,
     Position,
 } from "reactflow";
-import { getSmartEdge } from "@tisoap/react-flow-smart-edge";
 
 type RelationTableEdgeData = {
     label?: string;
@@ -88,53 +86,16 @@ const RelationTableEdge: React.FC<EdgeProps<RelationTableEdgeData>> = (props) =>
     } = props;
 
     const { setEdges, setNodes } = useReactFlow();
-    const nodes = useStore((state) => Array.from(state.nodeInternals.values()));
 
-    const smartEdgeResult = getSmartEdge({
-        sourcePosition,
-        targetPosition,
+    const [edgePath, labelX, labelY] = getSmoothStepPath({
         sourceX,
         sourceY,
+        sourcePosition,
         targetX,
         targetY,
-        nodes: nodes
-            .filter((n) => n.id !== source && n.id !== target)
-            .map((n) => {
-                const m = n as unknown as {
-                    width?: number;
-                    height?: number;
-                    measured?: { width?: number; height?: number };
-                };
-                return {
-                    ...n,
-                    width: n.width ?? m.measured?.width ?? 220,
-                    height: n.height ?? m.measured?.height ?? 120,
-                };
-            }),
+        targetPosition,
+        borderRadius: 6,
     });
-
-    let edgePath: string;
-    let labelX: number;
-    let labelY: number;
-
-    if (smartEdgeResult === null || smartEdgeResult instanceof Error) {
-        const [path, lx, ly] = getSmoothStepPath({
-            sourceX,
-            sourceY,
-            sourcePosition,
-            targetX,
-            targetY,
-            targetPosition,
-            borderRadius: 8,
-        });
-        edgePath = path;
-        labelX = lx;
-        labelY = ly;
-    } else {
-        edgePath = smartEdgeResult.svgPathString;
-        labelX = (sourceX + targetX) / 2;
-        labelY = (sourceY + targetY) / 2;
-    }
 
     const handleEdgeClick = (event: React.MouseEvent) => {
         event.stopPropagation();

@@ -45,12 +45,7 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
     const nameRef = useRef<HTMLDivElement | null>(null);
     const contentRef = useRef<HTMLDivElement | null>(null);
     
-    // Calculate height based on number of columns
-    const headerHeight = 36; // Approximate header height with padding
-    const rowHeight = 32; // Approximate row height with padding
-    const minHeight = 100;
-    const calculatedHeight = headerHeight + (data.columns?.length || 0) * rowHeight;
-    const nodeHeight = Math.max(minHeight, calculatedHeight);
+    const minHeight = 68;
     
     // Get initial width from node style or calculate based on content
     const getInitialWidth = () => {
@@ -68,6 +63,7 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
     
     const [nodeWidth, setNodeWidth] = useState(() => getInitialWidth());
     const [minWidth, setMinWidth] = useState(180);
+    const [measuredHeight, setMeasuredHeight] = useState(minHeight);
     
     useEffect(() => {
         if (!contentRef.current) return;
@@ -137,6 +133,22 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
         return () => clearTimeout(timeoutId);
     }, [data.columns, localName, data.name]);
 
+    // Use ResizeObserver to auto-measure actual rendered height and sync to node
+    useEffect(() => {
+        const el = contentRef.current;
+        if (!el || !nodeId) return;
+
+        const ro = new ResizeObserver(() => {
+            const h = el.scrollHeight;
+            if (h > 0) {
+                setMeasuredHeight(h);
+            }
+        });
+
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, [nodeId]);
+
     useEffect(() => {
         if (!isEditingName) {
             setLocalName(data.name);
@@ -177,21 +189,20 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
                         ...n, 
                         style: { 
                             ...n.style, 
-                            height: nodeHeight,
+                            height: measuredHeight,
                             width: nodeWidth,
                         } 
                     }
                     : n
             )
         );
-    }, [nodeHeight, nodeWidth, nodeId, setNodes]);
+    }, [measuredHeight, nodeWidth, nodeId, setNodes]);
 
     return (
         <div
-            className="w-full h-full relative"
+            className="w-full relative"
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
-            style={{ height: nodeHeight }}
         >
             <NodeResizer
                 color='var(--color-primary)'
@@ -200,8 +211,8 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
                 minHeight={minHeight}
             />
 
-            <DatabaseSchemaNode className="w-full h-full">
-                <div ref={contentRef} className="w-full h-full">
+            <DatabaseSchemaNode className="w-full">
+                <div ref={contentRef} className="w-full">
                 <DatabaseSchemaNodeHeader style={{ whiteSpace: 'nowrap' }}>
                     {isEditingName ? (
                         <div

@@ -42,8 +42,9 @@ export function LabeledHandle({
                 position={position}
                 id={id}
                 isConnectable={isConnectable}
+                style={isLeft ? { left: -6 } : isRight ? { right: -6 } : undefined}
                 className={classNames(
-                    "!w-3 !h-3 !bg-blue-500 !border-2 !border-white !rounded-full hover:!bg-blue-600 transition-all !z-50",
+                    "!w-3 !h-3 !bg-primary-500 !rounded-full hover:!bg-primary-600 transition-all !z-50",
                     showOnHover && !shouldShow && "!opacity-0 !pointer-events-none",
                     handleClassName
                 )}

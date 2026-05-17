@@ -71,20 +71,28 @@ import TourGuide from "./components/TourGuide";
 import { useAuth } from "@/providers/AuthProvider";
 import { checkSchemaExistence, getProjectPermissions } from "@/api/projects/client";
 import { createSchema, saveSchemaModel } from "./api/client";
+import { convertLogicalToPhysical, convertPhysicalToLogical, convertLogicalToConceptual, convertConceptualToLogical, convertPhysicalToConceptual, convertConceptualToPhysical } from "./utils/schema-conversion";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import ShareProject from "@/components/ShareProject";
 import type { ConceptualModelPayload } from "./utils/conceptual-model.builder";
+import { buildConceptualModel } from "./utils/conceptual-model.builder";
 import type { LogicalModelPayload } from "./utils/logical-model.builder";
+import { buildLogicalModel } from "./utils/logical-model.builder";
 import type { PhysicalModelPayload } from "./utils/physical-model.builder";
-import { mapStoredNodesToReactNodes, mapStoredEdgesToReactEdges } from "./utils/physical-diagram.builder";
+import { buildPhysicalModel } from "./utils/physical-model.builder";
+import { mapStoredNodesToReactNodes, mapStoredEdgesToReactEdges, mapReactNodesToStoredNodes as mapPhysicalReactToStored, mapReactEdgesToStoredEdges as mapPhysicalReactEdgesToStored } from "./utils/physical-diagram.builder";
 import type { StoredPhysicalNode, StoredPhysicalDiagramEdge } from "./utils/physical-diagram.builder";
 import {
     mapStoredNodesToReactNodes as mapLogicalStoredToReact,
     mapStoredEdgesToReactEdges as mapLogicalEdgesStoredToReact,
+    mapReactNodesToStoredNodes as mapLogicalReactToStored,
+    mapReactEdgesToStoredEdges as mapLogicalReactEdgesToStored,
 } from "./utils/logical-diagram.builder";
 import {
     mapStoredNodesToReactNodes as mapConceptualStoredToReact,
     mapStoredEdgesToReactEdges as mapConceptualEdgesStoredToReact,
+    mapReactNodesToStoredNodes as mapConceptualReactToStored,
+    mapReactEdgesToStoredEdges as mapConceptualReactEdgesToStored,
 } from "./utils/conceptual-diagram.builder";
 import type { StoredDiagramNode as StoredConceptualNode, StoredDiagramEdge as StoredConceptualEdge } from "./utils/conceptual-diagram.builder";
 
@@ -335,6 +343,7 @@ const EditProject = (props: IPropsEditProject) => {
     const [isDDLImportOpen, setIsDDLImportOpen] = useState(false);
     const [isHTMLDocsExportOpen, setIsHTMLDocsExportOpen] = useState(false);
     const [isVersionHistoryOpen, setIsVersionHistoryOpen] = useState(false);
+    const [isConverting, setIsConverting] = useState(false);
     const [isShareProjectOpen, setIsShareProjectOpen] = useState(false);
     const [exportInitialConfig, setExportInitialConfig] = useState<{ format: ExportFormat; scope: ExportScope }>({ format: 'png', scope: 'all' });
 
@@ -1182,12 +1191,12 @@ const EditProject = (props: IPropsEditProject) => {
                     case "logical-table": {
                         const cnt = existingNodes.filter((n) => n.type === "logical-table").length;
                         const logicalData = { name: `table_${cnt + 1}`, columns: [{ name: "column_1", isKey: false }] };
-                        newNode = { id, type: "logical-table", position, data: logicalData as NodeData, style: { width: 200, height: 120 }, selected: true };
+                        newNode = { id, type: "logical-table", position, data: logicalData as NodeData, style: { width: 200 }, selected: true };
                         break;
                     }
                     case "physical-table": {
                         const cnt = existingNodes.filter((n) => n.type === "relation").length;
-                        newNode = { id, type: "relation", position, data: { name: `table_${cnt + 1}`, columns: [{ name: "column_1", type: "varchar", isPrimary: false, isNullable: true }] }, style: { width: 220, height: 120 }, selected: true };
+                        newNode = { id, type: "relation", position, data: { name: `table_${cnt + 1}`, columns: [{ name: "column_1", type: "varchar", isPrimary: false, isNullable: true }] }, style: { width: 220 }, selected: true };
                         break;
                     }
                 }
@@ -1298,6 +1307,231 @@ const EditProject = (props: IPropsEditProject) => {
             }
         }
     }, [isConceptualSchema, isLogicalSchema, isPhysicalSchema, applyModelPayload, applyLogicalModelPayload, applyPhysicalModelPayload, projectData?.id, router]);
+
+    // ── Schema conversion (logical ↔ physical done directly; others via AI) ──
+    const handleConvertSchema = useCallback(async (targetType: string) => {
+        // Helper: rebuild fresh model from current canvas nodes/edges,
+        // falling back to the collaboration hook's cached model if canvas is empty.
+        const buildFreshLogicalModel = () => {
+            const storedNodes = mapLogicalReactToStored(nodes);
+            const storedEdges = mapLogicalReactEdgesToStored(edges, nodes);
+            if (storedNodes.length > 0) {
+                return buildLogicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
+            }
+            return _logicalModelData;
+        };
+
+        const buildFreshPhysicalModel = () => {
+            const storedNodes = mapPhysicalReactToStored(nodes);
+            const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
+            if (storedNodes.length > 0) {
+                return buildPhysicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
+            }
+            return _physicalModelData;
+        };
+
+        const buildFreshConceptualModel = () => {
+            const storedNodes = mapConceptualReactToStored(nodes);
+            const storedEdges = mapConceptualReactEdgesToStored(edges, nodes);
+            if (storedNodes.length > 0) {
+                return buildConceptualModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
+            }
+            return _conceptualModelData;
+        };
+
+        // Direct, deterministic conversion: logical → physical
+        if (isLogicalSchema && targetType === SchemaType.PHYSICAL && projectData?.id) {
+            const freshModel = buildFreshLogicalModel();
+            if (!freshModel) {
+                notificationProvider.open({ type: "error", message: "Logical model is not loaded yet. Please wait and try again." });
+                return;
+            }
+            setIsConverting(true);
+            try {
+                const physicalModel = convertLogicalToPhysical(freshModel, {
+                    newModelName: `${diagramName} (Physical)`,
+                });
+                const newSchema = await createSchema(projectData.id, {
+                    name: `${selectedSchema?.name ?? diagramName} (Physical)`,
+                    type: SchemaType.PHYSICAL,
+                });
+                await saveSchemaModel(projectData.id, newSchema.id, physicalModel as Record<string, unknown>);
+                notificationProvider.open({ type: "success", message: "Physical schema created — switching now" });
+                setIsConverting(false);
+                router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
+            } catch (error) {
+                console.error("Failed to convert logical to physical:", error);
+                notificationProvider.open({ type: "error", message: "Failed to convert schema. Please try again." });
+                setIsConverting(false);
+            }
+            return;
+        }
+
+        // Direct, deterministic conversion: physical → logical
+        if (isPhysicalSchema && targetType === SchemaType.LOGICAL && projectData?.id) {
+            const freshModel = buildFreshPhysicalModel();
+            if (!freshModel) {
+                notificationProvider.open({ type: "error", message: "Physical model is not loaded yet. Please wait and try again." });
+                return;
+            }
+            setIsConverting(true);
+            try {
+                const logicalModel = convertPhysicalToLogical(freshModel, {
+                    newModelName: `${diagramName} (Logical)`,
+                });
+                const newSchema = await createSchema(projectData.id, {
+                    name: `${selectedSchema?.name ?? diagramName} (Logical)`,
+                    type: SchemaType.LOGICAL,
+                });
+                await saveSchemaModel(projectData.id, newSchema.id, logicalModel as Record<string, unknown>);
+                notificationProvider.open({ type: "success", message: "Logical schema created — switching now" });
+                setIsConverting(false);
+                router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
+            } catch (error) {
+                console.error("Failed to convert physical to logical:", error);
+                notificationProvider.open({ type: "error", message: "Failed to convert schema. Please try again." });
+                setIsConverting(false);
+            }
+            return;
+        }
+
+        // Direct, deterministic conversion: logical → conceptual
+        if (isLogicalSchema && targetType === SchemaType.CONCEPTUAL && projectData?.id) {
+            const freshModel = buildFreshLogicalModel();
+            if (!freshModel) {
+                notificationProvider.open({ type: "error", message: "Logical model is not loaded yet. Please wait and try again." });
+                return;
+            }
+            setIsConverting(true);
+            try {
+                const conceptualModel = convertLogicalToConceptual(freshModel, {
+                    newModelName: `${diagramName} (Conceptual)`,
+                });
+                const newSchema = await createSchema(projectData.id, {
+                    name: `${selectedSchema?.name ?? diagramName} (Conceptual)`,
+                    type: SchemaType.CONCEPTUAL,
+                });
+                await saveSchemaModel(projectData.id, newSchema.id, conceptualModel as Record<string, unknown>);
+                notificationProvider.open({ type: "success", message: "Conceptual schema created — switching now" });
+                setIsConverting(false);
+                router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
+            } catch (error) {
+                console.error("Failed to convert logical to conceptual:", error);
+                notificationProvider.open({ type: "error", message: "Failed to convert schema. Please try again." });
+                setIsConverting(false);
+            }
+            return;
+        }
+
+        // Direct, deterministic conversion: conceptual → logical
+        if (isConceptualSchema && targetType === SchemaType.LOGICAL && projectData?.id) {
+            const freshModel = buildFreshConceptualModel();
+            if (!freshModel) {
+                notificationProvider.open({ type: "error", message: "Conceptual model is not loaded yet. Please wait and try again." });
+                return;
+            }
+            setIsConverting(true);
+            try {
+                const logicalModel = convertConceptualToLogical(freshModel, {
+                    newModelName: `${diagramName} (Logical)`,
+                });
+                const newSchema = await createSchema(projectData.id, {
+                    name: `${selectedSchema?.name ?? diagramName} (Logical)`,
+                    type: SchemaType.LOGICAL,
+                });
+                await saveSchemaModel(projectData.id, newSchema.id, logicalModel as Record<string, unknown>);
+                notificationProvider.open({ type: "success", message: "Logical schema created — switching now" });
+                setIsConverting(false);
+                router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
+            } catch (error) {
+                console.error("Failed to convert conceptual to logical:", error);
+                notificationProvider.open({ type: "error", message: "Failed to convert schema. Please try again." });
+                setIsConverting(false);
+            }
+            return;
+        }
+
+        // Direct, deterministic conversion: physical → conceptual
+        if (isPhysicalSchema && targetType === SchemaType.CONCEPTUAL && projectData?.id) {
+            const freshModel = buildFreshPhysicalModel();
+            if (!freshModel) {
+                notificationProvider.open({ type: "error", message: "Physical model is not loaded yet. Please wait and try again." });
+                return;
+            }
+            setIsConverting(true);
+            try {
+                const conceptualModel = convertPhysicalToConceptual(freshModel, {
+                    newModelName: `${diagramName} (Conceptual)`,
+                });
+                const newSchema = await createSchema(projectData.id, {
+                    name: `${selectedSchema?.name ?? diagramName} (Conceptual)`,
+                    type: SchemaType.CONCEPTUAL,
+                });
+                await saveSchemaModel(projectData.id, newSchema.id, conceptualModel as Record<string, unknown>);
+                notificationProvider.open({ type: "success", message: "Conceptual schema created — switching now" });
+                setIsConverting(false);
+                router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
+            } catch (error) {
+                console.error("Failed to convert physical to conceptual:", error);
+                notificationProvider.open({ type: "error", message: "Failed to convert schema. Please try again." });
+                setIsConverting(false);
+            }
+            return;
+        }
+
+        // Direct, deterministic conversion: conceptual → physical
+        if (isConceptualSchema && targetType === SchemaType.PHYSICAL && projectData?.id) {
+            const freshModel = buildFreshConceptualModel();
+            if (!freshModel) {
+                notificationProvider.open({ type: "error", message: "Conceptual model is not loaded yet. Please wait and try again." });
+                return;
+            }
+            setIsConverting(true);
+            try {
+                const physicalModel = convertConceptualToPhysical(freshModel, {
+                    newModelName: `${diagramName} (Physical)`,
+                });
+                const newSchema = await createSchema(projectData.id, {
+                    name: `${selectedSchema?.name ?? diagramName} (Physical)`,
+                    type: SchemaType.PHYSICAL,
+                });
+                await saveSchemaModel(projectData.id, newSchema.id, physicalModel as Record<string, unknown>);
+                notificationProvider.open({ type: "success", message: "Physical schema created — switching now" });
+                setIsConverting(false);
+                router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
+            } catch (error) {
+                console.error("Failed to convert conceptual to physical:", error);
+                notificationProvider.open({ type: "error", message: "Failed to convert schema. Please try again." });
+                setIsConverting(false);
+            }
+            return;
+        }
+
+        // Fallback: open ChatBox with a conversion hint for AI-assisted conversions
+        // (still passes fresh model via currentModel prop of ChatBox)
+        void buildFreshConceptualModel(); // ensure conceptual model is fresh if needed
+        setIsChatBoxOpen(true);
+        setChatThreadId(undefined);
+        const params = new URLSearchParams(searchParams.toString());
+        const labels: Record<string, string> = { conceptual: "conceptual", logical: "logical", physical: "physical" };
+        params.set("convertTo", labels[targetType] ?? targetType);
+        router.replace(`/projects/${projectData?.id}?${params.toString()}`, { scroll: false });
+    }, [
+        isConceptualSchema,
+        isLogicalSchema,
+        isPhysicalSchema,
+        nodes,
+        edges,
+        _logicalModelData,
+        _physicalModelData,
+        _conceptualModelData,
+        selectedSchema?.id,
+        selectedSchema?.name,
+        projectData?.id,
+        diagramName,
+        router,
+        searchParams,
+    ]);
 
     const projectAwareness = useProjectAwareness({
         enabled: Boolean(projectData?.id && sessionId && hasPermission && isValidSchema === true && !!token),
@@ -1568,6 +1802,9 @@ const EditProject = (props: IPropsEditProject) => {
                     onShareClick={() => setIsShareProjectOpen(true)}
                     commentMode={commentMode}
                     onToggleCommentMode={() => { setCommentMode(!commentMode); setActiveToolMode('none'); }}
+                    schemaType={isConceptualSchema ? 'conceptual' : isLogicalSchema ? 'logical' : isPhysicalSchema ? 'physical' : undefined}
+                    onConvertSchema={(targetType) => { handleConvertSchema(targetType); }}
+                    isConverting={isConverting}
                 />
                 <ShareProject
                     projectId={projectData?.id}

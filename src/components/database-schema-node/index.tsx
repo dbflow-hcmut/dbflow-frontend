@@ -9,7 +9,7 @@ export const DatabaseSchemaNode = memo(({
   className?: string;
 }) => {
   return (
-    <div className={classNames("bg-white border border-gray-300", className)} style={{ overflow: 'visible' }}>
+    <div className={classNames("bg-white border border-primary-500 rounded-lg shadow-lg", className)} style={{ overflow: 'visible' }}>
       {children}
     </div>
   );
@@ -27,7 +27,7 @@ export const DatabaseSchemaNodeHeader = memo(({
   style?: React.CSSProperties;
 }) => {
   return (
-    <div className={classNames("border-b border-gray-300 bg-gray-50 px-3 py-2 font-semibold text-sm", className)} style={style}>
+    <div className={classNames("border-b border-gray-300 bg-primary-500 rounded-t-lg px-3 py-2 font-bold text-white text-sm", className)} style={style}>
       {children}
     </div>
   );
@@ -43,7 +43,7 @@ export const DatabaseSchemaNodeBody = memo(({
   className?: string;
 }) => {
   return (
-    <div className={classNames("divide-y divide-gray-200", className)}>
+    <div className={classNames("rounded-b-lg", className)}>
       {children}
     </div>
   );

@@ -2,10 +2,12 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { Avatar, Button, Tooltip, Dropdown } from "antd";
-import { Download, MessageCircleMore, History, Send, Smile, ThumbsUp, PartyPopper, PlugZap } from "lucide-react";
+import { Download, MessageCircleMore, History, Send, ArrowRightLeft, DatabaseZap, MessageSquareWarning } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { RemoteCollaborator } from "../../hooks/useCollaborationAwareness";
+
+type SchemaType = 'conceptual' | 'logical' | 'physical';
 
 type HeaderProps = {
     diagramName: string;
@@ -24,6 +26,9 @@ type HeaderProps = {
     onShareClick: () => void;
     commentMode?: boolean;
     onToggleCommentMode?: () => void;
+    schemaType?: SchemaType;
+    onConvertSchema?: (targetType: SchemaType) => void;
+    isConverting?: boolean;
 };
 
 const Header: React.FC<HeaderProps> = ({
@@ -43,6 +48,9 @@ const Header: React.FC<HeaderProps> = ({
     onShareClick,
     commentMode = false,
     onToggleCommentMode,
+    schemaType,
+    onConvertSchema,
+    isConverting = false,
 }) => {
     const inputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
@@ -66,6 +74,21 @@ const Header: React.FC<HeaderProps> = ({
     }, []);
 
     const avatarItems = useMemo(() => collaborators.slice(0, 4), [collaborators]);
+
+    const convertItems = useMemo(() => {
+        const allTypes: { type: SchemaType; label: string }[] = [
+            { type: 'conceptual', label: 'Convert to Conceptual' },
+            { type: 'logical',    label: 'Convert to Logical' },
+            { type: 'physical',   label: 'Convert to Physical' },
+        ];
+        return allTypes
+            .filter((t) => t.type !== schemaType)
+            .map((t) => ({
+                key: t.type,
+                label: t.label,
+                onClick: () => onConvertSchema?.(t.type),
+            }));
+    }, [schemaType, onConvertSchema]);
 
     const downloadItems = useMemo(() => {
         const items = [
@@ -153,25 +176,6 @@ const Header: React.FC<HeaderProps> = ({
                 </Button>
             </div>
             <div className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12">
-                <Tooltip title="Version History" placement="bottom">
-                    <Button
-                        id="tour-version-history"
-                        type="text"
-                        className="!px-2"
-                        onClick={onVersionHistory}
-                    >
-                        <History size={18} />
-                    </Button>
-                </Tooltip>
-                <Tooltip title="Comment" placement="bottom">
-                    <Button
-                        type={commentMode ? 'primary' : 'text'}
-                        className="!px-2"
-                        onClick={onToggleCommentMode}
-                    >
-                        <MessageCircleMore size={18} />
-                    </Button>
-                </Tooltip>
                 {collaborators.length > 0 && (
                 <div className="rounded-xl py-1 h-10 flex items-center">
                     <Avatar.Group
@@ -208,13 +212,58 @@ const Header: React.FC<HeaderProps> = ({
                     </Avatar.Group>
                 </div>
                 )}
-                <Button
-                    type="primary"
-                    className="!px-3 gap-2 flex items-center"
-                >
-                    <PlugZap className="text-white" size={18} />
-                    <span className="font-semibold">Connect to Database</span>
-                </Button>
+                <Tooltip title="Version History" placement="bottom">
+                    <Button
+                        id="tour-version-history"
+                        type="text"
+                        className="!px-2"
+                        onClick={onVersionHistory}
+                    >
+                        <History size={18} />
+                    </Button>
+                </Tooltip>
+                {/* <Tooltip title="Comment" placement="bottom">
+                    <Button
+                        type={commentMode ? 'primary' : 'text'}
+                        className="!px-2"
+                        onClick={onToggleCommentMode}
+                    >
+                        <MessageCircleMore size={18} />
+                    </Button>
+                </Tooltip> */}
+                <Tooltip title="Connect to Database" placement="bottom">
+                    <Button
+                        type={'text'}
+                        className="!px-2"
+                    >
+                        <DatabaseZap size={18} />
+                    </Button>
+                </Tooltip>
+                <Tooltip title="Linter & Safety Warning" placement="bottom">
+                    <Button
+                        type={'text'}
+                        className="!px-2"
+                    >
+                        <MessageSquareWarning size={18} />
+                    </Button>
+                </Tooltip>
+                {schemaType && convertItems.length > 0 && (
+                    <Dropdown
+                        menu={{ items: convertItems }}
+                        trigger={isConverting ? [] : ['click']}
+                        placement="bottomRight"
+                        align={{ offset: [0, 10] }}
+                    >
+                        <Button
+                            type="primary"
+                            className="!px-3 gap-2 flex items-center"
+                            loading={isConverting}
+                        >
+                            {!isConverting && <ArrowRightLeft className="text-white" size={18} />}
+                            <span className="font-semibold">{isConverting ? 'Converting…' : 'Convert schema'}</span>
+                        </Button>
+                    </Dropdown>
+                )}
             </div>
         </div>
     );
