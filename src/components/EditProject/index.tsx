@@ -95,6 +95,9 @@ import {
     mapReactEdgesToStoredEdges as mapConceptualReactEdgesToStored,
 } from "./utils/conceptual-diagram.builder";
 import type { StoredDiagramNode as StoredConceptualNode, StoredDiagramEdge as StoredConceptualEdge } from "./utils/conceptual-diagram.builder";
+import { runConceptualLinter, runLogicalLinter, runPhysicalLinter } from "./utils/schema-linter";
+import type { LintResult } from "./utils/schema-linter";
+import LinterPanel from "./components/LinterPanel";
 
 export type EntityField = {
     id: string;
@@ -346,6 +349,7 @@ const EditProject = (props: IPropsEditProject) => {
     const [isConverting, setIsConverting] = useState(false);
     const [isShareProjectOpen, setIsShareProjectOpen] = useState(false);
     const [exportInitialConfig, setExportInitialConfig] = useState<{ format: ExportFormat; scope: ExportScope }>({ format: 'png', scope: 'all' });
+    const [isLinterOpen, setIsLinterOpen] = useState(false);
 
     const isUserSelectingSchemaRef = useRef(false);
 
@@ -1040,6 +1044,41 @@ const EditProject = (props: IPropsEditProject) => {
     });
 
     const awareness = isConceptualSchema ? conceptualAwareness : isLogicalSchema ? logicalAwareness : isPhysicalSchema ? physicalAwareness : null;
+
+    // ── Linter — computed synchronously in the same render as nodes/edges ────
+    const lintResult = useMemo((): LintResult => {
+        const empty: LintResult = { issues: [], counts: { error: 0, warning: 0, info: 0 } };
+        if (isConceptualSchema) {
+            const storedNodes = mapConceptualReactToStored(nodes);
+            const storedEdges = mapConceptualReactEdgesToStored(edges, nodes);
+            const model = storedNodes.length > 0
+                ? buildConceptualModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
+                : _conceptualModelData;
+            return model ? runConceptualLinter(model) : empty;
+        }
+        if (isLogicalSchema) {
+            const storedNodes = mapLogicalReactToStored(nodes);
+            const storedEdges = mapLogicalReactEdgesToStored(edges, nodes);
+            const model = storedNodes.length > 0
+                ? buildLogicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
+                : _logicalModelData;
+            return model ? runLogicalLinter(model) : empty;
+        }
+        if (isPhysicalSchema) {
+            const storedNodes = mapPhysicalReactToStored(nodes);
+            const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
+            const model = storedNodes.length > 0
+                ? buildPhysicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
+                : _physicalModelData;
+            return model ? runPhysicalLinter(model) : empty;
+        }
+        return empty;
+    }, [
+        isConceptualSchema, isLogicalSchema, isPhysicalSchema,
+        nodes, edges,
+        _conceptualModelData, _logicalModelData, _physicalModelData,
+        selectedSchema?.id, selectedSchema?.name,
+    ]);
 
     // Override entity/relationship creators with model-first versions when
     // operating on a conceptual schema (model-as-truth architecture).
@@ -1805,6 +1844,9 @@ const EditProject = (props: IPropsEditProject) => {
                     schemaType={isConceptualSchema ? 'conceptual' : isLogicalSchema ? 'logical' : isPhysicalSchema ? 'physical' : undefined}
                     onConvertSchema={(targetType) => { handleConvertSchema(targetType); }}
                     isConverting={isConverting}
+                    linterOpen={isLinterOpen}
+                    onToggleLinterPanel={() => setIsLinterOpen((v) => !v)}
+                    linterCounts={lintResult.counts}
                 />
                 <ShareProject
                     projectId={projectData?.id}
@@ -2388,6 +2430,23 @@ const EditProject = (props: IPropsEditProject) => {
                 />
 
                 <SearchModal open={isSearchModalOpen} onClose={() => setIsSearchModalOpen(false)} />
+                <LinterPanel
+                    issues={lintResult.issues}
+                    counts={lintResult.counts}
+                    isOpen={isLinterOpen}
+                    onClose={() => setIsLinterOpen(false)}
+                    onIssueClick={(nodeId) => {
+                        const node = nodes.find((n) => n.id === nodeId);
+                        if (node) {
+                            setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === nodeId })));
+                            reactFlowInstanceRef.current?.fitView({
+                                nodes: [{ id: nodeId }],
+                                duration: 500,
+                                padding: 0.5,
+                            });
+                        }
+                    }}
+                />
                 <ChatBox
                     isOpen={isChatBoxOpen}
                     onClose={() => setIsChatBoxOpen(false)}

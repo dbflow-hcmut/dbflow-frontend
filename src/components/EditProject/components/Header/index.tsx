@@ -29,6 +29,9 @@ type HeaderProps = {
     schemaType?: SchemaType;
     onConvertSchema?: (targetType: SchemaType) => void;
     isConverting?: boolean;
+    linterOpen?: boolean;
+    onToggleLinterPanel?: () => void;
+    linterCounts?: { error: number; warning: number; info: number };
 };
 
 const Header: React.FC<HeaderProps> = ({
@@ -51,6 +54,9 @@ const Header: React.FC<HeaderProps> = ({
     schemaType,
     onConvertSchema,
     isConverting = false,
+    linterOpen = false,
+    onToggleLinterPanel,
+    linterCounts,
 }) => {
     const inputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
@@ -240,12 +246,28 @@ const Header: React.FC<HeaderProps> = ({
                     </Button>
                 </Tooltip>
                 <Tooltip title="Linter & Safety Warning" placement="bottom">
-                    <Button
-                        type={'text'}
-                        className="!px-2"
-                    >
-                        <MessageSquareWarning size={18} />
-                    </Button>
+                    <div className="relative inline-flex">
+                        <Button
+                            type={linterOpen ? 'primary' : 'text'}
+                            className="!px-2"
+                            onClick={onToggleLinterPanel}
+                        >
+                            <MessageSquareWarning size={18} />
+                        </Button>
+                        {linterCounts && (linterCounts.error + linterCounts.warning + linterCounts.info) > 0 && (
+                            <span
+                                className="pointer-events-none absolute -top-1 -right-1 flex items-center justify-center rounded-full text-white text-[9px] font-bold leading-none z-10"
+                                style={{
+                                    minWidth: 14,
+                                    height: 14,
+                                    padding: '0 3px',
+                                    backgroundColor: linterCounts.error > 0 ? '#ef4444' : linterCounts.warning > 0 ? '#f59e0b' : '#3b82f6',
+                                }}
+                            >
+                                {linterCounts.error + linterCounts.warning + linterCounts.info}
+                            </span>
+                        )}
+                    </div>
                 </Tooltip>
                 {schemaType && convertItems.length > 0 && (
                     <Dropdown
