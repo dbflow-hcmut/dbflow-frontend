@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Avatar, Button, Tooltip, Dropdown } from "antd";
 import { Download, MessageCircleMore, History, Send, ArrowRightLeft, DatabaseZap, MessageSquareWarning } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { RemoteCollaborator } from "../../hooks/useCollaborationAwareness";
+import ProjectDBConnectionModal from "@/components/ProjectDBConnectionModal";
 
 type SchemaType = 'conceptual' | 'logical' | 'physical';
 
@@ -32,6 +33,7 @@ type HeaderProps = {
     linterOpen?: boolean;
     onToggleLinterPanel?: () => void;
     linterCounts?: { error: number; warning: number; info: number };
+    projectId?: string;
 };
 
 const Header: React.FC<HeaderProps> = ({
@@ -57,9 +59,11 @@ const Header: React.FC<HeaderProps> = ({
     linterOpen = false,
     onToggleLinterPanel,
     linterCounts,
+    projectId,
 }) => {
     const inputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
+    const [isDBConnectionOpen, setIsDBConnectionOpen] = useState(false);
 
     useEffect(() => {
         if (isEditingDiagramName && inputRef.current) {
@@ -127,6 +131,7 @@ const Header: React.FC<HeaderProps> = ({
     }, [onDownload, onExportJson, onExportDDL, onExportHTMLDocs]);
 
     return (
+        <>
         <div className="pt-4 bg-transparent flex items-center justify-between px-4 fixed top-0 z-10 w-full">
             <div className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12">
                 <div className="cursor-pointer mx-1" onClick={() => router.push(`/ai-chat`)}>
@@ -241,6 +246,7 @@ const Header: React.FC<HeaderProps> = ({
                     <Button
                         type={'text'}
                         className="!px-2"
+                        onClick={() => setIsDBConnectionOpen(true)}
                     >
                         <DatabaseZap size={18} />
                     </Button>
@@ -288,6 +294,14 @@ const Header: React.FC<HeaderProps> = ({
                 )}
             </div>
         </div>
+            {projectId && (
+                <ProjectDBConnectionModal
+                    open={isDBConnectionOpen}
+                    onClose={() => setIsDBConnectionOpen(false)}
+                    projectId={projectId}
+                />
+            )}
+        </>
     );
 };
 

@@ -1847,6 +1847,7 @@ const EditProject = (props: IPropsEditProject) => {
                     linterOpen={isLinterOpen}
                     onToggleLinterPanel={() => setIsLinterOpen((v) => !v)}
                     linterCounts={lintResult.counts}
+                    projectId={projectData?.id}
                 />
                 <ShareProject
                     projectId={projectData?.id}
