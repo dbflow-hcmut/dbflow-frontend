@@ -211,7 +211,7 @@ export const ChatContent: React.FC<ChatContentProps> = ({
                     <button
                         onClick={() => fileInputRef.current?.click()}
                         disabled={isLoading || attachments.length >= ATTACHMENT_MAX_COUNT}
-                        className="flex-none p-1.5 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                        className="flex-none p-1.5 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer pb-3"
                         title="Attach file (.sql, .csv, .json, image)"
                     >
                         <Paperclip size={16} />
@@ -228,7 +228,7 @@ export const ChatContent: React.FC<ChatContentProps> = ({
                             onKeyDown={handleKeyPress}
                             placeholder="Type your message..."
                             autoSize={{ minRows: 1, maxRows: 4 }}
-                            className="!border-0 !shadow-none !outline-none focus:!border-0 focus:!ring-0 focus:!shadow-none"
+                            className="!border-0 !shadow-none !outline-none focus:!border-0 focus:!ring-0 focus:!shadow-none min-h-10!"
                             disabled={isLoading}
                         />
                     </div>
