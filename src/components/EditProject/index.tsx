@@ -347,6 +347,7 @@ const EditProject = (props: IPropsEditProject) => {
     const [isHTMLDocsExportOpen, setIsHTMLDocsExportOpen] = useState(false);
     const [isVersionHistoryOpen, setIsVersionHistoryOpen] = useState(false);
     const [isConverting, setIsConverting] = useState(false);
+    const [isSyncing, setIsSyncing] = useState(false);
     const [isShareProjectOpen, setIsShareProjectOpen] = useState(false);
     const [exportInitialConfig, setExportInitialConfig] = useState<{ format: ExportFormat; scope: ExportScope }>({ format: 'png', scope: 'all' });
     const [isLinterOpen, setIsLinterOpen] = useState(false);
@@ -976,6 +977,12 @@ const EditProject = (props: IPropsEditProject) => {
     const isLogicalSchema = selectedSchema?.type === SchemaType.LOGICAL;
     const isPhysicalSchema = selectedSchema?.type === SchemaType.PHYSICAL;
     const resolvedUserName = effectiveUser?.fullName ?? effectiveUser?.email ?? projectData?.owner?.name ?? "You";
+
+    // Schemas in the same project that can be sync'd to from the current schema
+    const syncableSchemas = useMemo(() => {
+        if (!selectedSchema) return [];
+        return schemaList.filter(s => s.id !== selectedSchema.id && s.type !== selectedSchema.type);
+    }, [schemaList, selectedSchema]);
     const resolvedUserAvatar = effectiveUser?.avatar ?? undefined;
 
     const { viewport, handleViewportChange } = useDiagramViewport({
@@ -1572,6 +1579,79 @@ const EditProject = (props: IPropsEditProject) => {
         searchParams,
     ]);
 
+    // ── Schema sync: overwrite an existing schema with converted model ─────────
+    const handleSyncToSchema = useCallback(async (targetSchemaId: string, targetSchemaType: string) => {
+        if (!projectData?.id) return;
+
+        const buildFreshLogical = () => {
+            const storedNodes = mapLogicalReactToStored(nodes);
+            const storedEdges = mapLogicalReactEdgesToStored(edges, nodes);
+            if (storedNodes.length > 0) return buildLogicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
+            return _logicalModelData;
+        };
+        const buildFreshPhysical = () => {
+            const storedNodes = mapPhysicalReactToStored(nodes);
+            const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
+            if (storedNodes.length > 0) return buildPhysicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
+            return _physicalModelData;
+        };
+        const buildFreshConceptual = () => {
+            const storedNodes = mapConceptualReactToStored(nodes);
+            const storedEdges = mapConceptualReactEdgesToStored(edges, nodes);
+            if (storedNodes.length > 0) return buildConceptualModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
+            return _conceptualModelData;
+        };
+
+        let convertedModel: Record<string, unknown> | null = null;
+        if (isLogicalSchema && targetSchemaType === SchemaType.PHYSICAL) {
+            const fresh = buildFreshLogical();
+            if (!fresh) { notificationProvider.open({ type: 'error', message: 'Logical model is not loaded yet.' }); return; }
+            convertedModel = convertLogicalToPhysical(fresh) as Record<string, unknown>;
+        } else if (isLogicalSchema && targetSchemaType === SchemaType.CONCEPTUAL) {
+            const fresh = buildFreshLogical();
+            if (!fresh) { notificationProvider.open({ type: 'error', message: 'Logical model is not loaded yet.' }); return; }
+            convertedModel = convertLogicalToConceptual(fresh) as Record<string, unknown>;
+        } else if (isPhysicalSchema && targetSchemaType === SchemaType.LOGICAL) {
+            const fresh = buildFreshPhysical();
+            if (!fresh) { notificationProvider.open({ type: 'error', message: 'Physical model is not loaded yet.' }); return; }
+            convertedModel = convertPhysicalToLogical(fresh) as Record<string, unknown>;
+        } else if (isPhysicalSchema && targetSchemaType === SchemaType.CONCEPTUAL) {
+            const fresh = buildFreshPhysical();
+            if (!fresh) { notificationProvider.open({ type: 'error', message: 'Physical model is not loaded yet.' }); return; }
+            convertedModel = convertPhysicalToConceptual(fresh) as Record<string, unknown>;
+        } else if (isConceptualSchema && targetSchemaType === SchemaType.LOGICAL) {
+            const fresh = buildFreshConceptual();
+            if (!fresh) { notificationProvider.open({ type: 'error', message: 'Conceptual model is not loaded yet.' }); return; }
+            convertedModel = convertConceptualToLogical(fresh) as Record<string, unknown>;
+        } else if (isConceptualSchema && targetSchemaType === SchemaType.PHYSICAL) {
+            const fresh = buildFreshConceptual();
+            if (!fresh) { notificationProvider.open({ type: 'error', message: 'Conceptual model is not loaded yet.' }); return; }
+            convertedModel = convertConceptualToPhysical(fresh) as Record<string, unknown>;
+        }
+
+        if (!convertedModel) {
+            notificationProvider.open({ type: 'error', message: 'Cannot sync between these schema types.' });
+            return;
+        }
+
+        setIsSyncing(true);
+        try {
+            await saveSchemaModel(projectData.id, targetSchemaId, convertedModel);
+            notificationProvider.open({ type: 'success', message: 'Schema synced successfully' });
+        } catch (error) {
+            console.error('Failed to sync schema:', error);
+            notificationProvider.open({ type: 'error', message: 'Failed to sync schema. Please try again.' });
+        } finally {
+            setIsSyncing(false);
+        }
+    }, [
+        isConceptualSchema, isLogicalSchema, isPhysicalSchema,
+        nodes, edges,
+        _logicalModelData, _physicalModelData, _conceptualModelData,
+        selectedSchema?.id, selectedSchema?.name,
+        projectData?.id,
+    ]);
+
     const projectAwareness = useProjectAwareness({
         enabled: Boolean(projectData?.id && sessionId && hasPermission && isValidSchema === true && !!token),
         projectId: projectData?.id,
@@ -1844,6 +1924,9 @@ const EditProject = (props: IPropsEditProject) => {
                     schemaType={isConceptualSchema ? 'conceptual' : isLogicalSchema ? 'logical' : isPhysicalSchema ? 'physical' : undefined}
                     onConvertSchema={(targetType) => { handleConvertSchema(targetType); }}
                     isConverting={isConverting}
+                    syncableSchemas={syncableSchemas}
+                    onSyncToSchema={handleSyncToSchema}
+                    isSyncing={isSyncing}
                     linterOpen={isLinterOpen}
                     onToggleLinterPanel={() => setIsLinterOpen((v) => !v)}
                     linterCounts={lintResult.counts}

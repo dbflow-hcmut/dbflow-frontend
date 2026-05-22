@@ -1,10 +1,18 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Input, Button } from "antd";
-import { Send, Loader2, RefreshCw, Square } from "lucide-react";
+import { Send, Loader2, RefreshCw, Square, Paperclip } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+    type Attachment,
+    readFileAsAttachment,
+    ATTACHMENT_ACCEPT,
+    ATTACHMENT_MAX_COUNT,
+    ATTACHMENT_MAX_TOTAL_BYTES,
+} from "@/api/ai/client";
+import { AttachmentPreviews } from "@/components/AttachmentPreviews";
 
 export interface Message {
     id: string;
@@ -13,11 +21,12 @@ export interface Message {
     timestamp: Date;
     isStreaming?: boolean;
     isError?: boolean;
+    attachments?: Attachment[];
 }
 
 interface ChatContentProps {
     messages?: Message[];
-    onSend: (text: string) => void;
+    onSend: (text: string, attachments?: Attachment[]) => void;
     onMessagesChange?: (messages: Message[]) => void;
     isLoading?: boolean;
     reasoningText?: string;
@@ -37,9 +46,29 @@ export const ChatContent: React.FC<ChatContentProps> = ({
 }) => {
     const [internalMessages] = useState<Message[]>([]);
     const [inputValue, setInputValue] = useState("");
+    const [attachments, setAttachments] = useState<Attachment[]>([]);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     const messages = externalMessages !== undefined ? externalMessages : internalMessages;
+
+    const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(e.target.files ?? []);
+        if (!files.length) return;
+        e.target.value = "";
+        const currentTotal = attachments.reduce((s, a) => s + a.size, 0);
+        const newAtts: Attachment[] = [];
+        for (const file of files) {
+            if (attachments.length + newAtts.length >= ATTACHMENT_MAX_COUNT) break;
+            if (currentTotal + newAtts.reduce((s, a) => s + a.size, 0) + file.size > ATTACHMENT_MAX_TOTAL_BYTES) continue;
+            const att = await readFileAsAttachment(file);
+            if (att) newAtts.push(att);
+        }
+        if (newAtts.length === 0) return;
+        setAttachments((prev) => [...prev, ...newAtts]);
+    }, [attachments]);
+
+    const removeAttachment = (id: string) => setAttachments((prev) => prev.filter((a) => a.id !== id));
 
     useEffect(() => {
         if (messagesEndRef.current) {
@@ -48,9 +77,11 @@ export const ChatContent: React.FC<ChatContentProps> = ({
     }, [messages, isLoading]);
 
     const handleSend = () => {
-        if (!inputValue.trim() || isLoading) return;
-        onSend(inputValue);
+        if ((!inputValue.trim() && attachments.length === 0) || isLoading) return;
+        const currentAttachments = [...attachments];
+        onSend(inputValue, currentAttachments);
         setInputValue("");
+        setAttachments([]);
     };
 
     const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -72,8 +103,19 @@ export const ChatContent: React.FC<ChatContentProps> = ({
                     return (
                         <div
                             key={message.id}
-                            className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"}`}
+                            className={`flex flex-col ${message.sender === "user" ? "items-end" : "items-start"}`}
                         >
+                            {/* File previews — outside bubble, above it */}
+                            {message.sender === "user" && message.attachments && message.attachments.length > 0 && (
+                                <div className="mb-1 max-w-[80%]">
+                                    <AttachmentPreviews
+                                        attachments={message.attachments}
+                                        onRemove={() => {}}
+                                        compact
+                                        readonly
+                                    />
+                                </div>
+                            )}
                             <div className="max-w-[80%]">
                                 <div
                                     className={`rounded-lg px-4 py-2 ${
@@ -156,17 +198,40 @@ export const ChatContent: React.FC<ChatContentProps> = ({
                 <div ref={messagesEndRef} />
             </div>
 
-            <div className="border-t border-gray-200 p-4 bg-white">
+            <div className="border-t border-gray-200 p-3 bg-white">
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept={ATTACHMENT_ACCEPT}
+                    multiple
+                    className="hidden"
+                    onChange={handleFileChange}
+                />
                 <div className="flex items-end gap-2">
-                    <Input.TextArea
-                        value={inputValue}
-                        onChange={(e) => setInputValue(e.target.value)}
-                        onKeyDown={handleKeyPress}
-                        placeholder="Type your message..."
-                        autoSize={{ minRows: 1, maxRows: 4 }}
-                        className="flex-1 min-h-10!"
-                        disabled={isLoading}
-                    />
+                    <button
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isLoading || attachments.length >= ATTACHMENT_MAX_COUNT}
+                        className="flex-none p-1.5 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                        title="Attach file (.sql, .csv, .json, image)"
+                    >
+                        <Paperclip size={16} />
+                    </button>
+                    <div className="flex-1 border border-gray-300 rounded-lg focus-within:border-primary-500 focus-within:ring-1 focus-within:ring-primary-100 bg-white overflow-hidden">
+                        {attachments.length > 0 && (
+                            <div className="px-2 pt-2 pb-1">
+                                <AttachmentPreviews attachments={attachments} onRemove={removeAttachment} compact />
+                            </div>
+                        )}
+                        <Input.TextArea
+                            value={inputValue}
+                            onChange={(e) => setInputValue(e.target.value)}
+                            onKeyDown={handleKeyPress}
+                            placeholder="Type your message..."
+                            autoSize={{ minRows: 1, maxRows: 4 }}
+                            className="!border-0 !shadow-none !outline-none focus:!border-0 focus:!ring-0 focus:!shadow-none"
+                            disabled={isLoading}
+                        />
+                    </div>
                     {isLoading ? (
                         <Button
                             type="default"
@@ -181,7 +246,7 @@ export const ChatContent: React.FC<ChatContentProps> = ({
                             type="primary"
                             icon={<Send size={16} />}
                             onClick={handleSend}
-                            disabled={!inputValue.trim()}
+                            disabled={!inputValue.trim() && attachments.length === 0}
                             className="!h-10"
                         >
                             Send

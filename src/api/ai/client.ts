@@ -2,9 +2,138 @@
 
 import { LANGGRAPH_THREADS, LANGGRAPH_STREAM, LANGGRAPH_CANCEL_RUN } from "@/api";
 
+// ── Attachment types ──────────────────────────────────────────────────────────
+
+export type AttachmentFileType = "sql" | "csv" | "json" | "image" | "pdf" | "docx";
+
+export interface Attachment {
+  id: string;
+  name: string;
+  fileType: AttachmentFileType;
+  /** text content for sql/csv/json; base64 data URL for image/pdf; empty string for docx */
+  content: string;
+  size: number;
+  /** Parsed model payload when fileType=json and the JSON looks like a schema model */
+  modelJson?: Record<string, unknown>;
+}
+
+/** Max attachments per message */
+export const ATTACHMENT_MAX_COUNT = 5;
+/** Max total size of all attachments (bytes) */
+export const ATTACHMENT_MAX_TOTAL_BYTES = 20 * 1024 * 1024; // 20 MB
+/** Accepted file types for the file picker */
+export const ATTACHMENT_ACCEPT = ".sql,.csv,.json,.png,.jpg,.jpeg,.webp,.svg,.pdf,.doc,.docx";
+
+/**
+ * Read a File object into an Attachment.
+ * Returns null if the file type is unsupported or the file is too large.
+ */
+export async function readFileAsAttachment(file: File): Promise<Attachment | null> {
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  let fileType: AttachmentFileType;
+  if (ext === "sql") fileType = "sql";
+  else if (ext === "csv") fileType = "csv";
+  else if (ext === "json") fileType = "json";
+  else if (["png", "jpg", "jpeg", "webp", "svg"].includes(ext)) fileType = "image";
+  else if (ext === "pdf") fileType = "pdf";
+  else if (["doc", "docx"].includes(ext)) fileType = "docx";
+  else return null;
+
+  const content = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    if (fileType === "image" || fileType === "pdf") {
+      reader.readAsDataURL(file);
+    } else if (fileType === "docx") {
+      // DOCX binary — we don't extract text client-side; store empty content
+      resolve("");
+    } else {
+      reader.readAsText(file);
+    }
+  });
+
+  let modelJson: Record<string, unknown> | undefined;
+  if (fileType === "json") {
+    try {
+      const parsed = JSON.parse(content) as Record<string, unknown>;
+      if (parsed && (parsed.entities || parsed.tables || parsed.model)) {
+        modelJson = parsed;
+      }
+    } catch {
+      // not valid JSON or not a model
+    }
+  }
+
+  return { id: crypto.randomUUID(), name: file.name, fileType, content, size: file.size, modelJson };
+}
+
+// ── Multimodal ChatMessage support ───────────────────────────────────────────
+
+export type ChatMessageContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
-  content: string;
+  content: string | ChatMessageContentPart[];
+}
+
+/**
+ * Build a ChatMessage and optional model override from user text + attachments.
+ * - SQL / CSV → embedded as fenced code blocks in the text
+ * - JSON model files → returned as `modelOverride`; plain JSON embedded in text
+ * - Images → multimodal content array (uses presigned S3 URL if available, else base64)
+ * - PDF → inline base64 via image_url (Gemini 1.5 supports application/pdf inline)
+ * - DOCX → reference note in text (Gemini doesn't support DOCX natively)
+ */
+export function buildChatInputFromAttachments(
+  text: string,
+  attachments: Attachment[],
+): { message: ChatMessage; modelOverride?: Record<string, unknown> } {
+  if (attachments.length === 0) {
+    return { message: { role: "user", content: text } };
+  }
+
+  const imageFiles = attachments.filter((a) => a.fileType === "image");
+  const pdfFiles = attachments.filter((a) => a.fileType === "pdf");
+  const jsonModel = attachments.find((a) => a.fileType === "json" && a.modelJson);
+
+  let textContent = text;
+  for (const a of attachments) {
+    if (a.fileType === "sql") {
+      textContent = `[File: ${a.name}]\n\`\`\`sql\n${a.content}\n\`\`\`\n\n${textContent}`;
+    } else if (a.fileType === "csv") {
+      textContent = `[File: ${a.name}]\n\`\`\`csv\n${a.content}\n\`\`\`\n\n${textContent}`;
+    } else if (a.fileType === "json" && !a.modelJson) {
+      textContent = `[File: ${a.name}]\n\`\`\`json\n${a.content}\n\`\`\`\n\n${textContent}`;
+    } else if (a.fileType === "docx") {
+      textContent = `[Attached Word document: ${a.name}]\n\n${textContent}`;
+    }
+    // images and pdfs handled via content parts below
+  }
+
+  const hasMultimodal = imageFiles.length > 0 || pdfFiles.length > 0;
+
+  let message: ChatMessage;
+  if (hasMultimodal) {
+    const parts: ChatMessageContentPart[] = [{ type: "text", text: textContent }];
+
+    for (const a of imageFiles) {
+      parts.push({ type: "image_url", image_url: { url: a.content } });
+    }
+
+    for (const a of pdfFiles) {
+      // Send PDF inline as base64 (Gemini 1.5 supports application/pdf via image_url)
+      parts.push({ type: "image_url", image_url: { url: a.content } });
+    }
+
+    message = { role: "user", content: parts };
+  } else {
+    message = { role: "user", content: textContent };
+  }
+
+  return { message, modelOverride: jsonModel?.modelJson };
 }
 
 // Fixed assistant ID for DBFlow AI

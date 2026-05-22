@@ -12,6 +12,8 @@ import {
     RoutingInfo,
     extractModelJsonFromContent,
     cancelRun,
+    type Attachment,
+    buildChatInputFromAttachments,
 } from "@/api/ai/client";
 import {
     createConversation,
@@ -218,16 +220,22 @@ const ChatBox: React.FC<ChatBoxProps> = ({
         }
     };
 
-    const handleSend = useCallback(async (text: string) => {
-        if (!text.trim() || isLoading) return;
+    const handleSend = useCallback(async (text: string, attachments?: Attachment[]) => {
+        const trimmed = text.trim();
+        const atts = attachments ?? [];
+        if (!trimmed && atts.length === 0) return;
+        if (isLoading) return;
 
-        lastUserMessageRef.current = text.trim();
+        lastUserMessageRef.current = trimmed;
+
+        const { message: enrichedMessage, modelOverride } = buildChatInputFromAttachments(trimmed, atts);
 
         const userMessage: Message = {
             id: Date.now().toString(),
-            text: text.trim(),
+            text: trimmed,
             sender: "user",
             timestamp: new Date(),
+            attachments: atts.length > 0 ? atts : undefined,
         };
 
         setMessages((prev) => [...prev, userMessage]);
@@ -267,12 +275,12 @@ const ChatBox: React.FC<ChatBoxProps> = ({
 
         setMessages((prev) => [...prev, aiMessage]);
 
-        const chatMessages: ChatMessage[] = [
-            { role: "user", content: text.trim() },
-        ];
+        const chatMessages: ChatMessage[] = [enrichedMessage];
 
         let finalContent = "";
         let modelAlreadyApplied = false;
+
+        const effectiveModel = modelOverride ?? currentModel ?? undefined;
 
         const returnedRunId = await streamChatToLangGraph(
             DBFLOW_ASSISTANT_ID,
@@ -394,7 +402,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                 if (finalContent) {
                     try {
                         await saveMessages(threadId, [
-                            { role: "user", content: text.trim() },
+                            { role: "user", content: trimmed },
                             { role: "assistant", content: finalContent },
                         ]);
                     } catch (error) {
@@ -435,7 +443,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
             },
             abortController.signal,
             schemaLevel,
-            currentModel,
+            effectiveModel,
         );
         if (returnedRunId) runIdRef.current = returnedRunId;
         abortControllerRef.current = null;

@@ -1,14 +1,20 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Avatar, Button, Tooltip, Dropdown } from "antd";
-import { Download, MessageCircleMore, History, Send, ArrowRightLeft, DatabaseZap, MessageSquareWarning } from "lucide-react";
+import { Avatar, Button, Tooltip, Dropdown, Modal } from "antd";
+import { Download, MessageCircleMore, History, Send, ArrowRightLeft, DatabaseZap, MessageSquareWarning, RefreshCw } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { RemoteCollaborator } from "../../hooks/useCollaborationAwareness";
 import ProjectDBConnectionModal from "@/components/ProjectDBConnectionModal";
 
 type SchemaType = 'conceptual' | 'logical' | 'physical';
+
+export type SyncableSchema = {
+    id: string;
+    name: string;
+    type: string;
+};
 
 type HeaderProps = {
     diagramName: string;
@@ -30,6 +36,9 @@ type HeaderProps = {
     schemaType?: SchemaType;
     onConvertSchema?: (targetType: SchemaType) => void;
     isConverting?: boolean;
+    syncableSchemas?: SyncableSchema[];
+    onSyncToSchema?: (targetSchemaId: string, targetSchemaType: string) => void;
+    isSyncing?: boolean;
     linterOpen?: boolean;
     onToggleLinterPanel?: () => void;
     linterCounts?: { error: number; warning: number; info: number };
@@ -56,6 +65,9 @@ const Header: React.FC<HeaderProps> = ({
     schemaType,
     onConvertSchema,
     isConverting = false,
+    syncableSchemas = [],
+    onSyncToSchema,
+    isSyncing = false,
     linterOpen = false,
     onToggleLinterPanel,
     linterCounts,
@@ -275,6 +287,38 @@ const Header: React.FC<HeaderProps> = ({
                         )}
                     </div>
                 </Tooltip>
+                {syncableSchemas.length > 0 && onSyncToSchema && (
+                    <Dropdown
+                        menu={{
+                            items: syncableSchemas.map((s) => ({
+                                key: s.id,
+                                label: s.name,
+                                onClick: () => {
+                                    Modal.confirm({
+                                        title: `Sync to "${s.name}"?`,
+                                        content: `\"${s.name}\" will be updated to reflect the latest changes from the current schema. Its existing content will be replaced.`,
+                                        okText: 'Sync',
+                                        cancelText: 'Cancel',
+                                        okButtonProps: { danger: true },
+                                        onOk: () => onSyncToSchema(s.id, s.type),
+                                    });
+                                },
+                            })),
+                        }}
+                        trigger={isSyncing ? [] : ['click']}
+                        placement="bottomRight"
+                        align={{ offset: [0, 10] }}
+                    >
+                        <Button
+                            type="default"
+                            className="!px-3 gap-2 flex items-center"
+                            loading={isSyncing}
+                        >
+                            {!isSyncing && <RefreshCw size={16} />}
+                            <span className="font-semibold">{isSyncing ? 'Syncing…' : 'Sync to…'}</span>
+                        </Button>
+                    </Dropdown>
+                )}
                 {schemaType && convertItems.length > 0 && (
                     <Dropdown
                         menu={{ items: convertItems }}
