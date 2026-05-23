@@ -6,6 +6,9 @@ export const API_LOGIN = `${API_BASE}/auth/login`;
 
 export const PROXY_BASE = `${FE_BASE}/api/proxy`;
 
+/** Dedicated multipart upload proxy → backend uploads to S3, returns { key, url } */
+export const FE_UPLOAD_ATTACHMENT = `${FE_BASE}/api/upload-attachment`;
+
 export const PROXY_USERS = `${PROXY_BASE}/users`;
 export const PROXY_USERS_ME = `${PROXY_USERS}/me`;
 export const PROXY_USERS_PROFILE = `${PROXY_USERS}/profile`;

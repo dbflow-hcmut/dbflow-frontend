@@ -18,6 +18,7 @@ import {
   cancelRun,
   type Attachment,
   readFileAsAttachment,
+  uploadAttachmentForAI,
   buildChatInputFromAttachments,
   ATTACHMENT_ACCEPT,
   ATTACHMENT_MAX_COUNT,
@@ -49,6 +50,47 @@ interface AIChatViewProps {
   /** If provided, load this existing conversation */
   threadId?: string;
 }
+
+// ── Attachment metadata persistence helpers ───────────────────────────────────
+const ATT_MARKER = "<!-- __att__:";
+const ATT_END = " -->";
+
+function encodeAttachmentMetadata(content: string, attachments: Attachment[]): string {
+  if (attachments.length === 0) return content;
+  const meta = attachments.map(({ id, name, fileType, size, url }) => ({
+    id,
+    name,
+    fileType,
+    size,
+    ...(url ? { url } : {}),
+  }));
+  return `${content}\n${ATT_MARKER}${JSON.stringify(meta)}${ATT_END}`;
+}
+
+function decodeAttachmentMetadata(raw: string): { content: string; attachments: Attachment[] } {
+  const markerIdx = raw.lastIndexOf(ATT_MARKER);
+  if (markerIdx === -1) return { content: raw, attachments: [] };
+  const endIdx = raw.lastIndexOf(ATT_END);
+  if (endIdx <= markerIdx) return { content: raw, attachments: [] };
+  const jsonStr = raw.slice(markerIdx + ATT_MARKER.length, endIdx);
+  const cleanContent = raw.slice(0, markerIdx).trimEnd();
+  try {
+    const parsed = JSON.parse(jsonStr) as Array<{
+      id: string;
+      name: string;
+      fileType: Attachment["fileType"];
+      size: number;
+      url?: string;
+    }>;
+    return {
+      content: cleanContent,
+      attachments: parsed.map((a) => ({ ...a, content: "" })),
+    };
+  } catch {
+    return { content: raw, attachments: [] };
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function AIChatView({ threadId: initialThreadId }: AIChatViewProps) {
   const router = useRouter();
@@ -99,12 +141,24 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
         const conversation = await getConversation(initialThreadId);
         const msgs = conversation?.messages ?? [];
         if (msgs.length > 0) {
-          const loadedMessages: Message[] = msgs.map((msg, index) => ({
-            id: `loaded-${index}-${msg.id}`,
-            role: msg.role,
-            content: msg.content,
-            timestamp: new Date(msg.createdAt),
-          }));
+          const loadedMessages: Message[] = msgs.map((msg, index) => {
+            if (msg.role === "user") {
+              const { content, attachments } = decodeAttachmentMetadata(msg.content);
+              return {
+                id: `loaded-${index}-${msg.id}`,
+                role: msg.role as "user",
+                content,
+                timestamp: new Date(msg.createdAt),
+                attachments: attachments.length > 0 ? attachments : undefined,
+              };
+            }
+            return {
+              id: `loaded-${index}-${msg.id}`,
+              role: msg.role,
+              content: msg.content,
+              timestamp: new Date(msg.createdAt),
+            };
+          });
           setMessages(loadedMessages);
         }
       } catch (error) {
@@ -124,20 +178,42 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
     e.target.value = "";
 
     const currentTotal = attachments.reduce((s, a) => s + a.size, 0);
-    const newAttachments: Attachment[] = [];
+    const pairs: Array<{ att: Attachment; file: File }> = [];
     for (const file of files) {
-      if (attachments.length + newAttachments.length >= ATTACHMENT_MAX_COUNT) break;
-      if (currentTotal + newAttachments.reduce((s, a) => s + a.size, 0) + file.size > ATTACHMENT_MAX_TOTAL_BYTES) continue;
+      if (attachments.length + pairs.length >= ATTACHMENT_MAX_COUNT) break;
+      if (currentTotal + pairs.reduce((s, { att }) => s + att.size, 0) + file.size > ATTACHMENT_MAX_TOTAL_BYTES) continue;
       const att = await readFileAsAttachment(file);
-      if (att) newAttachments.push(att);
+      if (att) pairs.push({ att, file });
     }
-    if (newAttachments.length === 0) return;
+    if (pairs.length === 0) return;
+
+    // Mark files that need S3 upload as uploading immediately
+    const needsUpload = (fileType: Attachment["fileType"]) =>
+      fileType === "image" || fileType === "pdf" || fileType === "docx";
+    const newAttachments = pairs.map(({ att }) =>
+      needsUpload(att.fileType) ? { ...att, uploading: true } : att,
+    );
     setAttachments((prev) => [...prev, ...newAttachments]);
+
+    // Upload image/pdf/docx to S3 in background so AI receives a URL instead of base64
+    for (const { att, file } of pairs) {
+      if (needsUpload(att.fileType)) {
+        uploadAttachmentForAI(file, att.id).then((url) => {
+          setAttachments((prev) =>
+            prev.map((a) =>
+              a.id === att.id ? { ...a, uploading: false, ...(url ? { url } : {}) } : a,
+            ),
+          );
+        });
+      }
+    }
   }, [attachments]);
 
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
-  }, []);  const handleSend = useCallback(async (retryMessage?: string) => {
+  }, []);
+
+  const isUploading = attachments.some((a) => a.uploading);  const handleSend = useCallback(async (retryMessage?: string) => {
     const messageToSend = retryMessage || inputValue.trim();
     if ((!messageToSend && attachments.length === 0) || isLoading) return;
 
@@ -299,7 +375,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
         // Save messages and link conversation to this project
         await ensureConversationReady();
         await saveMessages(threadId, [
-          { role: "user", content: userMsg },
+          { role: "user", content: encodeAttachmentMetadata(userMsg, currentAttachments) },
           { role: "assistant", content: fullContent },
         ]);
         await linkConversationToProject(threadId, projectIdToUse, schema.id);
@@ -384,7 +460,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
           try {
             await ensureConversationReady();
             await saveMessages(threadId, [
-              { role: "user", content: userMessageContent },
+              { role: "user", content: encodeAttachmentMetadata(userMessageContent, currentAttachments) },
               { role: "assistant", content: finalAssistantContent },
             ]);
           } catch (error) {
@@ -511,7 +587,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
                 </button>
                 <button
                   onClick={() => handleSend()}
-                  disabled={(!inputValue.trim() && attachments.length === 0) || isLoading}
+                  disabled={(!inputValue.trim() && attachments.length === 0) || isLoading || isUploading}
                   className="absolute cursor-pointer right-3 bottom-[8px] p-2 bg-primary-500 text-white rounded-full hover:bg-primary-500 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                 >
                   <ArrowUp className="w-5 h-5 font-bold text-white" />
@@ -519,7 +595,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
               </div>
             </div>
 
-            <div className="text-xs text-gray-500 text-center mt-6">
+            {/* <div className="text-xs text-gray-500 text-center mt-6">
               Press{" "}
               <kbd className="px-1.5 py-0.5 bg-gray-100 rounded border border-gray-300 font-mono">
                 Enter
@@ -529,7 +605,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
                 Shift+Enter
               </kbd>{" "}
               for new line
-            </div>
+            </div> */}
           </div>
         </div>
       ) : (
@@ -733,7 +809,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
                   ) : (
                     <button
                       onClick={() => handleSend()}
-                      disabled={!inputValue.trim() && attachments.length === 0}
+                      disabled={(!inputValue.trim() && attachments.length === 0) || isUploading}
                       className="absolute cursor-pointer right-3 bottom-[8px] p-2 bg-primary-500 text-white rounded-full hover:bg-primary-500 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                     >
                       <ArrowUp className="w-5 h-5 font-bold text-white" />

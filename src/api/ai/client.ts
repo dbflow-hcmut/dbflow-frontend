@@ -1,6 +1,6 @@
 "use client";
 
-import { LANGGRAPH_THREADS, LANGGRAPH_STREAM, LANGGRAPH_CANCEL_RUN } from "@/api";
+import { LANGGRAPH_THREADS, LANGGRAPH_STREAM, LANGGRAPH_CANCEL_RUN, FE_UPLOAD_ATTACHMENT } from "@/api";
 
 // ── Attachment types ──────────────────────────────────────────────────────────
 
@@ -10,11 +10,18 @@ export interface Attachment {
   id: string;
   name: string;
   fileType: AttachmentFileType;
-  /** text content for sql/csv/json; base64 data URL for image/pdf; empty string for docx */
+  /** text content for sql/csv/json; base64 data URL for image/pdf preview; empty string for docx */
   content: string;
   size: number;
   /** Parsed model payload when fileType=json and the JSON looks like a schema model */
   modelJson?: Record<string, unknown>;
+  /**
+   * S3 presigned URL for image/pdf/docx — sent to the AI instead of the base64 content.
+   * Populated asynchronously after upload. While undefined the file is still uploading.
+   */
+  url?: string;
+  /** True while the S3 upload is in progress */
+  uploading?: boolean;
 }
 
 /** Max attachments per message */
@@ -68,6 +75,44 @@ export async function readFileAsAttachment(file: File): Promise<Attachment | nul
   return { id: crypto.randomUUID(), name: file.name, fileType, content, size: file.size, modelJson };
 }
 
+/**
+ * Upload a file (image or PDF) to S3 via the backend and return a presigned read URL.
+ * Flow:
+ *   1. POST /api/upload-attachment (multipart) → backend PUT to S3
+ *   2. Backend returns { key, url } where url is a presigned read URL (1h)
+ *   3. Return url — sent to AI instead of base64, keeping request body small.
+ * Returns null on any failure (caller falls back to base64).
+ */
+export async function uploadAttachmentForAI(
+  file: File,
+  attachmentId: string,
+): Promise<string | null> {
+  try {
+    const key = `ai-attachments/${attachmentId}/${Date.now()}-${file.name}`;
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("key", key);
+
+    const res = await fetch(FE_UPLOAD_ATTACHMENT!, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => res.status.toString());
+      console.error("[uploadAttachmentForAI] upload failed", res.status, errText);
+      return null;
+    }
+
+    const data = (await res.json()) as { key: string; url: string };
+    console.log("[uploadAttachmentForAI] upload success, url:", data.url);
+    return data.url ?? null;
+  } catch (err) {
+    console.error("[uploadAttachmentForAI] unexpected error", err);
+    return null;
+  }
+}
+
 // ── Multimodal ChatMessage support ───────────────────────────────────────────
 
 export type ChatMessageContentPart =
@@ -97,6 +142,9 @@ export function buildChatInputFromAttachments(
 
   const imageFiles = attachments.filter((a) => a.fileType === "image");
   const pdfFiles = attachments.filter((a) => a.fileType === "pdf");
+  // DOCX with a presigned URL → send as image_url part (Gemini supports document URLs)
+  // DOCX without URL (upload pending/failed) → fall back to text reference
+  const docxUrlFiles = attachments.filter((a) => a.fileType === "docx" && a.url);
   const jsonModel = attachments.find((a) => a.fileType === "json" && a.modelJson);
 
   let textContent = text;
@@ -107,25 +155,29 @@ export function buildChatInputFromAttachments(
       textContent = `[File: ${a.name}]\n\`\`\`csv\n${a.content}\n\`\`\`\n\n${textContent}`;
     } else if (a.fileType === "json" && !a.modelJson) {
       textContent = `[File: ${a.name}]\n\`\`\`json\n${a.content}\n\`\`\`\n\n${textContent}`;
-    } else if (a.fileType === "docx") {
+    } else if (a.fileType === "docx" && !a.url) {
+      // No URL yet — upload failed or still pending
       textContent = `[Attached Word document: ${a.name}]\n\n${textContent}`;
     }
-    // images and pdfs handled via content parts below
+    // image, pdf, docx-with-url handled via content parts below
   }
 
-  const hasMultimodal = imageFiles.length > 0 || pdfFiles.length > 0;
+  const hasMultimodal = imageFiles.length > 0 || pdfFiles.length > 0 || docxUrlFiles.length > 0;
 
   let message: ChatMessage;
   if (hasMultimodal) {
     const parts: ChatMessageContentPart[] = [{ type: "text", text: textContent }];
 
     for (const a of imageFiles) {
-      parts.push({ type: "image_url", image_url: { url: a.content } });
+      parts.push({ type: "image_url", image_url: { url: a.url ?? a.content } });
     }
 
     for (const a of pdfFiles) {
-      // Send PDF inline as base64 (Gemini 1.5 supports application/pdf via image_url)
-      parts.push({ type: "image_url", image_url: { url: a.content } });
+      parts.push({ type: "image_url", image_url: { url: a.url ?? a.content } });
+    }
+
+    for (const a of docxUrlFiles) {
+      parts.push({ type: "image_url", image_url: { url: a.url! } });
     }
 
     message = { role: "user", content: parts };

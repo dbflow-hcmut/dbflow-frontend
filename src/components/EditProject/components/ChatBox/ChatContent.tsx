@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm";
 import {
     type Attachment,
     readFileAsAttachment,
+    uploadAttachmentForAI,
     ATTACHMENT_ACCEPT,
     ATTACHMENT_MAX_COUNT,
     ATTACHMENT_MAX_TOTAL_BYTES,
@@ -57,18 +58,40 @@ export const ChatContent: React.FC<ChatContentProps> = ({
         if (!files.length) return;
         e.target.value = "";
         const currentTotal = attachments.reduce((s, a) => s + a.size, 0);
-        const newAtts: Attachment[] = [];
+        const pairs: Array<{ att: Attachment; file: File }> = [];
         for (const file of files) {
-            if (attachments.length + newAtts.length >= ATTACHMENT_MAX_COUNT) break;
-            if (currentTotal + newAtts.reduce((s, a) => s + a.size, 0) + file.size > ATTACHMENT_MAX_TOTAL_BYTES) continue;
+            if (attachments.length + pairs.length >= ATTACHMENT_MAX_COUNT) break;
+            if (currentTotal + pairs.reduce((s, { att }) => s + att.size, 0) + file.size > ATTACHMENT_MAX_TOTAL_BYTES) continue;
             const att = await readFileAsAttachment(file);
-            if (att) newAtts.push(att);
+            if (att) pairs.push({ att, file });
         }
-        if (newAtts.length === 0) return;
+        if (pairs.length === 0) return;
+
+        // Mark files that need S3 upload as uploading immediately
+        const needsUpload = (fileType: Attachment["fileType"]) =>
+            fileType === "image" || fileType === "pdf" || fileType === "docx";
+        const newAtts = pairs.map(({ att }) =>
+            needsUpload(att.fileType) ? { ...att, uploading: true } : att,
+        );
         setAttachments((prev) => [...prev, ...newAtts]);
+
+        // Upload image/pdf/docx to S3 in background so AI receives a URL instead of base64
+        for (const { att, file } of pairs) {
+            if (needsUpload(att.fileType)) {
+                uploadAttachmentForAI(file, att.id).then((url) => {
+                    setAttachments((prev) =>
+                        prev.map((a) =>
+                            a.id === att.id ? { ...a, uploading: false, ...(url ? { url } : {}) } : a,
+                        ),
+                    );
+                });
+            }
+        }
     }, [attachments]);
 
     const removeAttachment = (id: string) => setAttachments((prev) => prev.filter((a) => a.id !== id));
+
+    const isUploading = attachments.some((a) => a.uploading);
 
     useEffect(() => {
         if (messagesEndRef.current) {
@@ -77,7 +100,7 @@ export const ChatContent: React.FC<ChatContentProps> = ({
     }, [messages, isLoading]);
 
     const handleSend = () => {
-        if ((!inputValue.trim() && attachments.length === 0) || isLoading) return;
+        if ((!inputValue.trim() && attachments.length === 0) || isLoading || isUploading) return;
         const currentAttachments = [...attachments];
         onSend(inputValue, currentAttachments);
         setInputValue("");
@@ -246,7 +269,7 @@ export const ChatContent: React.FC<ChatContentProps> = ({
                             type="primary"
                             icon={<Send size={16} />}
                             onClick={handleSend}
-                            disabled={!inputValue.trim() && attachments.length === 0}
+                            disabled={(!inputValue.trim() && attachments.length === 0) || isUploading}
                             className="!h-10"
                         >
                             Send

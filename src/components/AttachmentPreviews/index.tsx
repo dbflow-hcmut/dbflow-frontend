@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { X as XIcon } from "lucide-react";
+import { X as XIcon, Loader2 } from "lucide-react";
 import type { Attachment } from "@/api/ai/client";
 
 interface AttachmentPreviewsProps {
@@ -107,15 +107,26 @@ export function AttachmentPreviews({
     <div className="flex flex-wrap gap-2">
       {attachments.map((a) => {
         if (a.fileType === "image") {
+          const imgSrc = a.url ?? a.content;
           return (
-            <div key={a.id} className={`relative ${thumbSize} rounded-lg overflow-hidden border border-gray-200 bg-gray-100 flex-none`}>
+            <div
+              key={a.id}
+              className={`relative ${thumbSize} rounded-lg overflow-hidden border border-gray-200 bg-gray-100 flex-none ${readonly && imgSrc ? "cursor-pointer hover:opacity-90 transition-opacity" : ""}`}
+              onClick={readonly && imgSrc ? () => window.open(imgSrc, "_blank", "noopener,noreferrer") : undefined}
+              title={readonly ? a.name : undefined}
+            >
               <img
-                src={a.content}
+                src={imgSrc}
                 alt={a.name}
                 className="w-full h-full object-cover"
                 draggable={false}
               />
-              {!readonly && (
+              {a.uploading && (
+                <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                  <Loader2 size={16} className="text-white animate-spin" />
+                </div>
+              )}
+              {!readonly && !a.uploading && (
                 <button
                   onClick={() => onRemove(a.id)}
                   className="absolute top-0.5 right-0.5 z-20 w-4 h-4 flex items-center justify-center bg-black/50 hover:bg-black/70 rounded-full text-white transition-colors cursor-pointer"
@@ -129,21 +140,35 @@ export function AttachmentPreviews({
         }
 
         // Non-image file card
+        const canOpen = readonly && !!a.url;
         return (
-          <div key={a.id} className={`relative flex items-center gap-2 ${cardHeight} rounded-lg border border-gray-200 bg-white overflow-hidden flex-none ${compact ? "max-w-[160px]" : "max-w-[200px]"}`}>
+          <div
+            key={a.id}
+            className={`relative flex items-center gap-2 ${cardHeight} rounded-lg border border-gray-200 bg-white overflow-hidden flex-none ${compact ? "max-w-[160px]" : "max-w-[200px]"} ${canOpen ? "cursor-pointer hover:border-gray-400 transition-colors" : ""}`}
+            onClick={canOpen ? () => window.open(a.url!, "_blank", "noopener,noreferrer") : undefined}
+            title={canOpen ? a.name : undefined}
+          >
             {/* Icon area */}
             <div className={`${compact ? "w-12 h-12" : "w-14 h-14"} flex-none overflow-hidden`}>
               <FileIcon fileType={a.fileType} />
             </div>
             {/* Info */}
-            <div className={`flex-1 min-w-0 ${readonly ? "pr-2" : "pr-6"}`}>
+            <div className={`flex-1 min-w-0 ${readonly || a.uploading ? "pr-2" : "pr-6"}`}>
               <p className="text-xs font-medium text-gray-800 truncate leading-tight">{a.name}</p>
               <div className="flex items-center gap-1 mt-0.5">
-                <FileTypeLabel fileType={a.fileType} />
-                <span className="text-[10px] text-gray-400">{formatSize(a.size)}</span>
+                {a.uploading ? (
+                  <span className="text-[10px] text-gray-400 flex items-center gap-0.5">
+                    <Loader2 size={10} className="animate-spin" /> uploading…
+                  </span>
+                ) : (
+                  <>
+                    <FileTypeLabel fileType={a.fileType} />
+                    <span className="text-[10px] text-gray-400">{formatSize(a.size)}</span>
+                  </>
+                )}
               </div>
             </div>
-            {!readonly && (
+            {!readonly && !a.uploading && (
               <button
                 onClick={() => onRemove(a.id)}
                 className="absolute top-1 right-1 z-20 w-4 h-4 flex items-center justify-center bg-gray-200 hover:bg-gray-300 rounded-full text-gray-600 transition-colors cursor-pointer"
