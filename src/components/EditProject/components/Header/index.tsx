@@ -7,6 +7,8 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { RemoteCollaborator } from "../../hooks/useCollaborationAwareness";
 import ProjectDBConnectionModal from "@/components/ProjectDBConnectionModal";
+import SQLGenerator from "@/components/SQLGenerator";
+import { introspectDbConnection, useProjectDbConnections } from "@/api/db-connections/client";
 
 type SchemaType = 'conceptual' | 'logical' | 'physical';
 
@@ -45,6 +47,18 @@ type HeaderProps = {
     projectId?: string;
 };
 
+type SQLGeneratorTable = {
+    id: string;
+    name: string;
+    columns: {
+        id: string;
+        name: string;
+        type: string;
+        isPrimaryKey?: boolean;
+        isNullable?: boolean;
+    }[];
+};
+
 const Header: React.FC<HeaderProps> = ({
     diagramName,
     isEditingDiagramName,
@@ -76,12 +90,54 @@ const Header: React.FC<HeaderProps> = ({
     const inputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
     const [isDBConnectionOpen, setIsDBConnectionOpen] = useState(false);
+    const [connectedDbId, setConnectedDbId] = useState<string | null>(null);
+    const [sqlGeneratorTables, setSqlGeneratorTables] = useState<SQLGeneratorTable[]>([]);
+    const [loadingTables, setLoadingTables] = useState(false);
+    const { data: projectConns } = useProjectDbConnections(projectId ?? null);
+
+    // Fetch real tables from connected database
+    const handleDBConnectionClose = useCallback(async () => {
+        setIsDBConnectionOpen(false);
+        // Get project connections to fetch real tables
+        try {
+            setLoadingTables(true);
+            if (projectConns && projectConns.length > 0) {
+                const firstConn = projectConns[0];
+                setConnectedDbId(firstConn.id);
+
+                // Fetch introspected tables
+                const introspectedTables = await introspectDbConnection(firstConn.id);
+                const formattedTables: SQLGeneratorTable[] = introspectedTables.map((table) => ({
+                    id: table.name,
+                    name: table.name,
+                    columns: table.columns.map((col) => ({
+                        id: col.name,
+                        name: col.name,
+                        type: col.dataType,
+                        isPrimaryKey: col.isPrimaryKey,
+                        isNullable: col.nullable,
+                    })),
+                }));
+                setSqlGeneratorTables(formattedTables);
+            }
+        } catch (error) {
+            console.error('Failed to fetch tables:', error);
+        } finally {
+            setLoadingTables(false);
+        }
+    }, [projectConns]);
 
     useEffect(() => {
         if (isEditingDiagramName && inputRef.current) {
             inputRef.current.focus();
         }
     }, [isEditingDiagramName]);
+
+    useEffect(() => {
+        if (projectConns && projectConns.length > 0) {
+            handleDBConnectionClose();
+        }
+    }, [projectConns, handleDBConnectionClose]);
 
     const collaboratorInitials = useCallback((user: RemoteCollaborator) => {
         const source = user.name ?? user.sessionId ?? "";
@@ -338,10 +394,25 @@ const Header: React.FC<HeaderProps> = ({
                 )}
             </div>
         </div>
+        {connectedDbId && (
+            <div className="mt-4 px-4 pb-4">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                    <h2 className="text-base font-semibold mb-3">SQL Query Generator</h2>
+                    <SQLGenerator
+                        tables={sqlGeneratorTables}
+                        projectId={projectId ?? ''}
+                        connId={connectedDbId}
+                        onDatabaseConfigRequired={() => setIsDBConnectionOpen(true)}
+                        isLoading={loadingTables}
+                        hasConnection={connectedDbId !== null}
+                    />
+                </div>
+            </div>
+        )}
             {projectId && (
                 <ProjectDBConnectionModal
                     open={isDBConnectionOpen}
-                    onClose={() => setIsDBConnectionOpen(false)}
+                    onClose={handleDBConnectionClose}
                     projectId={projectId}
                 />
             )}

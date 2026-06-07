@@ -10,6 +10,7 @@ import {
     PROXY_DB_CONNECTION_PLAIN_PARAMS,
     PROXY_DB_CONNECTION_SCHEMAS,
     PROXY_DB_CONNECTION_INTROSPECT,
+    PROXY_DB_CONNECTION_EXECUTE,
     PROXY_PROJECT_DB_CONNECTIONS,
     PROXY_PROJECT_DB_CONNECTION_LINK,
     PROXY_PROJECT_DB_CONNECTION_UNLINK,
@@ -25,6 +26,15 @@ interface TestResult {
     success: boolean;
     message: string;
     latencyMs?: number;
+}
+
+export interface QueryResultDto {
+    success: boolean;
+    rowCount: number;
+    columns: string[];
+    rows: Record<string, unknown>[];
+    executionTimeMs: number;
+    message?: string;
 }
 
 export interface IntrospectedColumn {
@@ -196,6 +206,24 @@ export async function introspectDbConnection(
         ? `${PROXY_DB_CONNECTION_INTROSPECT(connId)}?schema=${encodeURIComponent(schema)}`
         : PROXY_DB_CONNECTION_INTROSPECT(connId);
     return apiPost<IntrospectedTable[], Record<string, never>>(url, {});
+}
+
+// ─── Execute Query ──────────────────────────────────────
+
+export async function executeQueryDbConnection(
+    connId: string,
+    query: string,
+    parameters?: unknown[],
+    options?: { timeoutMs?: number; resultLimit?: number },
+): Promise<QueryResultDto> {
+    return apiPost<QueryResultDto, { query: string; parameters?: unknown[]; timeoutMs?: number; resultLimit?: number }>(
+        PROXY_DB_CONNECTION_EXECUTE(connId),
+        {
+            query,
+            parameters,
+            ...options,
+        },
+    );
 }
 
 // ─── Project linking ────────────────────────────────────
