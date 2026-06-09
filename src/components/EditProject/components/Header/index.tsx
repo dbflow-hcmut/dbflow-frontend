@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { Avatar, Button, Tooltip, Dropdown } from "antd";
-import { Download, MessageCircleMore, History, Send, ArrowRightLeft, DatabaseZap, MessageSquareWarning } from "lucide-react";
+import { Download, MessageCircleMore, History, Send, ArrowRightLeft, DatabaseZap, MessageSquareWarning, Layers } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { RemoteCollaborator } from "../../hooks/useCollaborationAwareness";
@@ -32,6 +32,8 @@ type HeaderProps = {
     linterOpen?: boolean;
     onToggleLinterPanel?: () => void;
     linterCounts?: { error: number; warning: number; info: number };
+    normalizationOpen?: boolean;
+    onToggleNormalizationPanel?: () => void;
 };
 
 const Header: React.FC<HeaderProps> = ({
@@ -57,6 +59,8 @@ const Header: React.FC<HeaderProps> = ({
     linterOpen = false,
     onToggleLinterPanel,
     linterCounts,
+    normalizationOpen = false,
+    onToggleNormalizationPanel,
 }) => {
     const inputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
@@ -269,6 +273,17 @@ const Header: React.FC<HeaderProps> = ({
                         )}
                     </div>
                 </Tooltip>
+                {onToggleNormalizationPanel && (
+                    <Tooltip title="Normalization Analysis" placement="bottom">
+                        <Button
+                            type={normalizationOpen ? 'primary' : 'text'}
+                            className="!px-2"
+                            onClick={onToggleNormalizationPanel}
+                        >
+                            <Layers size={18} />
+                        </Button>
+                    </Tooltip>
+                )}
                 {schemaType && convertItems.length > 0 && (
                     <Dropdown
                         menu={{ items: convertItems }}

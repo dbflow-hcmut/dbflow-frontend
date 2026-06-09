@@ -2,7 +2,6 @@
   "$schema": "https://json-schema.org/draft/2019-09/schema",
   "$id": "https://example.com/conceptual/diagram.schema.json",
   "title": "Conceptual ER/EER Diagram",
-  "description": "Matches StoredDiagramNode / StoredDiagramEdge in conceptual-diagram.builder.ts",
   "type": "object",
   "additionalProperties": false,
   "required": ["diagram"],
@@ -36,10 +35,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["x", "y"],
-      "properties": {
-        "x": { "type": "number" },
-        "y": { "type": "number" }
-      }
+      "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
     },
 
     "size": {
@@ -53,7 +49,6 @@
     },
 
     "node": {
-      "description": "SchemaStoredDiagramNode — a visual node on the canvas.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "type", "position", "size"],
@@ -71,46 +66,12 @@
         "zIndex": { "type": "integer", "minimum": 0 },
 
         "style": {
-          "description": "Visual styling. May include a 'meta' object for entity/relationship/attribute rendering hints.",
           "type": "object",
           "additionalProperties": true,
           "properties": {
             "class": { "type": "string" },
             "stroke": { "type": ["string", "null"] },
-            "fill": { "type": ["string", "null"] },
-            "meta": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "entity": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "variant": { "type": "string", "enum": ["single", "double", "dashed"] },
-                    "fields": { "type": "array" }
-                  }
-                },
-                "relationship": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "variant": { "type": "string", "enum": ["single", "double", "dashed"] },
-                    "cardinalities": {
-                      "type": "object",
-                      "additionalProperties": { "type": "string" }
-                    }
-                  }
-                },
-                "attribute": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "variant": { "type": "string", "enum": ["single", "double", "dashed"] },
-                    "isKey": { "type": "boolean" }
-                  }
-                }
-              }
-            }
+            "fill": { "type": ["string", "null"] }
           }
         },
 
@@ -199,7 +160,6 @@
     },
 
     "edge": {
-      "description": "StoredDiagramEdge — a connection between two nodes.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "type", "from", "to"],

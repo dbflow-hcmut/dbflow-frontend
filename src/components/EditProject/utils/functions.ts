@@ -1,8 +1,8 @@
 import React from "react";
 import { Node } from "reactflow";
 import type { EntityData, RelationshipData, AttributeData, NodeData } from "../index";
-import type { RelationTableData, RelationColumn, TableIndex } from "@/components/erds-notations/relation-table";
-import type { LogicalTableData } from "@/components/erds-notations/logical-table";
+import type { RelationTableData, RelationColumn, TableIndex, PhysicalFD } from "@/components/erds-notations/relation-table";
+import type { LogicalTableData, LogicalFD } from "@/components/erds-notations/logical-table";
 import type { MutateModelFn } from "../hooks/useConceptualCollaboration";
 import type { MutateLogicalModelFn } from "../hooks/useLogicalCollaboration";
 import type { MutatePhysicalModelFn } from "../hooks/usePhysicalCollaboration";
@@ -574,7 +574,7 @@ export const createUpdateFunctions = (
 
     const updateLogicalTableAttribute = (
         columnIndex: number,
-        updates: Partial<{ name: string; isKey: boolean }>
+        updates: Partial<{ name: string; isKey: boolean; isCandidateKey: boolean }>
     ) => {
         if (!selectedNode || selectedNode.type !== 'logical-table') return;
         const tableData = selectedNode.data as LogicalTableData;
@@ -617,6 +617,168 @@ export const createUpdateFunctions = (
         );
     };
 
+    // ── Functional Dependency CRUD (Logical) ───────────────────────────
+
+    const addLogicalFD = () => {
+        if (!selectedNode || selectedNode.type !== 'logical-table') return;
+        const tableData = selectedNode.data as LogicalTableData;
+        const newFD: LogicalFD = {
+            id: `fd_${Date.now().toString(36)}`,
+            left: [],
+            right: [],
+        };
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            functionalDependencies: [...(tableData.functionalDependencies || []), newFD],
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
+    const removeLogicalFD = (fdId: string) => {
+        if (!selectedNode || selectedNode.type !== 'logical-table') return;
+        const tableData = selectedNode.data as LogicalTableData;
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            functionalDependencies: (tableData.functionalDependencies || []).filter(fd => fd.id !== fdId),
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
+    const updateLogicalFD = (fdId: string, updates: Partial<LogicalFD>) => {
+        if (!selectedNode || selectedNode.type !== 'logical-table') return;
+        const tableData = selectedNode.data as LogicalTableData;
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            functionalDependencies: (tableData.functionalDependencies || []).map(fd =>
+                                fd.id === fdId ? { ...fd, ...updates } : fd
+                            ),
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
+    const toggleLogicalFDDisplay = () => {
+        if (!selectedNode || selectedNode.type !== 'logical-table') return;
+        const tableData = selectedNode.data as LogicalTableData;
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            showFDs: !tableData.showFDs,
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
+    // ── Functional Dependency CRUD (Physical / Relation) ─────────────
+
+    const addPhysicalFD = () => {
+        if (!selectedNode || selectedNode.type !== 'relation') return;
+        const tableData = selectedNode.data as RelationTableData;
+        const newFD: PhysicalFD = {
+            id: `fd_${Date.now().toString(36)}`,
+            left: [],
+            right: [],
+        };
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            functionalDependencies: [...(tableData.functionalDependencies || []), newFD],
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
+    const removePhysicalFD = (fdId: string) => {
+        if (!selectedNode || selectedNode.type !== 'relation') return;
+        const tableData = selectedNode.data as RelationTableData;
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            functionalDependencies: (tableData.functionalDependencies || []).filter(fd => fd.id !== fdId),
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
+    const updatePhysicalFD = (fdId: string, updates: Partial<PhysicalFD>) => {
+        if (!selectedNode || selectedNode.type !== 'relation') return;
+        const tableData = selectedNode.data as RelationTableData;
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            functionalDependencies: (tableData.functionalDependencies || []).map(fd =>
+                                fd.id === fdId ? { ...fd, ...updates } : fd
+                            ),
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
+    const togglePhysicalFDDisplay = () => {
+        if (!selectedNode || selectedNode.type !== 'relation') return;
+        const tableData = selectedNode.data as RelationTableData;
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            showFDs: !tableData.showFDs,
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
     return {
         updateNodeName,
         updateAttributeKey,
@@ -630,5 +792,13 @@ export const createUpdateFunctions = (
         removeLogicalTableAttribute,
         updateLogicalTableAttribute,
         reorderLogicalTableAttributes,
+        addLogicalFD,
+        removeLogicalFD,
+        updateLogicalFD,
+        toggleLogicalFDDisplay,
+        addPhysicalFD,
+        removePhysicalFD,
+        updatePhysicalFD,
+        togglePhysicalFDDisplay,
     };
 };

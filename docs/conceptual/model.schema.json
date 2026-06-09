@@ -2,7 +2,6 @@
   "$schema": "https://json-schema.org/draft/2019-09/schema",
   "$id": "https://example.com/conceptual/model.schema.json",
   "title": "Conceptual ER/EER Model",
-  "description": "Matches the ConceptualModelPayload type in conceptual-model.builder.ts",
   "type": "object",
   "required": ["model", "entities", "relationships"],
   "additionalProperties": false,
@@ -41,24 +40,23 @@
       "items": { "$ref": "#/$defs/category" }
     },
 
-    "constraints": {
-      "description": "Reserved for future use.",
-      "type": "array"
-    },
-
     "notes": {
       "description": "General notes about the model.",
       "type": "string"
     },
 
-    "tags": { "type": "array", "items": { "type": "string" } }
+    "tags": { "type": "array", "items": { "type": "string" } },
+
+    "constraints": {
+      "description": "Reserved for future use.",
+      "type": "array"
+    }
   },
 
   "$defs": {
     "entity": {
-      "description": "ModelEntity — strong or weak entity with attributes.",
       "type": "object",
-      "required": ["id", "name", "attributes"],
+      "required": ["id", "name", "kind", "attributes"],
       "additionalProperties": false,
       "properties": {
         "id": { "type": "string", "pattern": "^cid_" },
@@ -81,7 +79,7 @@
     },
 
     "attribute": {
-      "description": "ModelAttribute — entity or relationship attribute.",
+      "description": "Entity or relationship attribute.",
       "type": "object",
       "required": ["id", "name", "kind", "isKey"],
       "additionalProperties": false,
@@ -100,7 +98,7 @@
         "semantics": { "type": "array", "items": { "type": "string" } },
 
         "components": {
-          "description": "Child attributes when kind = composite or complex.",
+          "description": "For composite/complex attributes.",
           "type": "array",
           "items": {
             "type": "object",
@@ -108,23 +106,24 @@
             "additionalProperties": false,
             "properties": {
               "id": { "type": "string", "pattern": "^cid_" },
+
               "name": { "type": "string" },
-              "kind": { "type": "string", "enum": ["simple"] }
+
+              "kind": {
+                "type": "string",
+                "enum": ["simple"]
+              }
             }
           }
         },
 
-        "derivation": {
-          "description": "Derivation formula when kind = derived.",
-          "type": "string"
-        },
+        "derivation": { "type": "string" },
 
         "notes": { "type": "string" }
       }
     },
 
     "relationship": {
-      "description": "ModelRelationship — association or identifying relationship.",
       "type": "object",
       "required": ["id", "name", "type", "ends"],
       "additionalProperties": false,
@@ -160,7 +159,6 @@
     },
 
     "relEnd": {
-      "description": "RelationshipEnd — one participating entity in a relationship.",
       "type": "object",
       "required": ["entityId"],
       "additionalProperties": false,
@@ -176,7 +174,7 @@
     },
 
     "generalization": {
-      "description": "ModelGeneralization — Subtype/Supertype (is-a).",
+      "description": "Subtype/Supertype (is-a).",
       "type": "object",
       "required": ["id", "parentEntityId", "childEntityIds", "constraints"],
       "additionalProperties": false,
@@ -198,24 +196,28 @@
               "type": "string",
               "enum": ["disjoint", "overlap"]
             },
-            "completeness": {
-              "type": "string",
-              "enum": ["total", "partial"]
-            }
+            "completeness": { "type": "string", "enum": ["total", "partial"] }
           }
         }
       }
     },
 
     "category": {
-      "description": "ModelCategory — union type (category).",
       "type": "object",
-      "required": ["id", "categoryEntityId", "superclassEntityIds", "completeness"],
+      "required": [
+        "id",
+        "categoryEntityId",
+        "superclassEntityIds",
+        "completeness"
+      ],
       "additionalProperties": false,
       "properties": {
         "id": { "type": "string", "pattern": "^cid_" },
 
-        "categoryEntityId": { "type": "string", "pattern": "^cid_" },
+        "categoryEntityId": {
+          "type": "string",
+          "pattern": "^cid_"
+        },
 
         "superclassEntityIds": {
           "type": "array",
