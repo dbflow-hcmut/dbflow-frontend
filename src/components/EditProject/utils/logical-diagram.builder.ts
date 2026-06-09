@@ -149,13 +149,13 @@ const ensureStyle = (node: StoredLogicalNode) =>
 
 const mapLogicalTableNode = (node: StoredLogicalNode): Node<LogicalTableData> => {
     const dataSource = node.data as LogicalTableData | undefined;
-    
+
     // Prefer dataSource columns (full LogicalColumn data), otherwise use stored columns
     const columns = dataSource?.columns ?? (node.columns?.map(col => ({
         name: col.label || col.columnId,
         isKey: col.decorations?.pk || false,
     })) || []);
-    
+
     return {
         id: node.tableId ?? node.id,
         type: "logical-table",
@@ -163,6 +163,8 @@ const mapLogicalTableNode = (node: StoredLogicalNode): Node<LogicalTableData> =>
         data: {
             name: node.name ?? dataSource?.name ?? node.tableId ?? node.id,
             columns,
+            functionalDependencies: dataSource?.functionalDependencies,
+            showFDs: dataSource?.showFDs,
         },
         style: ensureStyle(node),
         zIndex: node.zIndex,
@@ -218,7 +220,7 @@ export const mapStoredNodesToReactNodes = (storedNodes: StoredLogicalNode[] = []
 };
 
 const mapReactLogicalTableNode = (node: Node<LogicalTableData>): StoredLogicalNode => {
-    const { name, columns = [] } = node.data;
+    const { name, columns = [], functionalDependencies, showFDs } = node.data;
 
     // Map columns to stored format (following docs schema)
     const storedColumns: StoredLogicalDiagramNode["columns"] = columns.map((col, idx) => ({
@@ -226,6 +228,7 @@ const mapReactLogicalTableNode = (node: Node<LogicalTableData>): StoredLogicalNo
         label: col.name,
         decorations: {
             pk: col.isKey ? true : undefined,
+            ck: col.isCandidateKey ? true : undefined,
             underline: col.isKey ? true : undefined,
         },
     }));
@@ -244,6 +247,8 @@ const mapReactLogicalTableNode = (node: Node<LogicalTableData>): StoredLogicalNo
         data: {
             name,
             columns,
+            ...(functionalDependencies?.length ? { functionalDependencies } : {}),
+            ...(showFDs != null ? { showFDs } : {}),
         } as LogicalTableData,
     };
 };

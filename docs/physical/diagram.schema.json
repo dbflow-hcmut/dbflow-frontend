@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://example.com/physical/diagram.schema.json",
+  "title": "Physical Relational Diagram",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["diagram"],
+
+  "properties": {
+    "diagram": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "nodes", "edges"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^pid_" },
+        "name": { "type": "string" },
+
+        "viewport": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "zoom": { "type": "number", "minimum": 0.1, "maximum": 5.0 },
+            "gridSize": { "type": "integer", "minimum": 2 },
+            "snapToGrid": { "type": "boolean" }
+          }
+        },
+
+        "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
+        "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } }
+      }
+    }
+  },
+
+  "$defs": {
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+    },
+
+    "size": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["w", "h"],
+      "properties": {
+        "w": { "type": "number", "minimum": 20 },
+        "h": { "type": "number", "minimum": 20 }
+      }
+    },
+
+    "style": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "class": { "type": "string" },
+        "stroke": { "type": ["string", "null"] },
+        "fill": { "type": ["string", "null"] },
+        "fontSize": { "type": "number" }
+      }
+    },
+
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "position", "size"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^pid_" },
+        "type": { "type": "string", "enum": ["table", "note", "sticky-note", "text-label", "drawing-path"] },
+        "position": { "$ref": "#/$defs/point" },
+        "size": { "$ref": "#/$defs/size" },
+        "zIndex": { "type": "integer", "minimum": 0 },
+        "style": { "$ref": "#/$defs/style" },
+
+        "name": { "type": "string" },
+
+        "tableId": {
+          "type": "string",
+          "pattern": "^pid_"
+        },
+
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["columnId"],
+            "properties": {
+              "columnId": { "type": "string", "pattern": "^pid_" },
+              "label": { "type": "string" },
+              "decorations": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "pk": { "type": "boolean", "default": false },
+                  "fk": { "type": "boolean", "default": false },
+                  "underline": { "type": "boolean", "default": false },
+                  "italic": { "type": "boolean", "default": false }
+                }
+              }
+            }
+          }
+        },
+
+        "text": { "type": "string" }
+      },
+
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "table" } } },
+          "then": { "required": ["tableId"] }
+        }
+      ]
+    },
+
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "source", "target"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^pid_" },
+        "type": { "type": "string", "enum": ["fk", "noteLink"] },
+
+        "source": { "type": "string", "pattern": "^pid_" },
+        "target": { "type": "string", "pattern": "^pid_" },
+
+        "points": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/point" }
+        },
+
+        "style": { "$ref": "#/$defs/style" },
+
+        "fkRef": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tableId": { "type": "string", "pattern": "^pid_" },
+            "foreignKeyIndex": { "type": "integer", "minimum": 0 },
+            "sourceColumnName": { "type": "string" },
+            "targetColumnName": { "type": "string" },
+            "onDelete": {
+              "type": "string",
+              "enum": ["NO ACTION", "CASCADE", "SET NULL", "SET DEFAULT", "RESTRICT"]
+            },
+            "onUpdate": {
+              "type": "string",
+              "enum": ["NO ACTION", "CASCADE", "SET NULL", "SET DEFAULT", "RESTRICT"]
+            }
+          }
+        },
+
+        "labels": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "text": { "type": "string" },
+            "position": { "$ref": "#/$defs/point" }
+          }
+        }
+      },
+
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "fk" } } },
+          "then": { "required": ["fkRef"] }
+        }
+      ]
+    }
+  }
+}

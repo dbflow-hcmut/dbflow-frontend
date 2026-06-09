@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from "react";
-import { Input, Checkbox, Select, Button } from "antd";
+import { Input, Checkbox, Select, Button, Switch } from "antd";
 import { X, Plus, Trash2, GripVertical } from "lucide-react";
 import { Node, Edge } from "reactflow";
 import type { AttributeData, NodeData, RelationshipData, EntityData } from "../../index";
-import type { RelationTableData, RelationColumn, TableIndex } from "@/components/erds-notations/relation-table";
-import type { LogicalTableData } from "@/components/erds-notations/logical-table";
+import type { RelationTableData, RelationColumn, TableIndex, PhysicalFD } from "@/components/erds-notations/relation-table";
+import type { LogicalTableData, LogicalFD } from "@/components/erds-notations/logical-table";
 import type { ErdEdgeData } from "../../utils/functions";
 import { GENERIC_DATA_TYPES, type FKAction, type DataTypeOption } from "../../utils/dbms-config";
 
@@ -40,11 +40,21 @@ type PropertiesPanelProps = {
     onRemoveLogicalTableAttribute?: (attributeIndex: number) => void;
     onUpdateLogicalTableAttribute?: (
         attributeIndex: number,
-        updates: Partial<{ name: string; isKey: boolean }>
+        updates: Partial<{ name: string; isKey: boolean; isCandidateKey: boolean }>
     ) => void;
     onReorderLogicalTableAttributes?: (fromIndex: number, toIndex: number) => void;
     onUpdateLogicalEdgeCardinality?: (side: 'source' | 'target', value: '1' | 'N') => void;
     onUpdatePhysicalEdgeCardinality?: (side: 'source' | 'target', value: '1' | 'N') => void;
+    // Functional dependency callbacks (logical)
+    onAddLogicalFD?: () => void;
+    onRemoveLogicalFD?: (fdId: string) => void;
+    onUpdateLogicalFD?: (fdId: string, updates: Partial<LogicalFD>) => void;
+    onToggleLogicalFDDisplay?: () => void;
+    // Functional dependency callbacks (physical)
+    onAddPhysicalFD?: () => void;
+    onRemovePhysicalFD?: (fdId: string) => void;
+    onUpdatePhysicalFD?: (fdId: string, updates: Partial<PhysicalFD>) => void;
+    onTogglePhysicalFDDisplay?: () => void;
 };
 
 const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
@@ -78,6 +88,14 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     onReorderLogicalTableAttributes,
     onUpdateLogicalEdgeCardinality,
     onUpdatePhysicalEdgeCardinality,
+    onAddLogicalFD,
+    onRemoveLogicalFD,
+    onUpdateLogicalFD,
+    onToggleLogicalFDDisplay,
+    onAddPhysicalFD,
+    onRemovePhysicalFD,
+    onUpdatePhysicalFD,
+    onTogglePhysicalFDDisplay,
 }) => {
     const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
     const connectedEnds = useMemo(() => {
@@ -241,14 +259,23 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                                             />
                                                         )}
                                                     </div>
-                                                    <div className="flex items-center gap-2 pl-6">
+                                                    <div className="flex items-center gap-3 pl-6">
                                                         <Checkbox
                                                             checked={col.isKey || false}
                                                             onChange={(e) =>
                                                                 onUpdateLogicalTableAttribute?.(idx, { isKey: e.target.checked })
                                                             }
                                                         >
-                                                            Is Key
+                                                            <span className="text-xs">PK</span>
+                                                        </Checkbox>
+                                                        <Checkbox
+                                                            checked={col.isCandidateKey || false}
+                                                            onChange={(e) =>
+                                                                onUpdateLogicalTableAttribute?.(idx, { isCandidateKey: e.target.checked })
+                                                            }
+                                                            disabled={col.isKey || false}
+                                                        >
+                                                            <span className="text-xs">CK</span>
                                                         </Checkbox>
                                                     </div>
                                                 </div>
@@ -256,6 +283,95 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                             {!(selectedNode.data as LogicalTableData).columns?.length && (
                                                 <div className="text-sm text-gray-500 py-2 text-center">
                                                     No columns. Click &quot;Add Column&quot; to add one.
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Functional Dependencies Section (Logical) */}
+                                    <div>
+                                        <div className="flex items-center justify-between mb-2">
+                                            <label className="block text-sm font-medium">
+                                                Functional Dependencies
+                                            </label>
+                                            <div className="flex items-center gap-1">
+                                                <Switch
+                                                    size="small"
+                                                    checked={(selectedNode.data as LogicalTableData).showFDs ?? false}
+                                                    onChange={() => onToggleLogicalFDDisplay?.()}
+                                                    title="Show on node"
+                                                />
+                                                {onAddLogicalFD && (
+                                                    <Button
+                                                        type="default"
+                                                        size="small"
+                                                        icon={<Plus size={14} />}
+                                                        onClick={onAddLogicalFD}
+                                                        className="h-7!"
+                                                    >
+                                                        Add
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-col gap-2">
+                                            {((selectedNode.data as LogicalTableData).functionalDependencies ?? []).map((fd) => {
+                                                const colOptions = ((selectedNode.data as LogicalTableData).columns ?? []).map(c => ({
+                                                    label: c.name,
+                                                    value: c.name,
+                                                }));
+                                                return (
+                                                    <div key={fd.id} className="border border-gray-200 rounded p-2">
+                                                        <div className="flex items-center justify-between mb-1.5">
+                                                            <span className="text-xs font-medium text-gray-500">
+                                                                {fd.left.length > 0 ? fd.left.join(', ') : '?'}{' → '}{fd.right.length > 0 ? fd.right.join(', ') : '?'}
+                                                            </span>
+                                                            {onRemoveLogicalFD && (
+                                                                <Button
+                                                                    type="text"
+                                                                    danger
+                                                                    size="small"
+                                                                    icon={<Trash2 size={12} />}
+                                                                    onClick={() => onRemoveLogicalFD(fd.id)}
+                                                                    className="flex-shrink-0 !h-5 !w-5 !p-0"
+                                                                />
+                                                            )}
+                                                        </div>
+                                                        <div className="space-y-1.5">
+                                                            <div>
+                                                                <div className="text-xs text-gray-400 mb-0.5">Determinant (left)</div>
+                                                                <Select
+                                                                    mode="multiple"
+                                                                    size="small"
+                                                                    value={fd.left}
+                                                                    onChange={(vals) => onUpdateLogicalFD?.(fd.id, { left: vals })}
+                                                                    placeholder="Select columns..."
+                                                                    style={{ width: '100%' }}
+                                                                    options={colOptions}
+                                                                    maxTagCount="responsive"
+                                                                />
+                                                            </div>
+                                                            <div className="text-center text-gray-300 text-xs">↓ determines</div>
+                                                            <div>
+                                                                <div className="text-xs text-gray-400 mb-0.5">Dependent (right)</div>
+                                                                <Select
+                                                                    mode="multiple"
+                                                                    size="small"
+                                                                    value={fd.right}
+                                                                    onChange={(vals) => onUpdateLogicalFD?.(fd.id, { right: vals })}
+                                                                    placeholder="Select columns..."
+                                                                    style={{ width: '100%' }}
+                                                                    options={colOptions}
+                                                                    maxTagCount="responsive"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                            {!((selectedNode.data as LogicalTableData).functionalDependencies ?? []).length && (
+                                                <div className="text-xs text-gray-400 py-1 text-center">
+                                                    No FDs defined
                                                 </div>
                                             )}
                                         </div>
@@ -342,6 +458,15 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                                             }
                                                         >
                                                             PK
+                                                        </Checkbox>
+                                                        <Checkbox
+                                                            checked={col.isCandidateKey || false}
+                                                            onChange={(e) =>
+                                                                onUpdateRelationTableColumn?.(idx, { isCandidateKey: e.target.checked })
+                                                            }
+                                                            disabled={col.isPrimary || false}
+                                                        >
+                                                            CK
                                                         </Checkbox>
                                                         <Checkbox
                                                             checked={col.isNullable !== false}
@@ -504,6 +629,95 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                             {!(selectedNode.data as RelationTableData).indexes?.length && (
                                                 <div className="text-sm text-gray-500 py-1 text-center">
                                                     No indexes
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Functional Dependencies Section (Physical) */}
+                                    <div>
+                                        <div className="flex items-center justify-between mb-2">
+                                            <label className="block text-sm font-medium">
+                                                Functional Dependencies
+                                            </label>
+                                            <div className="flex items-center gap-1">
+                                                <Switch
+                                                    size="small"
+                                                    checked={(selectedNode.data as RelationTableData).showFDs ?? false}
+                                                    onChange={() => onTogglePhysicalFDDisplay?.()}
+                                                    title="Show on node"
+                                                />
+                                                {onAddPhysicalFD && (
+                                                    <Button
+                                                        type="default"
+                                                        size="small"
+                                                        icon={<Plus size={14} />}
+                                                        onClick={onAddPhysicalFD}
+                                                        className="h-7!"
+                                                    >
+                                                        Add
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-col gap-2">
+                                            {((selectedNode.data as RelationTableData).functionalDependencies ?? []).map((fd) => {
+                                                const colOptions = ((selectedNode.data as RelationTableData).columns ?? []).map(c => ({
+                                                    label: c.name,
+                                                    value: c.name,
+                                                }));
+                                                return (
+                                                    <div key={fd.id} className="border border-gray-200 rounded p-2">
+                                                        <div className="flex items-center justify-between mb-1.5">
+                                                            <span className="text-xs font-medium text-gray-500">
+                                                                {fd.left.length > 0 ? fd.left.join(', ') : '?'}{' → '}{fd.right.length > 0 ? fd.right.join(', ') : '?'}
+                                                            </span>
+                                                            {onRemovePhysicalFD && (
+                                                                <Button
+                                                                    type="text"
+                                                                    danger
+                                                                    size="small"
+                                                                    icon={<Trash2 size={12} />}
+                                                                    onClick={() => onRemovePhysicalFD(fd.id)}
+                                                                    className="flex-shrink-0 !h-5 !w-5 !p-0"
+                                                                />
+                                                            )}
+                                                        </div>
+                                                        <div className="space-y-1.5">
+                                                            <div>
+                                                                <div className="text-xs text-gray-400 mb-0.5">Determinant (left)</div>
+                                                                <Select
+                                                                    mode="multiple"
+                                                                    size="small"
+                                                                    value={fd.left}
+                                                                    onChange={(vals) => onUpdatePhysicalFD?.(fd.id, { left: vals })}
+                                                                    placeholder="Select columns..."
+                                                                    style={{ width: '100%' }}
+                                                                    options={colOptions}
+                                                                    maxTagCount="responsive"
+                                                                />
+                                                            </div>
+                                                            <div className="text-center text-gray-300 text-xs">↓ determines</div>
+                                                            <div>
+                                                                <div className="text-xs text-gray-400 mb-0.5">Dependent (right)</div>
+                                                                <Select
+                                                                    mode="multiple"
+                                                                    size="small"
+                                                                    value={fd.right}
+                                                                    onChange={(vals) => onUpdatePhysicalFD?.(fd.id, { right: vals })}
+                                                                    placeholder="Select columns..."
+                                                                    style={{ width: '100%' }}
+                                                                    options={colOptions}
+                                                                    maxTagCount="responsive"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                            {!((selectedNode.data as RelationTableData).functionalDependencies ?? []).length && (
+                                                <div className="text-xs text-gray-400 py-1 text-center">
+                                                    No FDs defined
                                                 </div>
                                             )}
                                         </div>

@@ -490,7 +490,7 @@ export const usePhysicalCollaboration = ({
                 edgesRef.current,
                 nodesRef.current,
             );
-            const current =
+            const builtFromDiagram =
                 existingStoredNodesForModel.length > 0
                     ? buildPhysicalModel({
                           storedNodes: existingStoredNodesForModel,
@@ -500,6 +500,22 @@ export const usePhysicalCollaboration = ({
                       })
                     : (modelDataRef.current ??
                       createEmptyPhysicalModel(schema?.id ?? undefined, schema?.name ?? undefined));
+
+            // Preserve model-level metadata (dbms, description, notes) that
+            // buildPhysicalModel cannot reconstruct from diagram nodes.
+            const savedMeta = modelDataRef.current?.model;
+            const current: PhysicalModelPayload = savedMeta
+                ? {
+                      ...builtFromDiagram,
+                      model: {
+                          ...builtFromDiagram.model,
+                          dbms: savedMeta.dbms ?? builtFromDiagram.model.dbms,
+                          description: savedMeta.description ?? builtFromDiagram.model.description,
+                          notes: savedMeta.notes ?? builtFromDiagram.model.notes,
+                      },
+                  }
+                : builtFromDiagram;
+
             const next = mutator(current);
 
             const { nodes: storedNodes, edges: storedEdges } = await buildDiagramFromPhysicalModel({

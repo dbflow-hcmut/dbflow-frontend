@@ -1036,7 +1036,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
             width={drawerWidth}
             open={open}
             onClose={onClose}
-            destroyOnClose
+            destroyOnHidden
             styles={{ body: { display: "flex", flexDirection: "row", padding: "16px 24px", height: "100%", overflow: "hidden" } }}
         >
             {diffResult ? renderDiffPanel() : renderLeftPanel()}

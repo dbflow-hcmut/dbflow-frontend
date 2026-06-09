@@ -151,11 +151,11 @@ const ensureStyle = (node: StoredPhysicalNode) =>
 
 const mapRelationNode = (node: StoredPhysicalNode): Node<RelationTableData> => {
     const dataSource = node.data as RelationTableData | undefined;
-    
+
     // Prefer dataSource columns (full RelationColumn data), otherwise use empty array
     // node.columns is stored format and doesn't have full column info
     const columns = dataSource?.columns ?? [];
-    
+
     return {
         id: node.tableId ?? node.id,
         type: "relation",
@@ -164,6 +164,8 @@ const mapRelationNode = (node: StoredPhysicalNode): Node<RelationTableData> => {
             name: node.name ?? dataSource?.name ?? node.tableId ?? node.id,
             columns,
             indexes: dataSource?.indexes,
+            functionalDependencies: dataSource?.functionalDependencies,
+            showFDs: dataSource?.showFDs,
         },
         style: ensureStyle(node),
         zIndex: node.zIndex,
@@ -219,7 +221,7 @@ export const mapStoredNodesToReactNodes = (storedNodes: StoredPhysicalNode[] = [
 };
 
 const mapReactRelationNode = (node: Node<RelationTableData>): StoredPhysicalNode => {
-    const { name, columns = [] } = node.data;
+    const { name, columns = [], functionalDependencies, showFDs, indexes } = node.data;
 
     // Map columns to stored format
     const storedColumns: StoredPhysicalDiagramNode["columns"] = columns.map((col, idx) => ({
@@ -231,8 +233,6 @@ const mapReactRelationNode = (node: Node<RelationTableData>): StoredPhysicalNode
             underline: col.isPrimary ? true : undefined,
         },
     }));
-
-    const indexes = (node.data as RelationTableData)?.indexes;
 
     return {
         id: node.id,
@@ -249,6 +249,8 @@ const mapReactRelationNode = (node: Node<RelationTableData>): StoredPhysicalNode
             name,
             columns,
             ...(indexes && indexes.length > 0 ? { indexes } : {}),
+            ...(functionalDependencies?.length ? { functionalDependencies } : {}),
+            ...(showFDs != null ? { showFDs } : {}),
         } as RelationTableData,
     };
 };

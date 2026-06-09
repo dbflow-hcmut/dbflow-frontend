@@ -472,20 +472,7 @@ function lintLogical(payload: LogicalLintPayload): LintIssue[] {
         }
     }
 
-    // L009 — Nullable primary key column
-    for (const table of tables) {
-        for (const col of table.columns ?? []) {
-            if (col.roles?.primaryKey && col.nullable) {
-                issues.push({
-                    ruleId: "L009",
-                    severity: "error",
-                    message: `Table "${table.name}", column "${col.name}": primary key column must not be nullable.`,
-                    target: table.name,
-                    targetId: table.id,
-                });
-            }
-        }
-    }
+    // L009 — (Removed) Nullability is a physical-level concern, not checked at logical level.
 
     // L010 — Functional dependency references non-existent column
     for (const table of tables) {
