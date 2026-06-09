@@ -1,8 +1,11 @@
 import React, { useState, useCallback } from 'react';
-import { Select, Button, Space, Table, Form, Input, Checkbox, message, Tabs } from 'antd';
-import { CopyOutlined, DeleteOutlined, PlayCircleOutlined, ClearOutlined } from '@ant-design/icons';
+import { Select, Button, Space, Table, Form, Input, Checkbox, message, Tabs, Divider } from 'antd';
+import { CopyOutlined, DeleteOutlined, PlayCircleOutlined, ClearOutlined, PlusOutlined, MinusCircleOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { executeQueryDbConnection, QueryResultDto } from '@/api/db-connections/client';
+
+type QueryType = 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE';
+type QueryOperator = 'equals' | 'like' | 'greaterThan' | 'lessThan' | 'between';
 
 // Types for SQL Generation
 interface Column {
@@ -21,41 +24,142 @@ interface Table {
 
 interface QueryParameter {
   column: string;
-  operator: 'equals' | 'like' | 'greaterThan' | 'lessThan' | 'between';
+  operator: QueryOperator;
   value: string | string[];
 }
 
 interface GeneratedQuery {
   id: string;
-  type: 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE';
+  type: QueryType;
   query: string;
   parameters: QueryParameter[];
   timestamp: number;
 }
 
+interface FilterFormValue {
+  column?: string;
+  operator?: QueryOperator;
+  value?: string;
+  valueEnd?: string;
+}
+
+interface QueryFormValues {
+  selectedColumns?: string[];
+  filters?: FilterFormValue[];
+  where?: FilterFormValue[];
+  insertValues?: Record<string, string>;
+  updateValues?: Record<string, string>;
+}
+
+const operatorOptions: { label: string; value: QueryOperator }[] = [
+  { label: 'Equals', value: 'equals' },
+  { label: 'Contains', value: 'like' },
+  { label: 'Greater than', value: 'greaterThan' },
+  { label: 'Less than', value: 'lessThan' },
+  { label: 'Between', value: 'between' },
+];
+
+const isBlank = (value: unknown): boolean => value === undefined || value === null || String(value).trim() === '';
+
+const escapeSqlString = (value: string): string => value.replace(/'/g, "''");
+
+const isNumericColumn = (column?: Column): boolean => {
+  const type = column?.type?.toLowerCase() ?? '';
+  return /\b(int|integer|bigint|smallint|tinyint|decimal|numeric|number|float|double|real|money)\b/.test(type);
+};
+
+const isBooleanColumn = (column?: Column): boolean => {
+  const type = column?.type?.toLowerCase() ?? '';
+  return /\b(bool|boolean|bit)\b/.test(type);
+};
+
+const formatSqlValue = (table: Table, columnName: string, value: string): string => {
+  const trimmed = value.trim();
+  const column = table.columns.find(col => col.name === columnName);
+
+  if (trimmed.toUpperCase() === 'NULL') {
+    return 'NULL';
+  }
+
+  if (isBooleanColumn(column)) {
+    if (/^(true|1|yes)$/i.test(trimmed)) return 'TRUE';
+    if (/^(false|0|no)$/i.test(trimmed)) return 'FALSE';
+  }
+
+  if (isNumericColumn(column) && /^-?\d+(\.\d+)?$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  return `'${escapeSqlString(trimmed)}'`;
+};
+
+const buildCondition = (table: Table, param: QueryParameter): string => {
+  if (param.operator === 'between') {
+    const [start, end] = param.value as string[];
+    return `${param.column} BETWEEN ${formatSqlValue(table, param.column, start)} AND ${formatSqlValue(table, param.column, end)}`;
+  }
+
+  const value = Array.isArray(param.value) ? param.value[0] : param.value;
+  const sqlValue = formatSqlValue(table, param.column, value);
+
+  if (sqlValue === 'NULL' && param.operator === 'equals') {
+    return `${param.column} IS NULL`;
+  }
+
+  switch (param.operator) {
+    case 'equals':
+      return `${param.column} = ${sqlValue}`;
+    case 'like':
+      return `${param.column} LIKE '%${escapeSqlString(value.trim())}%'`;
+    case 'greaterThan':
+      return `${param.column} > ${sqlValue}`;
+    case 'lessThan':
+      return `${param.column} < ${sqlValue}`;
+    default:
+      return '';
+  }
+};
+
+const normalizeFilters = (filters: FilterFormValue[] | undefined): QueryParameter[] => (
+  filters ?? []
+).reduce<QueryParameter[]>((acc, filter) => {
+  if (!filter.column || !filter.operator || isBlank(filter.value)) return acc;
+
+  if (filter.operator === 'between') {
+    if (isBlank(filter.valueEnd)) return acc;
+    acc.push({
+      column: filter.column,
+      operator: filter.operator,
+      value: [String(filter.value), String(filter.valueEnd)],
+    });
+    return acc;
+  }
+
+  acc.push({
+    column: filter.column,
+    operator: filter.operator,
+    value: String(filter.value),
+  });
+  return acc;
+}, []);
+
+const normalizeColumnValues = (values: Record<string, string> | undefined): Record<string, string> => {
+  return Object.entries(values ?? {}).reduce<Record<string, string>>((acc, [column, value]) => {
+    if (!isBlank(value)) {
+      acc[column] = String(value);
+    }
+    return acc;
+  }, {});
+};
+
 // SQL Generator Utility Functions
 const SQLGeneratorUtils = {
-  generateSelectQuery: (table: Table, parameters: QueryParameter[]): string => {
-    let query = `SELECT * FROM ${table.name}`;
+  generateSelectQuery: (table: Table, selectedColumns: string[], parameters: QueryParameter[]): string => {
+    const columns = selectedColumns.length > 0 ? selectedColumns : table.columns.map(col => col.name);
+    let query = `SELECT ${columns.join(', ')} FROM ${table.name}`;
 
     if (parameters.length > 0) {
-      const conditions = parameters.map(param => {
-        switch (param.operator) {
-          case 'equals':
-            return `${param.column} = '${param.value}'`;
-          case 'like':
-            return `${param.column} LIKE '%${param.value}%'`;
-          case 'greaterThan':
-            return `${param.column} > ${param.value}`;
-          case 'lessThan':
-            return `${param.column} < ${param.value}`;
-          case 'between':
-            const [start, end] = param.value as string[];
-            return `${param.column} BETWEEN ${start} AND ${end}`;
-          default:
-            return '';
-        }
-      });
+      const conditions = parameters.map(param => buildCondition(table, param)).filter(Boolean);
       query += ` WHERE ${conditions.join(' AND ')}`;
     }
 
@@ -64,20 +168,20 @@ const SQLGeneratorUtils = {
 
   generateInsertQuery: (table: Table, columnValues: Record<string, string>): string => {
     const columns = Object.keys(columnValues);
-    const values = Object.values(columnValues);
-    return `INSERT INTO ${table.name} (${columns.join(', ')}) VALUES (${values.map(v => `'${v}'`).join(', ')});`;
+    const values = columns.map(column => formatSqlValue(table, column, columnValues[column]));
+    return `INSERT INTO ${table.name} (${columns.join(', ')}) VALUES (${values.join(', ')});`;
   },
 
-  generateUpdateQuery: (table: Table, updates: Record<string, string>, whereCondition: QueryParameter): string => {
+  generateUpdateQuery: (table: Table, updates: Record<string, string>, whereConditions: QueryParameter[]): string => {
     const setClause = Object.entries(updates)
-      .map(([col, val]) => `${col} = '${val}'`)
+      .map(([col, val]) => `${col} = ${formatSqlValue(table, col, val)}`)
       .join(', ');
-    const whereClause = `${whereCondition.column} = '${whereCondition.value}'`;
+    const whereClause = whereConditions.map(param => buildCondition(table, param)).filter(Boolean).join(' AND ');
     return `UPDATE ${table.name} SET ${setClause} WHERE ${whereClause};`;
   },
 
-  generateDeleteQuery: (table: Table, whereCondition: QueryParameter): string => {
-    const whereClause = `${whereCondition.column} = '${whereCondition.value}'`;
+  generateDeleteQuery: (table: Table, whereConditions: QueryParameter[]): string => {
+    const whereClause = whereConditions.map(param => buildCondition(table, param)).filter(Boolean).join(' AND ');
     return `DELETE FROM ${table.name} WHERE ${whereClause};`;
   },
 };
@@ -94,44 +198,94 @@ interface SQLGeneratorProps {
 
 const SQLGenerator: React.FC<SQLGeneratorProps> = ({
   tables,
-  projectId,
   connId,
   onDatabaseConfigRequired,
   isLoading = false,
-  hasConnection = false,
 }) => {
   const [selectedTable, setSelectedTable] = useState<string>('');
-  const [queryType, setQueryType] = useState<'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE'>('SELECT');
-  const [parameters, setParameters] = useState<QueryParameter[]>([]);
+  const [queryType, setQueryType] = useState<QueryType>('SELECT');
   const [generatedQueries, setGeneratedQueries] = useState<GeneratedQuery[]>([]);
   const [queryResults, setQueryResults] = useState<QueryResultDto | null>(null);
   const [executing, setExecuting] = useState(false);
-  const [form] = Form.useForm();
+  const [form] = Form.useForm<QueryFormValues>();
 
   const currentTable = tables.find(t => t.id === selectedTable);
 
-  const handleGenerateQuery = useCallback(() => {
+  const handleTableChange = useCallback((tableId: string) => {
+    const table = tables.find(t => t.id === tableId);
+    setSelectedTable(tableId);
+    form.resetFields();
+    form.setFieldsValue({
+      selectedColumns: table?.columns.map(col => col.name) ?? [],
+      filters: [],
+      where: [],
+      insertValues: {},
+      updateValues: {},
+    });
+  }, [form, tables]);
+
+  const handleQueryTypeChange = useCallback((type: QueryType) => {
+    setQueryType(type);
+    form.resetFields();
+    form.setFieldsValue({
+      selectedColumns: currentTable?.columns.map(col => col.name) ?? [],
+      filters: [],
+      where: [],
+      insertValues: {},
+      updateValues: {},
+    });
+  }, [currentTable, form]);
+
+  const handleGenerateQuery = useCallback(async () => {
     if (!currentTable) {
       message.error('Please select a table');
       return;
     }
 
     let query = '';
+    let queryParameters: QueryParameter[] = [];
 
     try {
+      const values = await form.validateFields();
+
       switch (queryType) {
-        case 'SELECT':
-          query = SQLGeneratorUtils.generateSelectQuery(currentTable, parameters);
+        case 'SELECT': {
+          queryParameters = normalizeFilters(values.filters);
+          query = SQLGeneratorUtils.generateSelectQuery(currentTable, values.selectedColumns ?? [], queryParameters);
           break;
-        case 'INSERT':
-          message.info('INSERT query generation - requires database connection');
+        }
+        case 'INSERT': {
+          const insertValues = normalizeColumnValues(values.insertValues);
+          if (Object.keys(insertValues).length === 0) {
+            message.error('Enter at least one value to insert');
+            return;
+          }
+          query = SQLGeneratorUtils.generateInsertQuery(currentTable, insertValues);
           break;
-        case 'UPDATE':
-          message.info('UPDATE query generation - requires database connection');
+        }
+        case 'UPDATE': {
+          const updateValues = normalizeColumnValues(values.updateValues);
+          queryParameters = normalizeFilters(values.where);
+          if (Object.keys(updateValues).length === 0) {
+            message.error('Enter at least one column value to update');
+            return;
+          }
+          if (queryParameters.length === 0) {
+            message.error('Add at least one WHERE condition for UPDATE');
+            return;
+          }
+          query = SQLGeneratorUtils.generateUpdateQuery(currentTable, updateValues, queryParameters);
           break;
-        case 'DELETE':
-          message.info('DELETE query generation - requires database connection');
+        }
+        case 'DELETE': {
+          queryParameters = normalizeFilters(values.where);
+          if (queryParameters.length === 0) {
+            message.error('Add at least one WHERE condition for DELETE');
+            return;
+          }
+          query = SQLGeneratorUtils.generateDeleteQuery(currentTable, queryParameters);
           break;
+        }
       }
 
       if (query) {
@@ -139,17 +293,20 @@ const SQLGenerator: React.FC<SQLGeneratorProps> = ({
           id: `query-${Date.now()}`,
           type: queryType,
           query,
-          parameters,
+          parameters: queryParameters,
           timestamp: Date.now(),
         };
 
-        setGeneratedQueries([newQuery, ...generatedQueries]);
+        setGeneratedQueries(prevQueries => [newQuery, ...prevQueries]);
         message.success('Query generated successfully');
       }
     } catch (error) {
-      message.error('Failed to generate query');
+      const hasFormErrors = typeof error === 'object' && error !== null && 'errorFields' in error;
+      if (!hasFormErrors) {
+        message.error('Failed to generate query');
+      }
     }
-  }, [currentTable, queryType, parameters, generatedQueries]);
+  }, [currentTable, form, queryType]);
 
   const handleExecuteQuery = useCallback(async (query: string) => {
     if (!connId) {
@@ -194,6 +351,113 @@ const SQLGenerator: React.FC<SQLGeneratorProps> = ({
   const handleClearResults = useCallback(() => {
     setQueryResults(null);
   }, []);
+
+  const renderConditionList = (name: 'filters' | 'where', emptyText: string) => (
+    <Form.List name={name}>
+      {(fields, { add, remove }) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {fields.length === 0 && (
+            <div style={{ color: '#999', fontSize: '12px' }}>{emptyText}</div>
+          )}
+          {fields.map(field => (
+            <div
+              key={field.key}
+              style={{
+                border: '1px solid #f0f0f0',
+                borderRadius: '6px',
+                padding: '8px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+              }}
+            >
+              <Space.Compact style={{ width: '100%' }}>
+                <Form.Item
+                  name={[field.name, 'column']}
+                  rules={[{ required: true, message: 'Select column' }]}
+                  style={{ marginBottom: 0, width: '45%' }}
+                >
+                  <Select
+                    placeholder="Column"
+                    options={currentTable?.columns.map(col => ({
+                      label: `${col.name} (${col.type})`,
+                      value: col.name,
+                    }))}
+                  />
+                </Form.Item>
+                <Form.Item
+                  name={[field.name, 'operator']}
+                  rules={[{ required: true, message: 'Select operator' }]}
+                  style={{ marginBottom: 0, width: '45%' }}
+                  initialValue="equals"
+                >
+                  <Select placeholder="Operator" options={operatorOptions} />
+                </Form.Item>
+                <Button
+                  danger
+                  icon={<MinusCircleOutlined />}
+                  onClick={() => remove(field.name)}
+                  style={{ width: '10%' }}
+                />
+              </Space.Compact>
+
+              <Form.Item
+                noStyle
+                shouldUpdate={(prevValues, nextValues) => {
+                  const prevOperator = prevValues?.[name]?.[field.name]?.operator;
+                  const nextOperator = nextValues?.[name]?.[field.name]?.operator;
+                  return prevOperator !== nextOperator;
+                }}
+              >
+                {({ getFieldValue }) => {
+                  const operator = getFieldValue([name, field.name, 'operator']);
+                  if (operator === 'between') {
+                    return (
+                      <Space.Compact style={{ width: '100%' }}>
+                        <Form.Item
+                          name={[field.name, 'value']}
+                          rules={[{ required: true, message: 'Start value' }]}
+                          style={{ marginBottom: 0, width: '50%' }}
+                        >
+                          <Input placeholder="Start value" />
+                        </Form.Item>
+                        <Form.Item
+                          name={[field.name, 'valueEnd']}
+                          rules={[{ required: true, message: 'End value' }]}
+                          style={{ marginBottom: 0, width: '50%' }}
+                        >
+                          <Input placeholder="End value" />
+                        </Form.Item>
+                      </Space.Compact>
+                    );
+                  }
+
+                  return (
+                    <Form.Item
+                      name={[field.name, 'value']}
+                      rules={[{ required: true, message: 'Enter value' }]}
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Input placeholder={operator === 'like' ? 'Text to contain' : 'Value'} />
+                    </Form.Item>
+                  );
+                }}
+              </Form.Item>
+            </div>
+          ))}
+          <Button
+            type="dashed"
+            block
+            icon={<PlusOutlined />}
+            onClick={() => add({ operator: 'equals' })}
+            disabled={!currentTable}
+          >
+            Add Condition
+          </Button>
+        </div>
+      )}
+    </Form.List>
+  );
 
   const queryColumns: ColumnsType<GeneratedQuery> = [
     {
@@ -270,7 +534,7 @@ const SQLGenerator: React.FC<SQLGeneratorProps> = ({
                       <Select
                         placeholder="Select a table"
                         value={selectedTable}
-                        onChange={setSelectedTable}
+                        onChange={handleTableChange}
                         options={tables.map(t => ({
                           label: t.name,
                           value: t.id,
@@ -281,7 +545,7 @@ const SQLGenerator: React.FC<SQLGeneratorProps> = ({
                     <Form.Item label="Query Type" required>
                       <Select
                         value={queryType}
-                        onChange={setQueryType}
+                        onChange={handleQueryTypeChange}
                         options={[
                           { label: 'SELECT', value: 'SELECT' },
                           { label: 'INSERT', value: 'INSERT' },
@@ -292,14 +556,73 @@ const SQLGenerator: React.FC<SQLGeneratorProps> = ({
                     </Form.Item>
 
                     {queryType === 'SELECT' && currentTable && (
-                      <Form.Item label="Filters">
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          {currentTable.columns.map(col => (
-                            <Checkbox key={col.id}>
-                              {col.name}
-                            </Checkbox>
-                          ))}
+                      <>
+                        <Form.Item
+                          label="Columns"
+                          name="selectedColumns"
+                          initialValue={currentTable.columns.map(col => col.name)}
+                          rules={[{ required: true, message: 'Select at least one column' }]}
+                        >
+                          <Checkbox.Group
+                            style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
+                            options={currentTable.columns.map(col => ({
+                              label: `${col.name} (${col.type})`,
+                              value: col.name,
+                            }))}
+                          />
+                        </Form.Item>
+
+                        <Divider style={{ margin: '12px 0' }} />
+
+                        <Form.Item label="Filters">
+                          {renderConditionList('filters', 'No filters. The query will return all rows.')}
+                        </Form.Item>
+                      </>
+                    )}
+
+                    {queryType === 'INSERT' && currentTable && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <div style={{ color: '#666', fontSize: '12px' }}>
+                          Leave a field blank to omit that column from the INSERT.
                         </div>
+                        {currentTable.columns.map(col => (
+                          <Form.Item
+                            key={col.id}
+                            label={`${col.name} (${col.type})${col.isPrimaryKey ? ' - PK' : ''}`}
+                            name={['insertValues', col.name]}
+                          >
+                            <Input placeholder={col.isNullable ? 'NULL or value' : 'Value'} />
+                          </Form.Item>
+                        ))}
+                      </div>
+                    )}
+
+                    {queryType === 'UPDATE' && currentTable && (
+                      <>
+                        <div style={{ color: '#666', fontSize: '12px', marginBottom: '8px' }}>
+                          Leave a field blank to keep that column unchanged.
+                        </div>
+                        {currentTable.columns.map(col => (
+                          <Form.Item
+                            key={col.id}
+                            label={`${col.name} (${col.type})${col.isPrimaryKey ? ' - PK' : ''}`}
+                            name={['updateValues', col.name]}
+                          >
+                            <Input placeholder="New value" />
+                          </Form.Item>
+                        ))}
+
+                        <Divider style={{ margin: '12px 0' }} />
+
+                        <Form.Item label="WHERE Conditions" required>
+                          {renderConditionList('where', 'Add a condition to choose which rows are updated.')}
+                        </Form.Item>
+                      </>
+                    )}
+
+                    {queryType === 'DELETE' && currentTable && (
+                      <Form.Item label="WHERE Conditions" required>
+                        {renderConditionList('where', 'Add a condition to choose which rows are deleted.')}
                       </Form.Item>
                     )}
 
