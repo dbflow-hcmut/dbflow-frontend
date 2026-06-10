@@ -54,6 +54,7 @@ export const PROXY_DB_CONNECTION_TEST_SAVED = (connId: string) => `${PROXY_DB_CO
 export const PROXY_DB_CONNECTION_PLAIN_PARAMS = (connId: string) => `${PROXY_DB_CONNECTIONS}/${connId}/plain-params`;
 export const PROXY_DB_CONNECTION_SCHEMAS = (connId: string) => `${PROXY_DB_CONNECTIONS}/${connId}/schemas`;
 export const PROXY_DB_CONNECTION_INTROSPECT = (connId: string) => `${PROXY_DB_CONNECTIONS}/${connId}/introspect`;
+export const PROXY_DB_CONNECTION_EXECUTE = (connId: string) => `${PROXY_DB_CONNECTIONS}/${connId}/execute`;
 export const PROXY_PROJECT_DB_CONNECTIONS = (projectId: string) => `${PROXY_BASE}/projects/${projectId}/db-connections`;
 export const PROXY_PROJECT_DB_CONNECTION_LINK = (projectId: string) => `${PROXY_PROJECT_DB_CONNECTIONS(projectId)}/link`;
 export const PROXY_PROJECT_DB_CONNECTION_UNLINK = (projectId: string, connId: string) => `${PROXY_PROJECT_DB_CONNECTIONS(projectId)}/${connId}/unlink`;
