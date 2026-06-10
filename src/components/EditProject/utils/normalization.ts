@@ -254,7 +254,7 @@ export const findCandidateKeys = (allAttributes: string[], fds: FD[]): string[][
  */
 export const minimalCover = (fds: FD[]): FD[] => {
     // Step 1: Split RHS into singletons
-    let singles: { left: string[]; right: string }[] = [];
+    const singles: { left: string[]; right: string }[] = [];
     for (const fd of fds) {
         const left = norm(fd.left);
         for (const r of norm(fd.right)) {

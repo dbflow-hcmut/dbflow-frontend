@@ -371,7 +371,7 @@ export const buildDiagramFromPhysicalModel = async ({
         if (!posLookup.has(table.id)) newTableIds.push(table.id);
     }
 
-    let autoPositions = new Map<string, { x: number; y: number }>();
+    const autoPositions = new Map<string, { x: number; y: number }>();
     if (newTableIds.length > 0) {
         // Compute bounding box of existing tables so new tables are placed below
         let existingMaxY = 0;
