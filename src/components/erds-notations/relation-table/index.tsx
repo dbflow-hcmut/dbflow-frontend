@@ -16,6 +16,7 @@ export type RelationColumn = {
     type?: string;
     length?: string;
     isPrimary?: boolean;
+    isCandidateKey?: boolean;
     isNullable?: boolean;
     isUnique?: boolean;
     isAutoIncrement?: boolean;
@@ -33,10 +34,18 @@ export type TableIndex = {
     isUnique: boolean;
 };
 
+export type PhysicalFD = {
+    id: string;
+    left: string[];   // column names
+    right: string[];  // column names
+};
+
 export type RelationTableData = {
     name: string;
     columns: RelationColumn[];
     indexes?: TableIndex[];
+    functionalDependencies?: PhysicalFD[];
+    showFDs?: boolean;
 };
 
 const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
@@ -308,12 +317,15 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
                                         isHovered={isHovered}
                                     />
                                     {col.isPrimary && (
-                                        <KeyRound size={14} className="text-amber-500" />
+                                        <span title="Primary Key"><KeyRound size={14} className="text-amber-500" /></span>
+                                    )}
+                                    {col.isCandidateKey && !col.isPrimary && (
+                                        <span title="Candidate Key"><KeyRound size={14} className="text-purple-500" /></span>
                                     )}
                                     {fkColumnNames.has(col.name) && (
                                         <Link2 size={14} className="text-blue-500" />
                                     )}
-                                    {col.isUnique && !col.isPrimary && (
+                                    {col.isUnique && !col.isPrimary && !col.isCandidateKey && (
                                         <Fingerprint size={14} className="text-purple-500" />
                                     )}
                                     {col.isAutoIncrement && (
@@ -348,6 +360,27 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
                         </DatabaseSchemaTableRow>
                     )}
                 </DatabaseSchemaNodeBody>
+
+                {/* Functional Dependencies (toggleable) */}
+                {data.showFDs && data.functionalDependencies && data.functionalDependencies.length > 0 && (
+                    <div
+                        className="border-t border-gray-200 px-2 py-1"
+                        style={{ fontSize: 10, lineHeight: '16px', color: '#666' }}
+                    >
+                        {data.functionalDependencies.map((fd) => (
+                            <div key={fd.id} className="flex items-center gap-0.5 truncate">
+                                <span className="font-medium" style={{ color: '#1677ff' }}>
+                                    {fd.left.length > 0 ? fd.left.join(', ') : '?'}
+                                </span>
+                                <span style={{ color: '#999' }}>{' → '}</span>
+                                <span className="font-medium" style={{ color: '#52c41a' }}>
+                                    {fd.right.length > 0 ? fd.right.join(', ') : '?'}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
                 </div>
             </DatabaseSchemaNode>
         </div>

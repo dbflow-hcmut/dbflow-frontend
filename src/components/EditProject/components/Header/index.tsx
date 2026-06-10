@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Avatar, Button, Tooltip, Dropdown, Modal } from "antd";
-import { Download, MessageCircleMore, History, Send, ArrowRightLeft, DatabaseZap, MessageSquareWarning, RefreshCw } from "lucide-react";
+import { Download, MessageCircleMore, History, Send, ArrowRightLeft, DatabaseZap, MessageSquareWarning, Layers, RefreshCw } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { RemoteCollaborator } from "../../hooks/useCollaborationAwareness";
@@ -45,6 +45,8 @@ type HeaderProps = {
     onToggleLinterPanel?: () => void;
     linterCounts?: { error: number; warning: number; info: number };
     projectId?: string;
+    normalizationOpen?: boolean;
+    onToggleNormalizationPanel?: () => void;
 };
 
 type SQLGeneratorTable = {
@@ -86,6 +88,8 @@ const Header: React.FC<HeaderProps> = ({
     onToggleLinterPanel,
     linterCounts,
     projectId,
+    normalizationOpen = false,
+    onToggleNormalizationPanel,
 }) => {
     const inputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
@@ -343,6 +347,17 @@ const Header: React.FC<HeaderProps> = ({
                         )}
                     </div>
                 </Tooltip>
+                {onToggleNormalizationPanel && (
+                    <Tooltip title="Normalization Analysis" placement="bottom">
+                        <Button
+                            type={normalizationOpen ? 'primary' : 'text'}
+                            className="!px-2"
+                            onClick={onToggleNormalizationPanel}
+                        >
+                            <Layers size={18} />
+                        </Button>
+                    </Tooltip>
+                )}
                 {syncableSchemas.length > 0 && onSyncToSchema && (
                     <Dropdown
                         menu={{

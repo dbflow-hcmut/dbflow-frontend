@@ -135,16 +135,26 @@ const buildLogicalModel = ({
 
     // Build tables with columns
     // Get column data from stored node data (LogicalTableData)
-    const tableDataMap = new Map<string, { name: string; columns: Array<{ name: string; isKey?: boolean }> }>();
-    
+    type NodeFD = { id: string; left: string[]; right: string[] };
+    const tableDataMap = new Map<string, {
+        name: string;
+        columns: Array<{ name: string; isKey?: boolean }>;
+        functionalDependencies?: NodeFD[];
+    }>();
+
     tableNodes.forEach((tableNode) => {
         if (tableNode.tableId) {
             // Get column data from node data (LogicalTableData)
-            const nodeData = tableNode.data as { name?: string; columns?: Array<{ name: string; isKey?: boolean }> } | undefined;
+            const nodeData = tableNode.data as {
+                name?: string;
+                columns?: Array<{ name: string; isKey?: boolean }>;
+                functionalDependencies?: NodeFD[];
+            } | undefined;
             if (nodeData && nodeData.columns) {
                 tableDataMap.set(tableNode.tableId, {
                     name: nodeData.name || tableNode.name || tableNode.tableId,
                     columns: nodeData.columns,
+                    functionalDependencies: nodeData.functionalDependencies,
                 });
             }
         }
@@ -169,13 +179,16 @@ const buildLogicalModel = ({
                   const fkInfo = fkMap.get(tableId)?.get(idx);
                   const isPrimaryKey = actualCol.isKey ?? false;
 
+                  const isCandidateKey = (actualCol as { isCandidateKey?: boolean }).isCandidateKey ?? false;
+
                   const column: ModelColumn = {
                       id: columnId,
                       name: columnName,
-                      nullable: true, // Default to nullable for logical schema
+                      nullable: true, // Logical schema does not define nullability
                       unique: false,
                       roles: {
                           primaryKey: isPrimaryKey,
+                          ...(isCandidateKey ? { candidateKey: true } : {}),
                           ...(fkInfo
                               ? {
                                     foreignKey: {
@@ -200,7 +213,7 @@ const buildLogicalModel = ({
                   const column: ModelColumn = {
                       id: columnId,
                       name: columnName,
-                      nullable: true, // Default to nullable
+                      nullable: true, // Logical schema does not define nullability
                       unique: false,
                       roles: {
                           primaryKey: isPrimaryKey,
@@ -218,11 +231,19 @@ const buildLogicalModel = ({
                   return column;
               });
 
+        // Extract FDs from node data (column names) → model FDs (column names)
+        const nodeFDs = tableData?.functionalDependencies ?? [];
+        const modelFDs: ModelFunctionalDependency[] = nodeFDs.map((fd) => ({
+            id: fd.id,
+            left: fd.left,
+            right: fd.right,
+        }));
+
         return {
             id: tableId,
             name: tableName,
             columns,
-            functionalDependencies: [], // TODO: Extract from diagram if needed
+            functionalDependencies: modelFDs.length > 0 ? modelFDs : undefined,
             notes: undefined,
         };
     });
@@ -331,8 +352,21 @@ export const buildDiagramFromLogicalModel = async ({
         if (!posLookup.has(table.id)) newTableIds.push(table.id);
     }
 
-    let autoPositions = new Map<string, { x: number; y: number }>();
+    const autoPositions = new Map<string, { x: number; y: number }>();
     if (newTableIds.length > 0) {
+        // Compute bounding box of existing tables so new tables are placed below
+        let existingMaxY = 0;
+        let existingMinX = Infinity;
+        for (const table of model.tables ?? []) {
+            const pos = posLookup.get(table.id);
+            if (!pos) continue;
+            const size = tableSizes.get(table.id) ?? { w: 200, h: 120 };
+            existingMaxY = Math.max(existingMaxY, pos.y + size.h);
+            existingMinX = Math.min(existingMinX, pos.x);
+        }
+        if (!isFinite(existingMinX)) existingMinX = 50;
+
+        // ELK layout for new tables among themselves
         const layoutTables: LayoutTable[] = (model.tables ?? [])
             .filter((t) => newTableIds.includes(t.id))
             .map((t) => ({
@@ -342,7 +376,16 @@ export const buildDiagramFromLogicalModel = async ({
                     .filter((c) => c.roles?.foreignKey?.refTableId)
                     .map((c) => c.roles!.foreignKey!.refTableId),
             }));
-        autoPositions = await computeELKTableLayout(layoutTables);
+        const rawPositions = await computeELKTableLayout(layoutTables);
+
+        // Offset new tables below existing tables
+        const offsetY = existingMaxY > 0 ? existingMaxY + 80 : 0;
+        for (const [id, pos] of rawPositions) {
+            autoPositions.set(id, {
+                x: pos.x + existingMinX,
+                y: pos.y + offsetY,
+            });
+        }
     }
 
     // ── Tables ───────────────────────────────────────────────────────────
@@ -362,11 +405,30 @@ export const buildDiagramFromLogicalModel = async ({
                 label: col.name,
                 decorations: {
                     pk: col.roles?.primaryKey ? true : undefined,
+                    ck: col.roles?.candidateKey ? true : undefined,
                     fk: col.roles?.foreignKey ? true : undefined,
                     underline: col.roles?.primaryKey ? true : undefined,
                 },
             }),
         );
+
+        // Convert model FDs (column IDs) → node FDs (column names)
+        const colIdToName = new Map<string, string>();
+        for (const col of table.columns ?? []) {
+            colIdToName.set(col.id, col.name);
+            // Also map by name for pass-through when left/right already contains names
+            colIdToName.set(col.name, col.name);
+        }
+        const nodeFDs = (table.functionalDependencies ?? []).map((fd) => ({
+            id: fd.id,
+            left: fd.left.map((ref) => colIdToName.get(ref) ?? ref),
+            right: fd.right.map((ref) => colIdToName.get(ref) ?? ref),
+        }));
+
+        // Preserve showFDs from existing node data if available
+        const existingNodeData = existingNodes?.find(
+            (n) => n.tableId === table.id || n.id === table.id,
+        )?.data as { showFDs?: boolean } | undefined;
 
         nodes.push({
             id: table.id,
@@ -381,7 +443,10 @@ export const buildDiagramFromLogicalModel = async ({
                 columns: (table.columns ?? []).map((col) => ({
                     name: col.name,
                     isKey: col.roles?.primaryKey ?? false,
+                    ...(col.roles?.candidateKey ? { isCandidateKey: true } : {}),
                 })),
+                ...(nodeFDs.length > 0 ? { functionalDependencies: nodeFDs } : {}),
+                ...(existingNodeData?.showFDs != null ? { showFDs: existingNodeData.showFDs } : {}),
             } as NodeData,
         });
     }
@@ -428,10 +493,13 @@ export const buildDiagramFromLogicalModel = async ({
 
     if (preserveUnmodeledNodes && existingNodes) {
         const modelNodeIds = new Set(nodes.map((n) => n.id));
-        const unmodeledNodes = existingNodes.filter((n) => !modelNodeIds.has(n.id));
+        const ANNOTATION_TYPES = new Set(["sticky-note", "text-label", "drawing-path", "note"]);
+        // Only preserve annotation/drawing nodes — table nodes not in the model should be removed
+        const unmodeledNodes = existingNodes.filter(
+            (n) => !modelNodeIds.has(n.id) && ANNOTATION_TYPES.has(n.type ?? ""),
+        );
         nodes.push(...unmodeledNodes);
     }
 
     return { nodes, edges };
 };
-

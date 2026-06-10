@@ -53,7 +53,7 @@
     "column": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name"],
+      "required": ["id", "name", "nullable", "unique"],
       "properties": {
         "id": { "type": "string", "pattern": "^lid_" },
         "name": { "type": "string" },
@@ -94,7 +94,7 @@
    "functionalDependency": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["left", "right"],
+      "required": ["id", "left", "right"],
       "properties": {
         "id": { "type": "string", "pattern": "^lid_" },
         "name": { "type": "string" },

@@ -2,115 +2,185 @@
  * Schema-level conversion utilities.
  *
  * Provides deterministic, AI-free transformations between schema levels:
- *   - Logical     → Physical
- *   - Physical    → Logical
- *   - Logical     → Conceptual
- *   - Conceptual  → Logical
+ *   - Logical     -> Physical   (+ DBMS-aware type inference)
+ *   - Physical    -> Logical
+ *   - Logical     -> Conceptual (junction table, multi-valued attr, weak entity, ISA detection)
+ *   - Conceptual  -> Logical
+ *   - Physical    -> Conceptual (chain: P -> L -> C)
+ *   - Conceptual  -> Physical   (chain: C -> L -> P, with optional DBMS)
  */
 
 import type { LogicalModelPayload } from "./logical-model.builder";
 import type { PhysicalModelPayload } from "./physical-model.builder";
 import type { ConceptualModelPayload } from "./conceptual-model.builder";
+import type { DBMSType } from "./dbms-config";
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// ── ID generators ───────────────────────────────────────────────────────────────
 
 const generatePid = (): string => {
     if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
         return `pid_${crypto.randomUUID()}`;
     }
-    const r = `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
-    return `pid_${r}`;
+    return `pid_${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
 };
 
-/** Map a logical column-id (lid_…) to a physical column-id (pid_…). */
+const generateLid = (): string => {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+        return `lid_${crypto.randomUUID()}`;
+    }
+    return `lid_${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+};
+
+const generateCid = (): string => {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+        return `cid_${crypto.randomUUID()}`;
+    }
+    return `cid_${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+};
+
+// ── ID prefix remapping ─────────────────────────────────────────────────────────
+
+/** Map a logical column-id (lid_...) to a physical column-id (pid_...). */
 const remapColId = (id: string): string => id.replace(/^lid_/, "pid_");
 
+/** Map a physical column-id (pid_...) to a logical column-id (lid_...). */
+const remapColIdToLogical = (id: string): string => id.replace(/^pid_/, "lid_");
+
+// ── DBMS-aware physical type inference ──────────────────────────────────────────
+
 /**
- * Infer a physical data-type from a logical column's role / name heuristics.
+ * DBMS-specific base type mappings.
+ * Keys are generic canonical types; values are DBMS-native equivalents.
+ */
+const DBMS_TYPE_MAP: Record<string, Record<string, string>> = {
+    mysql:      { int: "int",     boolean: "tinyint",  datetime: "datetime",  text: "text",     varchar: "varchar", decimal: "decimal" },
+    postgresql: { int: "integer", boolean: "boolean",  datetime: "timestamp", text: "text",     varchar: "varchar", decimal: "numeric" },
+    sqlserver:  { int: "int",     boolean: "bit",      datetime: "datetime2", text: "nvarchar", varchar: "nvarchar", decimal: "decimal" },
+};
+
+/**
+ * Infer a physical data-type (and optional default length) from a logical
+ * column's role and name heuristics, optionally mapped to a target DBMS.
  *
  * Rules (applied in order):
- *  1. Primary key or integer foreign key → 'int'
- *  2. Name contains date/time keywords  → 'datetime'
- *  3. Name contains numeric keywords    → 'int'
- *  4. Name contains boolean keywords    → 'boolean'
- *  5. Name contains large-text keywords → 'text'
- *  6. Everything else                   → 'varchar'
+ *  1. PK or FK                      -> int
+ *  2. Name matches date/time        -> datetime
+ *  3. Name matches monetary         -> decimal(10,2)
+ *  4. Name matches numeric          -> int
+ *  5. Name matches boolean          -> boolean
+ *  6. Name matches large-text       -> text
+ *  7. Name matches email / address  -> varchar(255)
+ *  8. Name matches short-string     -> varchar(100)
+ *  9. Default fallback              -> varchar(255)
  */
-const inferDataType = (col: {
-    name: string;
-    roles?: {
-        primaryKey?: boolean;
-        foreignKey?: unknown;
-    };
-}): string => {
-    if (col.roles?.primaryKey || col.roles?.foreignKey) return "int";
+const inferPhysicalDataType = (
+    col: { name: string; roles?: { primaryKey?: boolean; foreignKey?: unknown } },
+    dbms?: DBMSType,
+): { dataType: string; length?: string } => {
+    const map = dbms ? (DBMS_TYPE_MAP[dbms] ?? {}) : {};
+    const resolve = (generic: string, length?: string) => ({
+        dataType: map[generic] ?? generic,
+        length,
+    });
+
+    // 1. Key columns -> integer type
+    if (col.roles?.primaryKey || col.roles?.foreignKey) return resolve("int");
 
     const n = col.name.toLowerCase();
 
+    // 2. Date/time patterns
     if (
-        n.endsWith("_at") ||
-        n.endsWith("_date") ||
-        n.endsWith("_time") ||
-        n.includes("date") ||
-        n.includes("time") ||
-        n === "created" ||
-        n === "updated"
+        n.endsWith("_at") || n.endsWith("_date") || n.endsWith("_time") ||
+        n.includes("date") || n.includes("time") ||
+        n === "created" || n === "updated" ||
+        n === "born" || n === "dob" || n === "birthday"
     ) {
-        return "datetime";
+        return resolve("datetime");
     }
 
+    // 3. Monetary / precision decimal patterns
     if (
-        n.includes("count") ||
-        n.includes("_num") ||
-        n.startsWith("num_") ||
-        n.includes("qty") ||
-        n.includes("quantity") ||
-        n.includes("amount") ||
-        n.includes("price") ||
-        n.includes("total") ||
-        n.includes("score") ||
-        n.includes("rank") ||
-        n.includes("age") ||
-        n.includes("year")
+        n.includes("price") || n.includes("cost") || n.includes("amount") ||
+        n.includes("salary") || n.includes("total") || n.includes("balance") ||
+        n.includes("fee") || n.includes("tax") || n.includes("rate") ||
+        n.includes("discount") || n.includes("revenue") || n.includes("budget")
     ) {
-        return "int";
+        return resolve("decimal", "10,2");
     }
 
+    // 4. General numeric (integer)
     if (
-        n.startsWith("is_") ||
-        n.startsWith("has_") ||
-        n.startsWith("can_") ||
-        n === "active" ||
-        n === "enabled" ||
-        n === "deleted" ||
-        n === "verified" ||
-        n === "published"
+        n.includes("count") || n.includes("_num") || n.startsWith("num_") ||
+        n.includes("qty") || n.includes("quantity") ||
+        n.includes("score") || n.includes("rank") ||
+        n.includes("age") || n.includes("year") || n.includes("level") ||
+        n.includes("priority") || n.includes("weight") ||
+        n.includes("height") || n.includes("width") ||
+        n.includes("duration") || n.includes("attempts") || n.includes("limit")
     ) {
-        return "boolean";
+        return resolve("int");
     }
 
+    // 5. Boolean patterns
     if (
-        n.includes("description") ||
-        n.includes("content") ||
-        n.includes("body") ||
-        n.includes("notes") ||
-        n.includes("comment") ||
-        n.includes("bio") ||
-        n.includes("message")
+        n.startsWith("is_") || n.startsWith("has_") || n.startsWith("can_") ||
+        n.startsWith("should_") || n.startsWith("allow_") ||
+        n === "active" || n === "enabled" || n === "deleted" ||
+        n === "verified" || n === "published" || n === "visible" ||
+        n === "approved" || n === "locked" || n === "archived" ||
+        n === "confirmed" || n === "featured"
     ) {
-        return "text";
+        return resolve("boolean");
     }
 
-    return "varchar";
+    // 6. Large text patterns
+    if (
+        n.includes("description") || n.includes("content") || n.includes("body") ||
+        n.includes("notes") || n.includes("comment") || n.includes("bio") ||
+        n.includes("message") || n.includes("summary") || n.includes("text") ||
+        n.includes("html") || n.includes("markdown") ||
+        n.includes("metadata") || n.includes("payload")
+    ) {
+        return resolve("text");
+    }
+
+    // 7. Email / address -> varchar(255)
+    if (
+        n.includes("email") || n.includes("address") ||
+        n.includes("street") || n.includes("url") || n.includes("path")
+    ) {
+        return resolve("varchar", "255");
+    }
+
+    // 8. Short string fields -> varchar(100)
+    if (
+        n.includes("name") || n === "title" || n.includes("label") ||
+        n.includes("code") || n.includes("slug") || n.includes("sku") ||
+        n.includes("status") || n.includes("type") || n.includes("category") ||
+        n.includes("role") || n.includes("gender") || n.includes("country") ||
+        n.includes("city") || n.includes("state") || n.includes("zip") ||
+        n.includes("phone") || n.includes("fax") ||
+        n.includes("color") || n.includes("currency") || n.includes("locale") ||
+        n.includes("language") || n.includes("timezone") || n.includes("extension")
+    ) {
+        return resolve("varchar", "100");
+    }
+
+    // 9. Default fallback
+    return resolve("varchar", "255");
 };
 
-// ── public API ────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+//  LOGICAL -> PHYSICAL
+// ═══════════════════════════════════════════════════════════════════════════════
 
 export interface ConvertLogicalToPhysicalOptions {
     /** Override the generated model.id (defaults to a new pid). */
     newModelId?: string;
-    /** Override the model name (defaults to replacing "Logical" → "Physical"). */
+    /** Override the model name (defaults to replacing "Logical" -> "Physical"). */
     newModelName?: string;
+    /** Target DBMS -- enables DBMS-specific type mapping and auto-increment. */
+    dbms?: DBMSType;
 }
 
 /**
@@ -120,9 +190,10 @@ export interface ConvertLogicalToPhysicalOptions {
  *  - Table IDs are preserved so FK references remain consistent.
  *  - Column IDs are remapped from `lid_` prefix to `pid_` prefix.
  *  - FK `refColumnId` is remapped accordingly.
- *  - A `dataType` is inferred for every column from its role and name.
+ *  - A `dataType` (+ optional `length`) is inferred for every column from its
+ *    role and name; when `dbms` is provided, types are DBMS-native.
+ *  - Single-column integer PKs (that are not FK) get `autoIncrement: true`.
  *  - `nullable` and `unique` are carried over unchanged.
- *  - `autoIncrement` defaults to `false` (user can enable later).
  *  - Indexes are initialised as empty (no indexes in logical model).
  *  - Functional dependencies are carried over.
  */
@@ -133,57 +204,75 @@ export const convertLogicalToPhysical = (
     const derivedName = logicalModel.model.name
         .replace(/logical/gi, "Physical")
         .replace(/Logical/g, "Physical");
-    const modelName = opts.newModelName ?? (derivedName !== logicalModel.model.name ? derivedName : `${logicalModel.model.name} (Physical)`);
+    const modelName =
+        opts.newModelName ??
+        (derivedName !== logicalModel.model.name
+            ? derivedName
+            : `${logicalModel.model.name} (Physical)`);
+
+    const dbms = opts.dbms;
 
     return {
         model: {
             id: opts.newModelId ?? generatePid(),
             name: modelName,
             version: 1,
+            ...(dbms ? { dbms } : {}),
             notes: logicalModel.model.notes,
         },
-        tables: (logicalModel.tables ?? []).map((table) => ({
-            id: table.id,
-            name: table.name,
-            notes: table.notes,
-            columns: (table.columns ?? []).map((col) => ({
-                id: remapColId(col.id),
-                name: col.name,
-                dataType: inferDataType(col),
-                nullable: col.roles?.primaryKey ? false : (col.nullable ?? true),
-                unique: col.unique ?? false,
-                autoIncrement: false,
-                roles: col.roles
-                    ? {
-                          primaryKey: col.roles.primaryKey,
-                          candidateKey: col.roles.candidateKey,
-                          foreignKey: col.roles.foreignKey
-                              ? {
-                                    refTableId: col.roles.foreignKey.refTableId,
-                                    refColumnId: remapColId(col.roles.foreignKey.refColumnId),
-                                }
-                              : undefined,
-                      }
-                    : undefined,
-            })),
-            indexes: [],
-            functionalDependencies: table.functionalDependencies,
-        })),
+        tables: (logicalModel.tables ?? []).map((table) => {
+            // Detect single-column non-FK PK -> candidate for auto-increment
+            const pkCols = (table.columns ?? []).filter((c) => c.roles?.primaryKey);
+            const singleNonFKPK =
+                pkCols.length === 1 && !pkCols[0].roles?.foreignKey;
+
+            return {
+                id: table.id,
+                name: table.name,
+                notes: table.notes,
+                columns: (table.columns ?? []).map((col) => {
+                    const { dataType, length } = inferPhysicalDataType(col, dbms);
+                    const isPK = !!col.roles?.primaryKey;
+                    // Auto-increment: single-column integer PK that is NOT also a FK
+                    const isAutoIncrement =
+                        singleNonFKPK &&
+                        isPK &&
+                        ["int", "integer", "bigint", "smallint"].includes(dataType);
+
+                    return {
+                        id: remapColId(col.id),
+                        name: col.name,
+                        dataType,
+                        length,
+                        nullable: isPK ? false : (col.nullable ?? true),
+                        unique: col.unique ?? false,
+                        autoIncrement: isAutoIncrement,
+                        roles: col.roles
+                            ? {
+                                  primaryKey: col.roles.primaryKey,
+                                  candidateKey: col.roles.candidateKey,
+                                  foreignKey: col.roles.foreignKey
+                                      ? {
+                                            refTableId: col.roles.foreignKey.refTableId,
+                                            refColumnId: remapColId(
+                                                col.roles.foreignKey.refColumnId,
+                                            ),
+                                        }
+                                      : undefined,
+                              }
+                            : undefined,
+                    };
+                }),
+                indexes: [],
+                functionalDependencies: table.functionalDependencies,
+            };
+        }),
     };
 };
 
-// ── Physical → Logical ────────────────────────────────────────────────────────
-
-const generateLid = (): string => {
-    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-        return `lid_${crypto.randomUUID()}`;
-    }
-    const r = `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
-    return `lid_${r}`;
-};
-
-/** Remap a physical column-id (pid_…) to a logical column-id (lid_…). */
-const remapColIdToLogical = (id: string): string => id.replace(/^pid_/, "lid_");
+// ═══════════════════════════════════════════════════════════════════════════════
+//  PHYSICAL -> LOGICAL
+// ═══════════════════════════════════════════════════════════════════════════════
 
 export interface ConvertPhysicalToLogicalOptions {
     newModelId?: string;
@@ -200,6 +289,7 @@ export interface ConvertPhysicalToLogicalOptions {
  *  - Physical-only fields (`dataType`, `length`, `autoIncrement`, `defaultValue`,
  *    `indexes`) are dropped; the logical layer is implementation-agnostic.
  *  - `nullable`, `unique`, and `roles` (PK, FK, candidateKey) are kept.
+ *  - `comment` fields are merged into `notes` (comment takes priority).
  *  - `functionalDependencies` are carried over.
  */
 export const convertPhysicalToLogical = (
@@ -225,7 +315,7 @@ export const convertPhysicalToLogical = (
         tables: (physicalModel.tables ?? []).map((table) => ({
             id: table.id,
             name: table.name,
-            notes: table.notes,
+            notes: table.comment || table.notes,
             columns: (table.columns ?? []).map((col) => ({
                 id: remapColIdToLogical(col.id),
                 name: col.name,
@@ -238,56 +328,180 @@ export const convertPhysicalToLogical = (
                           foreignKey: col.roles.foreignKey
                               ? {
                                     refTableId: col.roles.foreignKey.refTableId,
-                                    refColumnId: remapColIdToLogical(col.roles.foreignKey.refColumnId),
+                                    refColumnId: remapColIdToLogical(
+                                        col.roles.foreignKey.refColumnId,
+                                    ),
                                 }
                               : undefined,
                       }
                     : undefined,
+                notes: col.comment || col.notes,
             })),
             functionalDependencies: table.functionalDependencies,
         })),
     };
 };
 
-// ── Logical → Conceptual ──────────────────────────────────────────────────────
-
-const generateCid = (): string => {
-    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-        return `cid_${crypto.randomUUID()}`;
-    }
-    const r = `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
-    return `cid_${r}`;
-};
+// ═══════════════════════════════════════════════════════════════════════════════
+//  LOGICAL -> CONCEPTUAL   (major reverse-engineering logic)
+// ═══════════════════════════════════════════════════════════════════════════════
 
 export interface ConvertLogicalToConceptualOptions {
     newModelId?: string;
     newModelName?: string;
 }
 
+// ── Table classification (internal) ─────────────────────────────────────────
+
+/**
+ * Classification kinds for logical tables during reverse-engineering
+ * to the conceptual level.
+ */
+type TableKind =
+    /** Regular strong entity. */
+    | "REGULAR"
+    /** Single-col PK that is also FK -> IS-A child (class table inheritance). */
+    | "ISA_CHILD"
+    /** All PK cols (>= 2) are FK -> N:M or N-ary junction table. */
+    | "JUNCTION"
+    /** Exactly 2 cols: both PK, one FK -> multi-valued attribute on parent. */
+    | "MULTI_VALUED"
+    /** Composite PK with partial FK + extra non-PK cols -> weak entity. */
+    | "WEAK";
+
+type LogicalTable = NonNullable<LogicalModelPayload["tables"]>[number];
+type LogicalColumn = LogicalTable["columns"][number];
+
+type TableClassification = {
+    kind: TableKind;
+    table: LogicalTable;
+    /** ISA_CHILD: parent table ID. */
+    isaParentId?: string;
+    /** MULTI_VALUED: parent table ID. */
+    mvParentId?: string;
+    /** MULTI_VALUED: the value column (PK non-FK). */
+    mvValueCol?: LogicalColumn;
+    /** WEAK: owner table ID (from the FK PK column). */
+    weakOwnerId?: string;
+    /** JUNCTION: referenced table IDs (one per FK PK column). */
+    junctionRefTableIds?: string[];
+};
+
+/**
+ * Classify each logical table to determine its conceptual mapping.
+ *
+ * Classification priority (first match wins):
+ *  1. ISA_CHILD: single PK col that is also FK to another table.
+ *  2. JUNCTION:  >= 2 PK cols, ALL are FK to existing tables.
+ *  3. MULTI_VALUED: exactly 2 cols, both PK, exactly one FK.
+ *  4. WEAK:      composite PK (>= 2), partial FK among PKs, has non-PK cols.
+ *  5. REGULAR:   everything else -> strong entity.
+ */
+const classifyTables = (tables: LogicalTable[]): TableClassification[] => {
+    const tableIdSet = new Set(tables.map((t) => t.id));
+
+    return tables.map((table): TableClassification => {
+        const cols = table.columns ?? [];
+        const pkCols = cols.filter((c) => c.roles?.primaryKey);
+        const pkFkCols = pkCols.filter((c) => c.roles?.foreignKey);
+        const pkNonFkCols = pkCols.filter((c) => !c.roles?.foreignKey);
+        const nonPkCols = cols.filter((c) => !c.roles?.primaryKey);
+
+        // ── 1. ISA: single PK that is also FK ───────────────────────
+        if (
+            pkCols.length === 1 &&
+            pkFkCols.length === 1 &&
+            tableIdSet.has(pkFkCols[0].roles!.foreignKey!.refTableId)
+        ) {
+            return {
+                kind: "ISA_CHILD",
+                table,
+                isaParentId: pkFkCols[0].roles!.foreignKey!.refTableId,
+            };
+        }
+
+        // ── 2. Junction: all PK cols (>= 2) are FK ──────────────────
+        if (pkCols.length >= 2 && pkFkCols.length === pkCols.length) {
+            const refIds = pkFkCols
+                .map((c) => c.roles!.foreignKey!.refTableId)
+                .filter((id) => tableIdSet.has(id));
+            if (refIds.length >= 2) {
+                return {
+                    kind: "JUNCTION",
+                    table,
+                    junctionRefTableIds: refIds,
+                };
+            }
+        }
+
+        // ── 3. Multi-valued: 2 PK cols, 1 FK, 0 non-PK cols ────────
+        if (
+            cols.length === 2 &&
+            pkCols.length === 2 &&
+            pkFkCols.length === 1 &&
+            pkNonFkCols.length === 1 &&
+            nonPkCols.length === 0 &&
+            tableIdSet.has(pkFkCols[0].roles!.foreignKey!.refTableId)
+        ) {
+            return {
+                kind: "MULTI_VALUED",
+                table,
+                mvParentId: pkFkCols[0].roles!.foreignKey!.refTableId,
+                mvValueCol: pkNonFkCols[0],
+            };
+        }
+
+        // ── 4. Weak entity: composite PK, partial FK, has extras ────
+        if (
+            pkCols.length >= 2 &&
+            pkFkCols.length >= 1 &&
+            pkFkCols.length < pkCols.length &&
+            nonPkCols.length > 0
+        ) {
+            const ownerId = pkFkCols[0].roles!.foreignKey!.refTableId;
+            if (tableIdSet.has(ownerId)) {
+                return {
+                    kind: "WEAK",
+                    table,
+                    weakOwnerId: ownerId,
+                };
+            }
+        }
+
+        // ── 5. Regular strong entity ─────────────────────────────────
+        return { kind: "REGULAR", table };
+    });
+};
+
 /**
  * Converts a `LogicalModelPayload` into a `ConceptualModelPayload`.
  *
  * Mapping rules:
- *  - Each table → one strong Entity.
- *  - PK columns → key Attributes (isKey: true, kind: "simple").
- *  - Candidate key columns → key Attributes.
- *  - FK-only columns (not also PK) → NOT added as attributes; each FK
- *    generates one Relationship between source and referenced entity (N:1).
- *  - If the same (sourceTable, refTable) pair appears multiple times,
- *    only one relationship is emitted (deduplication).
- *  - Table IDs are reused as Entity IDs so FK references resolve correctly.
  *
- * ISA (Generalization) detection — class table inheritance pattern:
- *  - If a table's PK column is ALSO a FK to another table, that FK represents
- *    an IS-A relationship (child entity inherits parent). The column is NOT
- *    added as an attribute, and the FK is NOT added as a regular relationship.
- *    Instead a Generalization entry is created with the parent→children mapping.
- *    Default constraints: disjoint / partial (conservative; user can adjust).
+ *  Table classification (reverse-engineering heuristics):
+ *   - REGULAR:      Strong entity with simple attributes.
+ *   - ISA_CHILD:    PK-is-FK pattern -> generalization (child IS-A parent).
+ *   - JUNCTION:     All-PK-are-FK pattern -> N:M or N-ary relationship,
+ *                   with non-PK columns as relationship attributes.
+ *   - MULTI_VALUED: 2-col all-PK (one FK) pattern -> multi_valued attribute
+ *                   added to the parent entity.
+ *   - WEAK:         Composite PK with partial FK + extra cols -> weak entity
+ *                   with an identifying relationship to the owner.
  *
- * Not recoverable from logical model:
- *  - Categories (union types): no representation in logical schema.
- *  - Disjointness / completeness metadata: not stored in logical model.
- *    (defaults are set on generated generalizations, see above.)
+ *  Entity mapping:
+ *   - REGULAR / ISA_CHILD / WEAK tables -> entities.
+ *   - PK cols -> key attributes (isKey: true).
+ *   - FK-only cols -> NOT added as attributes; each FK generates an N:1
+ *     relationship (deduplicated per entity pair).
+ *   - Candidate key cols -> key attributes.
+ *
+ *  Generalization:
+ *   - ISA children grouped by parent -> one Generalization per parent.
+ *   - Defaults: disjoint / partial (conservative; user can adjust).
+ *
+ *  Not recoverable from logical model:
+ *   - Categories (union types): no representation in relational schema.
+ *   - Exact disjointness / completeness semantics.
  */
 export const convertLogicalToConceptual = (
     logicalModel: LogicalModelPayload,
@@ -303,29 +517,27 @@ export const convertLogicalToConceptual = (
             : `${logicalModel.model.name} (Conceptual)`);
 
     const tables = logicalModel.tables ?? [];
+    const classifications = classifyTables(tables);
     const tableIdSet = new Set(tables.map((t) => t.id));
 
-    // ── Detect ISA via class table inheritance pattern ─────────────────
-    // A table whose PK column is also a FK → child entity IS-A parent entity.
-    // isaMap: childTableId → parentTableId (one direct parent only)
-    const isaMap = new Map<string, string>();
-    for (const table of tables) {
-        for (const col of table.columns ?? []) {
-            if (col.roles?.primaryKey && col.roles?.foreignKey) {
-                const refTableId = col.roles.foreignKey.refTableId;
-                if (tableIdSet.has(refTableId) && !isaMap.has(table.id)) {
-                    isaMap.set(table.id, refTableId);
-                }
-            }
-        }
+    // Quick lookup sets by classification
+    const junctionTableIds = new Set<string>();
+    const mvTableIds = new Set<string>();
+    const isaChildIds = new Set<string>();
+    for (const cls of classifications) {
+        if (cls.kind === "JUNCTION") junctionTableIds.add(cls.table.id);
+        if (cls.kind === "MULTI_VALUED") mvTableIds.add(cls.table.id);
+        if (cls.kind === "ISA_CHILD") isaChildIds.add(cls.table.id);
     }
 
-    // Group children by parent → one Generalization per parent
+    // ── 1. Generalizations (ISA) ────────────────────────────────────────
     const generalizationMap = new Map<string, string[]>();
-    for (const [childId, parentId] of isaMap.entries()) {
-        const children = generalizationMap.get(parentId) ?? [];
-        children.push(childId);
-        generalizationMap.set(parentId, children);
+    for (const cls of classifications) {
+        if (cls.kind === "ISA_CHILD" && cls.isaParentId) {
+            const children = generalizationMap.get(cls.isaParentId) ?? [];
+            children.push(cls.table.id);
+            generalizationMap.set(cls.isaParentId, children);
+        }
     }
 
     const generalizations: NonNullable<ConceptualModelPayload["generalizations"]> = [];
@@ -335,26 +547,48 @@ export const convertLogicalToConceptual = (
             parentEntityId,
             childEntityIds,
             constraints: {
-                // Conservative defaults — user can refine after conversion
                 disjointness: "disjoint",
                 completeness: "partial",
             },
         });
     }
 
-    // ── Entities ─────────────────────────────────────────────────────
-    const entities: ConceptualModelPayload["entities"] = tables.map((table) => {
-        const attributes: NonNullable<ConceptualModelPayload["entities"][number]["attributes"]> = [];
+    // ── 2. Entities ─────────────────────────────────────────────────────
+    type AttrPayload = NonNullable<
+        ConceptualModelPayload["entities"][number]["attributes"]
+    >[number];
+    const entities: ConceptualModelPayload["entities"] = [];
+
+    for (const cls of classifications) {
+        // Junction tables and multi-valued tables do NOT become entities
+        if (cls.kind === "JUNCTION" || cls.kind === "MULTI_VALUED") continue;
+
+        const table = cls.table;
+        const isWeak = cls.kind === "WEAK";
+        const attributes: AttrPayload[] = [];
 
         for (const col of table.columns ?? []) {
-            const isFKOnly = col.roles?.foreignKey && !col.roles?.primaryKey && !col.roles?.candidateKey;
-            // ISA PK+FK column becomes a generalization edge, not an attribute
+            // FK-only columns become relationships, not attributes
+            const isFKOnly =
+                col.roles?.foreignKey &&
+                !col.roles?.primaryKey &&
+                !col.roles?.candidateKey;
+
+            // ISA PK+FK column -> generalization, not attribute
             const isISA =
+                cls.kind === "ISA_CHILD" &&
                 col.roles?.primaryKey &&
                 col.roles?.foreignKey &&
-                isaMap.get(table.id) === col.roles.foreignKey.refTableId;
+                cls.isaParentId === col.roles.foreignKey.refTableId;
 
-            if (isFKOnly || isISA) continue;
+            // Weak entity identifying FK PK column -> identifying rel, not attribute
+            const isWeakOwnerFK =
+                isWeak &&
+                col.roles?.primaryKey &&
+                col.roles?.foreignKey &&
+                cls.weakOwnerId === col.roles.foreignKey?.refTableId;
+
+            if (isFKOnly || isISA || isWeakOwnerFK) continue;
 
             attributes.push({
                 id: generateCid(),
@@ -364,35 +598,134 @@ export const convertLogicalToConceptual = (
             });
         }
 
-        return {
+        // Attach multi-valued attributes from child MV tables
+        for (const mvCls of classifications) {
+            if (mvCls.kind !== "MULTI_VALUED") continue;
+            if (mvCls.mvParentId !== table.id) continue;
+            if (mvCls.mvValueCol) {
+                attributes.push({
+                    id: generateCid(),
+                    name: mvCls.mvValueCol.name,
+                    kind: "multi_valued" as const,
+                    isKey: false,
+                });
+            }
+        }
+
+        entities.push({
             id: table.id,
             name: table.name,
-            kind: "strong" as const,
+            kind: isWeak ? ("weak" as const) : ("strong" as const),
             attributes,
             notes: table.notes,
-        };
-    });
+        });
+    }
 
-    // ── Relationships from regular FK columns ─────────────────────────
-    const relationships: ConceptualModelPayload["relationships"] = [];
+    // ── 3. Relationships ────────────────────────────────────────────────
+    type RelPayload = ConceptualModelPayload["relationships"][number];
+    const relationships: RelPayload[] = [];
 
-    for (const table of tables) {
+    // Track emitted (entityA, entityB) pairs to deduplicate
+    const emittedRelPairs = new Set<string>();
+    const pairKey = (a: string, b: string): string =>
+        [a, b].sort().join("↔"); // arrow separator to avoid collision
+
+    // ── 3a. Junction tables -> N:M / N-ary relationships ─────────────
+    for (const cls of classifications) {
+        if (cls.kind !== "JUNCTION") continue;
+        const refIds = cls.junctionRefTableIds ?? [];
+
+        // Relationship attributes = non-PK columns in the junction table
+        const nonPkCols = (cls.table.columns ?? []).filter(
+            (c) => !c.roles?.primaryKey,
+        );
+        const relAttrs: AttrPayload[] = nonPkCols.map((col) => ({
+            id: generateCid(),
+            name: col.name,
+            kind: "simple" as const,
+            isKey: false,
+        }));
+
+        const ends: RelPayload["ends"] = refIds.map((refId) => ({
+            entityId: refId,
+            cardinality: "N",
+            optional: true,
+        }));
+
+        relationships.push({
+            id: generateCid(),
+            name: cls.table.name,
+            type: "association" as const,
+            ...(ends.length > 2 ? { arity: ends.length } : {}),
+            ends,
+            ...(relAttrs.length > 0 ? { attributes: relAttrs } : {}),
+        });
+
+        // Mark all entity pairs as emitted
+        for (let i = 0; i < refIds.length; i++) {
+            for (let j = i + 1; j < refIds.length; j++) {
+                emittedRelPairs.add(pairKey(refIds[i], refIds[j]));
+            }
+        }
+    }
+
+    // ── 3b. Weak entity -> identifying relationship to owner ─────────
+    for (const cls of classifications) {
+        if (cls.kind !== "WEAK" || !cls.weakOwnerId) continue;
+
+        const pk = pairKey(cls.table.id, cls.weakOwnerId);
+        if (emittedRelPairs.has(pk)) continue;
+        emittedRelPairs.add(pk);
+
+        const ownerTable = tables.find((t) => t.id === cls.weakOwnerId);
+        const relName = `${ownerTable?.name ?? "owner"}_${cls.table.name}`;
+
+        relationships.push({
+            id: generateCid(),
+            name: relName,
+            type: "identifying" as const,
+            ends: [
+                { entityId: cls.weakOwnerId, cardinality: "1", optional: false },
+                { entityId: cls.table.id,     cardinality: "N", optional: false },
+            ],
+        });
+    }
+
+    // ── 3c. Regular FK columns -> N:1 association relationships ──────
+    for (const cls of classifications) {
+        // Only tables that became entities (not junction/MV)
+        if (cls.kind === "JUNCTION" || cls.kind === "MULTI_VALUED") continue;
+
+        const table = cls.table;
         for (const col of table.columns ?? []) {
             if (!col.roles?.foreignKey) continue;
             const fk = col.roles.foreignKey;
             if (!tableIdSet.has(fk.refTableId)) continue;
 
-            // Skip ISA FK — already represented as a generalization
-            if (col.roles?.primaryKey && isaMap.get(table.id) === fk.refTableId) continue;
+            // Skip if the referenced table is a junction/MV (not an entity)
+            if (junctionTableIds.has(fk.refTableId) || mvTableIds.has(fk.refTableId))
+                continue;
 
-            // Deduplicate: one relationship per (source, ref) pair
-            const alreadyExists = relationships.some(
-                (r) =>
-                    r.ends.length === 2 &&
-                    r.ends.some((e) => e.entityId === table.id) &&
-                    r.ends.some((e) => e.entityId === fk.refTableId),
-            );
-            if (alreadyExists) continue;
+            // Skip ISA FK (already represented as generalization)
+            if (
+                cls.kind === "ISA_CHILD" &&
+                col.roles?.primaryKey &&
+                cls.isaParentId === fk.refTableId
+            )
+                continue;
+
+            // Skip weak entity owner FK (already handled above)
+            if (
+                cls.kind === "WEAK" &&
+                col.roles?.primaryKey &&
+                cls.weakOwnerId === fk.refTableId
+            )
+                continue;
+
+            // Deduplicate by entity pair
+            const pk = pairKey(table.id, fk.refTableId);
+            if (emittedRelPairs.has(pk)) continue;
+            emittedRelPairs.add(pk);
 
             const refTable = tables.find((t) => t.id === fk.refTableId);
             const relName = `${table.name}_${refTable?.name ?? fk.refTableId}`;
@@ -402,8 +735,16 @@ export const convertLogicalToConceptual = (
                 name: relName,
                 type: "association" as const,
                 ends: [
-                    { entityId: table.id,      cardinality: "N", optional: true },
-                    { entityId: fk.refTableId,  cardinality: "1", optional: false },
+                    {
+                        entityId: table.id,
+                        cardinality: "N",
+                        optional: col.nullable !== false,
+                    },
+                    {
+                        entityId: fk.refTableId,
+                        cardinality: "1",
+                        optional: false,
+                    },
                 ],
             });
         }
@@ -419,16 +760,14 @@ export const convertLogicalToConceptual = (
         entities,
         relationships,
         generalizations,
-        // Categories (union types) cannot be inferred from the logical model —
-        // there is no representation of union/category entities in a relational schema.
         categories: [],
-        // Top-level constraints array (separate from generalization constraints) —
-        // not recoverable; disjointness/completeness are set per-generalization above.
         constraints: [],
     };
 };
 
-// ── Conceptual → Logical ──────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+//  CONCEPTUAL -> LOGICAL
+// ═══════════════════════════════════════════════════════════════════════════════
 
 export interface ConvertConceptualToLogicalOptions {
     newModelId?: string;
@@ -439,28 +778,29 @@ export interface ConvertConceptualToLogicalOptions {
  * Converts a `ConceptualModelPayload` into a `LogicalModelPayload`.
  *
  * Mapping rules:
- *  Entities → Tables (ids preserved).
+ *  Entities -> Tables (ids preserved).
  *  Attributes:
- *   - isKey → PK column (nullable: false, unique: true).
- *   - composite with components → flattened into one column per leaf component.
- *   - derived → skipped (not stored in relational schema).
- *   - all others → regular column.
- *   - entity with no key attribute → auto-prepend `id` PK column.
+ *   - isKey -> PK column (nullable: false, unique: true).
+ *   - composite with components -> flattened into one column per leaf component.
+ *   - multi_valued -> separate table with composite PK (FK to parent + value col).
+ *   - derived -> skipped (not stored in relational schema).
+ *   - all others -> regular column.
+ *   - entity with no key attribute -> auto-prepend `id` PK column.
  *
  *  Generalizations (ISA / class table inheritance):
- *   - Child entity's existing PK column gets an additional FK → parent PK; or
+ *   - Child entity's existing PK column gets an additional FK -> parent PK; or
  *     a new PK+FK column is prepended if the child has no PK of its own.
  *
  *  Relationships:
- *   - N:1 / 1:N  → FK column on the N side.
- *   - 1:1        → FK column on the optional side (first end used as tiebreaker).
- *   - N:M        → junction table with two composite PK+FK columns.
- *   - N-ary (3+) → junction table with one PK+FK column per participant.
- *   - Relationship attributes → columns on the FK table (1:N/1:1) or
+ *   - N:1 / 1:N  -> FK column on the N side.
+ *   - 1:1        -> FK column on the optional side (first end used as tiebreaker).
+ *   - N:M        -> junction table with two composite PK+FK columns.
+ *   - N-ary (3+) -> junction table with one PK+FK column per participant.
+ *   - Relationship attributes -> columns on the FK table (1:N/1:1) or
  *     junction table (N:M / N-ary).
  *
  *  Not representable:
- *   - Categories (union/category types) → plain tables with no FK.
+ *   - Categories (union/category types) -> plain tables with no FK.
  */
 export const convertConceptualToLogical = (
     conceptualModel: ConceptualModelPayload,
@@ -479,7 +819,7 @@ export const convertConceptualToLogical = (
     const relationships = conceptualModel.relationships ?? [];
     const generalizations = conceptualModel.generalizations ?? [];
 
-    // ── Mutable helpers ──────────────────────────────────────────────────────
+    // ── Mutable helpers ──────────────────────────────────────────────────
     type MutCol = {
         id: string;
         name: string;
@@ -492,19 +832,37 @@ export const convertConceptualToLogical = (
         };
         notes?: string;
     };
-    type MutTable = { id: string; name: string; columns: MutCol[]; notes?: string };
+    type MutTable = {
+        id: string;
+        name: string;
+        columns: MutCol[];
+        notes?: string;
+    };
     const tableMap = new Map<string, MutTable>();
 
-    // ── Step 1: Entities → Tables with attribute columns ─────────────────────
+    // ── Step 1: Entities -> Tables with attribute columns ────────────────
     for (const entity of entities) {
         const columns: MutCol[] = [];
 
         for (const attr of entity.attributes ?? []) {
+            // Derived attributes are not stored
             if (attr.kind === "derived") continue;
 
-            if (attr.kind === "composite" && attr.components && attr.components.length > 0) {
+            // Multi-valued attributes become separate tables (handled in Step 4)
+            if (attr.kind === "multi_valued") continue;
+
+            if (
+                attr.kind === "composite" &&
+                attr.components &&
+                attr.components.length > 0
+            ) {
                 for (const comp of attr.components) {
-                    columns.push({ id: generateLid(), name: comp.name, nullable: true, unique: false });
+                    columns.push({
+                        id: generateLid(),
+                        name: comp.name,
+                        nullable: true,
+                        unique: false,
+                    });
                 }
             } else {
                 columns.push({
@@ -529,10 +887,15 @@ export const convertConceptualToLogical = (
             });
         }
 
-        tableMap.set(entity.id, { id: entity.id, name: entity.name, columns, notes: entity.notes });
+        tableMap.set(entity.id, {
+            id: entity.id,
+            name: entity.name,
+            columns,
+            notes: entity.notes,
+        });
     }
 
-    // ── Step 2: Generalizations → class table inheritance ────────────────────
+    // ── Step 2: Generalizations -> class table inheritance ──────────────
     const getPKCol = (tableId: string): MutCol | undefined =>
         tableMap.get(tableId)?.columns.find((c) => c.roles?.primaryKey);
 
@@ -545,17 +908,20 @@ export const convertConceptualToLogical = (
             const childTable = tableMap.get(childId);
             if (!childTable) continue;
 
-            const existingPK = childTable.columns.find((c) => c.roles?.primaryKey);
+            const existingPK = childTable.columns.find(
+                (c) => c.roles?.primaryKey,
+            );
             if (existingPK) {
-                // Augment existing PK: also make it a FK → parent PK
                 existingPK.roles = {
                     ...existingPK.roles,
                     primaryKey: true,
-                    foreignKey: { refTableId: gen.parentEntityId, refColumnId: parentPK.id },
+                    foreignKey: {
+                        refTableId: gen.parentEntityId,
+                        refColumnId: parentPK.id,
+                    },
                 };
-                existingPK.name = parentPK.name; // align name with parent's PK
+                existingPK.name = parentPK.name;
             } else {
-                // Prepend new PK+FK column
                 childTable.columns.unshift({
                     id: generateLid(),
                     name: `${parentTable.name}_id`,
@@ -563,15 +929,19 @@ export const convertConceptualToLogical = (
                     unique: true,
                     roles: {
                         primaryKey: true,
-                        foreignKey: { refTableId: gen.parentEntityId, refColumnId: parentPK.id },
+                        foreignKey: {
+                            refTableId: gen.parentEntityId,
+                            refColumnId: parentPK.id,
+                        },
                     },
                 });
             }
         }
     }
 
-    // ── Step 3: Relationships → FK columns / junction tables ─────────────────
-    const getPKColId = (tableId: string): string | undefined => getPKCol(tableId)?.id;
+    // ── Step 3: Relationships -> FK columns / junction tables ───────────
+    const getPKColId = (tableId: string): string | undefined =>
+        getPKCol(tableId)?.id;
 
     for (const rel of relationships) {
         const ends = (rel.ends ?? []).filter((e) => tableMap.has(e.entityId));
@@ -579,10 +949,12 @@ export const convertConceptualToLogical = (
 
         const relAttributes = rel.attributes ?? [];
 
-        // N-ary (3+) → junction table
+        // N-ary (3+) -> junction table
         if (ends.length > 2) {
             const junctionId = `tbl_${rel.id}`;
-            const junctionName = rel.name || ends.map((e) => tableMap.get(e.entityId)!.name).join("_");
+            const junctionName =
+                rel.name ||
+                ends.map((e) => tableMap.get(e.entityId)!.name).join("_");
             const cols: MutCol[] = [];
             for (const end of ends) {
                 const pkId = getPKColId(end.entityId);
@@ -592,56 +964,110 @@ export const convertConceptualToLogical = (
                     name: `${tableMap.get(end.entityId)!.name}_id`,
                     nullable: false,
                     unique: false,
-                    roles: { primaryKey: true, foreignKey: { refTableId: end.entityId, refColumnId: pkId } },
+                    roles: {
+                        primaryKey: true,
+                        foreignKey: {
+                            refTableId: end.entityId,
+                            refColumnId: pkId,
+                        },
+                    },
                 });
             }
             for (const rAttr of relAttributes) {
-                cols.push({ id: generateLid(), name: rAttr.name, nullable: true, unique: false });
+                cols.push({
+                    id: generateLid(),
+                    name: rAttr.name,
+                    nullable: true,
+                    unique: false,
+                });
             }
-            if (cols.length > 0) tableMap.set(junctionId, { id: junctionId, name: junctionName, columns: cols });
+            if (cols.length > 0) {
+                tableMap.set(junctionId, {
+                    id: junctionId,
+                    name: junctionName,
+                    columns: cols,
+                });
+            }
             continue;
         }
 
         // Binary relationship
         const [endA, endB] = ends;
-        const isAMany = endA.cardinality === "N" || endA.cardinality === "M";
-        const isBMany = endB.cardinality === "N" || endB.cardinality === "M";
+        const isAMany =
+            endA.cardinality === "N" || endA.cardinality === "M";
+        const isBMany =
+            endB.cardinality === "N" || endB.cardinality === "M";
 
         if (isAMany && isBMany) {
-            // N:M → junction table
+            // N:M -> junction table
             const pkA = getPKColId(endA.entityId);
             const pkB = getPKColId(endB.entityId);
             if (!pkA || !pkB) continue;
             const tableA = tableMap.get(endA.entityId)!;
             const tableB = tableMap.get(endB.entityId)!;
             const junctionId = `tbl_${rel.id}`;
-            const junctionName = rel.name || `${tableA.name}_${tableB.name}`;
+            const junctionName =
+                rel.name || `${tableA.name}_${tableB.name}`;
             const cols: MutCol[] = [
                 {
-                    id: generateLid(), name: `${tableA.name}_id`, nullable: false, unique: false,
-                    roles: { primaryKey: true, foreignKey: { refTableId: endA.entityId, refColumnId: pkA } },
+                    id: generateLid(),
+                    name: `${tableA.name}_id`,
+                    nullable: false,
+                    unique: false,
+                    roles: {
+                        primaryKey: true,
+                        foreignKey: {
+                            refTableId: endA.entityId,
+                            refColumnId: pkA,
+                        },
+                    },
                 },
                 {
-                    id: generateLid(), name: `${tableB.name}_id`, nullable: false, unique: false,
-                    roles: { primaryKey: true, foreignKey: { refTableId: endB.entityId, refColumnId: pkB } },
+                    id: generateLid(),
+                    name: `${tableB.name}_id`,
+                    nullable: false,
+                    unique: false,
+                    roles: {
+                        primaryKey: true,
+                        foreignKey: {
+                            refTableId: endB.entityId,
+                            refColumnId: pkB,
+                        },
+                    },
                 },
             ];
             for (const rAttr of relAttributes) {
-                cols.push({ id: generateLid(), name: rAttr.name, nullable: true, unique: false });
+                cols.push({
+                    id: generateLid(),
+                    name: rAttr.name,
+                    nullable: true,
+                    unique: false,
+                });
             }
-            tableMap.set(junctionId, { id: junctionId, name: junctionName, columns: cols });
+            tableMap.set(junctionId, {
+                id: junctionId,
+                name: junctionName,
+                columns: cols,
+            });
         } else {
-            // 1:N, N:1, or 1:1 → FK on the N-side (or optional side for 1:1)
+            // 1:N, N:1, or 1:1 -> FK on the N-side (or optional side for 1:1)
             let fkEnd: (typeof ends)[number];
             let refEnd: (typeof ends)[number];
 
             if (isAMany && !isBMany) {
-                fkEnd = endA; refEnd = endB;
+                fkEnd = endA;
+                refEnd = endB;
             } else if (!isAMany && isBMany) {
-                fkEnd = endB; refEnd = endA;
+                fkEnd = endB;
+                refEnd = endA;
             } else {
-                // 1:1 — prefer the optional side; fall back to endA
-                fkEnd = (endA.optional !== false) ? endA : (endB.optional !== false ? endB : endA);
+                // 1:1 -- prefer the optional side; fall back to endA
+                fkEnd =
+                    endA.optional !== false
+                        ? endA
+                        : endB.optional !== false
+                          ? endB
+                          : endA;
                 refEnd = fkEnd === endA ? endB : endA;
             }
 
@@ -660,12 +1086,66 @@ export const convertConceptualToLogical = (
                 id: generateLid(),
                 name: colName,
                 nullable: fkEnd.optional !== false,
-                unique: !isAMany && !isBMany, // 1:1 → unique
-                roles: { foreignKey: { refTableId: refEnd.entityId, refColumnId: pkRef } },
+                unique: !isAMany && !isBMany, // 1:1 -> unique
+                roles: {
+                    foreignKey: {
+                        refTableId: refEnd.entityId,
+                        refColumnId: pkRef,
+                    },
+                },
             });
             for (const rAttr of relAttributes) {
-                fkTable.columns.push({ id: generateLid(), name: rAttr.name, nullable: true, unique: false });
+                fkTable.columns.push({
+                    id: generateLid(),
+                    name: rAttr.name,
+                    nullable: true,
+                    unique: false,
+                });
             }
+        }
+    }
+
+    // ── Step 4: Multi-valued attributes -> separate tables ──────────────
+    for (const entity of entities) {
+        for (const attr of entity.attributes ?? []) {
+            if (attr.kind !== "multi_valued") continue;
+
+            const parentTable = tableMap.get(entity.id);
+            if (!parentTable) continue;
+            const parentPK = parentTable.columns.find(
+                (c) => c.roles?.primaryKey,
+            );
+            if (!parentPK) continue;
+
+            const mvTableId = `tbl_mv_${entity.id}_${attr.id}`;
+            const mvTableName = `${entity.name}_${attr.name}`;
+            const cols: MutCol[] = [
+                {
+                    id: generateLid(),
+                    name: `${entity.name}_id`,
+                    nullable: false,
+                    unique: false,
+                    roles: {
+                        primaryKey: true,
+                        foreignKey: {
+                            refTableId: entity.id,
+                            refColumnId: parentPK.id,
+                        },
+                    },
+                },
+                {
+                    id: generateLid(),
+                    name: attr.name,
+                    nullable: false,
+                    unique: false,
+                    roles: { primaryKey: true },
+                },
+            ];
+            tableMap.set(mvTableId, {
+                id: mvTableId,
+                name: mvTableName,
+                columns: cols,
+            });
         }
     }
 
@@ -680,7 +1160,9 @@ export const convertConceptualToLogical = (
     };
 };
 
-// ── Physical → Conceptual ─────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+//  PHYSICAL -> CONCEPTUAL (two-step chain)
+// ═══════════════════════════════════════════════════════════════════════════════
 
 export interface ConvertPhysicalToConceptualOptions {
     newModelId?: string;
@@ -691,8 +1173,8 @@ export interface ConvertPhysicalToConceptualOptions {
  * Converts a `PhysicalModelPayload` into a `ConceptualModelPayload`.
  *
  * Implemented as a two-step chain:
- *   Physical → Logical (strip implementation details)
- *   Logical  → Conceptual (detect ISA, map FK → Relationship)
+ *   Physical -> Logical (strip implementation details)
+ *   Logical  -> Conceptual (detect ISA, junction, weak, multi-valued, FK -> Rel)
  *
  * See `convertPhysicalToLogical` and `convertLogicalToConceptual` for full rules.
  */
@@ -716,19 +1198,23 @@ export const convertPhysicalToConceptual = (
     });
 };
 
-// ── Conceptual → Physical ─────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+//  CONCEPTUAL -> PHYSICAL (two-step chain)
+// ═══════════════════════════════════════════════════════════════════════════════
 
 export interface ConvertConceptualToPhysicalOptions {
     newModelId?: string;
     newModelName?: string;
+    /** Target DBMS -- passed through to Logical -> Physical for type mapping. */
+    dbms?: DBMSType;
 }
 
 /**
  * Converts a `ConceptualModelPayload` into a `PhysicalModelPayload`.
  *
  * Implemented as a two-step chain:
- *   Conceptual → Logical (map Entity/Relationship/Generalization → tables + FKs)
- *   Logical    → Physical (infer data types, add indexes)
+ *   Conceptual -> Logical (map Entity/Relationship/Generalization -> tables + FKs)
+ *   Logical    -> Physical (infer data types per DBMS, set auto-increment)
  *
  * See `convertConceptualToLogical` and `convertLogicalToPhysical` for full rules.
  */
@@ -749,5 +1235,6 @@ export const convertConceptualToPhysical = (
     return convertLogicalToPhysical(logicalModel, {
         newModelId: opts.newModelId,
         newModelName: modelName,
+        dbms: opts.dbms,
     });
 };

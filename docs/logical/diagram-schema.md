@@ -1,60 +1,60 @@
 ## diagram
 
-- `id`: định danh của sơ đồ (prefix `lid_`).
-- `name`: tên sơ đồ
-- `viewport`: thông tin hiển thị toàn cảnh sơ đồ.
-  - `x`, `y`: tọa độ gốc (offset).
-  - `zoom`: mức phóng to/thu nhỏ (0.1 → 5.0).
-  - `gridSize`: kích thước lưới.
-  - `snapToGrid`: có tự động bắt vào lưới không.
-- `nodes`: danh sách node (mỗi node có thể là bảng hoặc ghi chú).
-- `edges`: danh sách cạnh (mũi tên FK hoặc liên kết ghi chú).
+* `id*`: Định danh sơ đồ (prefix `lid_`).
+* `name*`: Tên sơ đồ.
+* `viewport`: Thông tin hiển thị toàn cảnh sơ đồ.
+  * `x`, `y`: Tọa độ gốc (offset).
+  * `zoom`: Mức phóng to/thu nhỏ (0.1 → 5.0).
+  * `gridSize`: Kích thước lưới.
+  * `snapToGrid`: Có tự động bắt vào lưới không.
+* `nodes*`: Danh sách node (bảng hoặc ghi chú).
+* `edges*`: Danh sách cạnh (mũi tên FK hoặc liên kết ghi chú).
+
+---
 
 ## node
 
-- `id`: định danh node (prefix `lid_`).
-- `type`: `"table"` hoặc `"note"`.
-- `position`: tọa độ trên canvas (x,y).
-- `size`: kích thước (w,h).
-- `zIndex`: lớp hiển thị (cái nào chồng lên trên).
-- `style`: style cơ bản (stroke, fill, font size, class CSS).
-- `name`: tên hiển thị của node (thường là tên bảng).
-- `tableId`: trỏ về `table.id` trong `model.json` (bắt buộc khi type=table).
-- `columns`: dùng để quy định thứ tự và trang trí cột hiển thị trong bảng (chỉ cho type=table).
+* `id*`: Định danh node (prefix `lid_`).
+* `type*`: `"table"`, `"note"`, `"sticky-note"`, `"text-label"`, `"drawing-path"`.
+* `position*`: Tọa độ trên canvas (`x`, `y`).
+* `size*`: Kích thước (`w`, `h`; minimum 20×20).
+* `zIndex`: Lớp hiển thị.
+* `style`: Style cơ bản (`class`, `stroke`, `fill`, `fontSize`).
+* `name`: Tên hiển thị của node (thường là tên bảng).
 
-  - `columnId`: tham chiếu đến `column.id` trong `model.json`.
-  - `label`: tên hiển thị nếu khác tên gốc.
-  - `decorations`: để style cột (pk, fk, underline, italic).
+### table node (type = "table")
 
-    - `pk`: cột PK (gạch chân).
-    - `fk`: cột FK (thường đánh dấu).
-    - `underline`: ép hiển thị gạch chân.
-    - `italic`: hiển thị in nghiêng.
+* `tableId*`: Tham chiếu `table.id` trong model.json (prefix `lid_`).
+* `columns`: Thứ tự và trang trí cột hiển thị.
+  * `columnId*`: Tham chiếu `column.id` trong model.json (prefix `lid_`).
+  * `label`: Tên hiển thị nếu khác tên gốc.
+  * `decorations`: Style cột.
+    * `pk`: Cột PK (gạch chân).
+    * `fk`: Cột FK (đánh dấu).
+    * `underline`: Ép hiển thị gạch chân.
+    * `italic`: Hiển thị in nghiêng.
 
-- `text`: nội dung ghi chú (chỉ cho type=note).
+### note node (type = "note")
+
+* `text`: Nội dung ghi chú.
+
+---
 
 ## edge
 
-- `id`: định danh cạnh (prefix `lid_`).
-- `type`: `"fk"` hoặc `"noteLink"`.
-- `source`: columnId nguồn (format: `lid_nodeId_col_index`). Từ đây có thể extract được nodeId và column index.
-- `target`: columnId đích (format: `lid_nodeId_col_index`). Từ đây có thể extract được nodeId và column index.
-- `sourceSide`: phía của handle nguồn (`"left"` hoặc `"right"`).
-- `targetSide`: phía của handle đích (`"left"` hoặc `"right"`).
-- `points`: polyline (một danh sách điểm) để vẽ đường đi uốn lượn.
-- `style`: style đường (stroke, fill, class…).
-- `fkRef`: tham chiếu tới foreign key cụ thể trong `model.json` (bắt buộc nếu type=fk).
-
-  - `tableId`: id bảng chứa FK.
-  - `foreignKeyIndex`: chỉ số trong mảng `table.foreignKeys`.
-
-- `labels`: text hiển thị trên cạnh.
-
-  - `text`: nội dung.
-  - `position`: tọa độ đặt label.
-
-## Khác
-
-- `point`: đối tượng `{x,y}` để định vị.
-- `size`: `{w,h}` cho kích thước node.
-- `style`: `{class, stroke, fill, fontSize}` để tùy chỉnh.
+* `id*`: Định danh cạnh (prefix `lid_`).
+* `type*`: `"fk"` hoặc `"noteLink"`.
+* `source*`: ID column nguồn (prefix `lid_`).
+* `target*`: ID column đích (prefix `lid_`).
+* `sourceSide`: Phía kết nối column nguồn (`left` / `right`).
+* `targetSide`: Phía kết nối column đích (`left` / `right`).
+* `points`: Polyline — danh sách điểm (`x`, `y`) vẽ đường uốn lượn.
+* `style`: Style đường (`stroke`, `fill`, `class`).
+* `fkRef`: Tham chiếu FK cụ thể trong model.json (bắt buộc nếu type = `fk`).
+  * `tableId`: ID bảng chứa FK (prefix `lid_`).
+  * `foreignKeyIndex`: Chỉ số trong mảng FK (≥ 0).
+* `labels`: Text hiển thị trên cạnh.
+  * `text`: Nội dung.
+  * `position`: Tọa độ đặt label (`x`, `y`).
+* `sourceCardinality`: Cardinality phía nguồn (`"1"` / `"N"`).
+* `targetCardinality`: Cardinality phía đích (`"1"` / `"N"`).

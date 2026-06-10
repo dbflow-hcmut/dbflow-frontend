@@ -1,520 +1,289 @@
-# Schema Conversion — Logical ↔ Physical ↔ Conceptual
+# Schema Conversion — Logical <-> Physical <-> Conceptual
 
-## Tổng quan
+## Tong quan
 
-Tính năng **Convert schema** cho phép người dùng chuyển đổi qua lại giữa các mức độ của schema mà không cần AI. Hiện tại hỗ trợ **sáu chiều** đều deterministic:
+Tinh nang **Convert schema** cho phep nguoi dung chuyen doi qua lai giua cac muc do cua schema ma khong can AI. Hien tai ho tro **sau chieu** deu deterministic:
 
-| Từ | Sang | Phương pháp |
+| Tu | Sang | Phuong phap |
 |---|---|---|
-| Logical | Physical | Deterministic (tự động suy ra data type) |
-| Physical | Logical | Deterministic (strip physical details) |
-| Logical | Conceptual | Deterministic (detect ISA, map FK → Relationship) |
-| Conceptual | Logical | Deterministic (map Entity → Table, Relationship/Generalization → FK) |
-| Physical | Conceptual | Deterministic (chain: Physical → Logical → Conceptual) |
-| Conceptual | Physical | Deterministic (chain: Conceptual → Logical → Physical) |
+| Logical | Physical | Deterministic (DBMS-aware type inference, auto-increment) |
+| Physical | Logical | Deterministic (strip physical details, preserve comments) |
+| Logical | Conceptual | Deterministic (detect ISA, junction table, multi-valued attr, weak entity) |
+| Conceptual | Logical | Deterministic (map Entity -> Table, Rel/Gen -> FK, multi-valued -> table) |
+| Physical | Conceptual | Deterministic (chain: Physical -> Logical -> Conceptual) |
+| Conceptual | Physical | Deterministic (chain: Conceptual -> Logical -> Physical, with optional DBMS) |
 
-**File implementation:** `src/components/EditProject/utils/schema-conversion.ts`  
+**File implementation:** `src/components/EditProject/utils/schema-conversion.ts`
 **Entry point:** `handleConvertSchema` trong `src/components/EditProject/index.tsx`
 
 ---
 
-## Quy trình thực thi
+## Quy trinh thuc thi
 
 ```
-User click "Convert schema" → chọn target type
-    │
-    ▼
+User click "Convert schema" -> chon target type
+    |
+    v
 handleConvertSchema(targetType)
-    │  ← rebuild model tươi từ nodes/edges hiện tại trước khi convert
-    │
-    ├─ isLogical && target = physical    ──► convertLogicalToPhysical()
-    ├─ isPhysical && target = logical    ──► convertPhysicalToLogical()
-    ├─ isLogical && target = conceptual  ──► convertLogicalToConceptual()
-    ├─ isConceptual && target = logical  ──► convertConceptualToLogical()
-    ├─ isPhysical && target = conceptual ──► convertPhysicalToConceptual()  [chain P→L→C]
-    ├─ isConceptual && target = physical ──► convertConceptualToPhysical()  [chain C→L→P]
-    │
-    │  (sau khi convert)
-    │  createSchema() → saveSchemaModel() → router.push(new schema)
-    │
-    └─ else ─────────────────────────────► mở ChatBox + set convertTo param
+    |  <- rebuild model tuoi tu nodes/edges hien tai truoc khi convert
+    |
+    +- isLogical && target = physical    --> convertLogicalToPhysical()
+    +- isPhysical && target = logical    --> convertPhysicalToLogical()
+    +- isLogical && target = conceptual  --> convertLogicalToConceptual()
+    +- isConceptual && target = logical  --> convertConceptualToLogical()
+    +- isPhysical && target = conceptual --> convertPhysicalToConceptual()  [chain P->L->C]
+    +- isConceptual && target = physical --> convertConceptualToPhysical()  [chain C->L->P]
+    |
+    |  (sau khi convert)
+    |  createSchema() -> saveSchemaModel() -> router.push(new schema)
+    |
+    +- else --> mo ChatBox + set convertTo param
 ```
 
-> **Lưu ý quan trọng:** Trước khi convert, model được rebuild từ `nodes`/`edges` đang hiển thị trên canvas (không phải từ cache của collaboration hook). Điều này đảm bảo mọi thay đổi trực tiếp trên canvas (xóa node, đổi tên...) đều được phản ánh đúng.
-
-Trong khi đang convert, nút **Convert schema** ở Header sẽ hiển thị loading spinner và bị disabled — không cho bấm lại cho đến khi navigate xong hoặc có lỗi.
+> **Luu y quan trong:** Truoc khi convert, model duoc rebuild tu `nodes`/`edges` dang hien thi tren canvas (khong phai tu cache cua collaboration hook). Dieu nay dam bao moi thay doi truc tiep tren canvas (xoa node, doi ten...) deu duoc phan anh dung.
 
 ---
 
-## 1. Logical → Physical (`convertLogicalToPhysical`)
+## 1. Logical -> Physical (`convertLogicalToPhysical`)
 
-### Mục đích
+### Muc dich
 
-Chuyển `LogicalModelPayload` thành `PhysicalModelPayload`. Physical schema bổ sung thêm thông tin implementation: data type cụ thể, index, constraint vật lý. Bước chuyển này tự động suy ra data type từ role và tên column.
+Chuyen `LogicalModelPayload` thanh `PhysicalModelPayload`. Physical schema bo sung them thong tin implementation: data type cu the, index, constraint vat ly.
 
-### Quy tắc chuyển đổi — Model level
+### Options
 
-| Trường | Hành vi |
+| Option | Mo ta |
 |---|---|
-| `model.id` | Tạo mới với prefix `pid_` |
-| `model.name` | Thay "logical"/"Logical" → "Physical"; nếu không thay được thì thêm " (Physical)" |
-| `model.version` | Reset về `1` |
-| `model.notes` | Giữ nguyên |
+| `newModelId` | Override model ID (mac dinh: tao moi `pid_*`) |
+| `newModelName` | Override model name |
+| `dbms` | Target DBMS (`mysql` / `postgresql` / `sqlserver`) -- bat type mapping theo DBMS |
 
-### Quy tắc chuyển đổi — Table level
+### Quy tac chuyen doi -- Model level
 
-| Trường | Hành vi |
+| Truong | Hanh vi |
 |---|---|
-| `table.id` | **Giữ nguyên** (để FK references không bị đứt) |
-| `table.name` | Giữ nguyên |
-| `table.notes` | Giữ nguyên |
-| `table.indexes` | Khởi tạo rỗng `[]` (logical không có indexes) |
-| `table.functionalDependencies` | Giữ nguyên (carry over) |
+| `model.id` | Tao moi voi prefix `pid_` |
+| `model.name` | Thay "logical"/"Logical" -> "Physical"; neu khong thay duoc thi them " (Physical)" |
+| `model.version` | Reset ve `1` |
+| `model.dbms` | Set theo `opts.dbms` (neu cung cap) |
+| `model.notes` | Giu nguyen |
 
-### Quy tắc chuyển đổi — Column level
+### Quy tac chuyen doi -- Column level
 
-| Trường | Hành vi |
+| Truong | Hanh vi |
 |---|---|
-| `col.id` | Remap prefix: `lid_` → `pid_` |
-| `col.name` | Giữ nguyên |
-| `col.nullable` | Giữ nguyên; **ngoại lệ**: PK column → `false` |
-| `col.unique` | Giữ nguyên |
-| `col.autoIncrement` | Mặc định `false` (user có thể bật sau) |
-| `col.defaultValue` | Không set (undefined) |
-| `col.length` | Không set (undefined) |
-| `col.roles.primaryKey` | Giữ nguyên |
-| `col.roles.candidateKey` | Giữ nguyên |
-| `col.roles.foreignKey.refTableId` | Giữ nguyên |
-| `col.roles.foreignKey.refColumnId` | Remap prefix: `lid_` → `pid_` |
-| `col.dataType` | **Suy ra** theo bảng `inferDataType` bên dưới |
+| `col.id` | Remap prefix: `lid_` -> `pid_` |
+| `col.name` | Giu nguyen |
+| `col.nullable` | Giu nguyen; **ngoai le**: PK column -> `false` |
+| `col.unique` | Giu nguyen |
+| `col.autoIncrement` | `true` neu la single-column integer PK (khong phai FK); `false` con lai |
+| `col.defaultValue` | Khong set (undefined) |
+| `col.dataType` | **Suy ra** theo bang `inferPhysicalDataType` ben duoi |
+| `col.length` | **Suy ra** tu heuristic (vd: varchar -> "255", decimal -> "10,2") |
+| `col.roles` | Giu nguyen; FK refColumnId duoc remap `lid_` -> `pid_` |
 
-### Bảng suy ra `dataType` (inferDataType)
+### Bang suy ra `dataType` (inferPhysicalDataType)
 
-Áp dụng theo thứ tự ưu tiên — rule đầu tiên match sẽ được dùng:
+Ap dung theo thu tu uu tien -- rule dau tien match se duoc dung:
 
-| Ưu tiên | Điều kiện | `dataType` |
+| Uu tien | Dieu kien | Generic type | Default length |
+|---|---|---|---|
+| 1 | `roles.primaryKey` hoac `roles.foreignKey` | `int` | -- |
+| 2 | Ten chua date/time patterns | `datetime` | -- |
+| 3 | Ten chua monetary patterns (price, cost, amount...) | `decimal` | `"10,2"` |
+| 4 | Ten chua numeric patterns (count, qty, age...) | `int` | -- |
+| 5 | Ten chua boolean patterns (is_, has_, active...) | `boolean` | -- |
+| 6 | Ten chua large-text patterns (description, content...) | `text` | -- |
+| 7 | Ten chua email, address, url | `varchar` | `"255"` |
+| 8 | Ten chua name, title, code, status... | `varchar` | `"100"` |
+| 9 | Mac dinh | `varchar` | `"255"` |
+
+### DBMS-specific type mapping
+
+Khi `opts.dbms` duoc cung cap, generic types duoc map sang native types:
+
+| Generic | MySQL | PostgreSQL | SQL Server |
+|---|---|---|---|
+| `int` | `int` | `integer` | `int` |
+| `boolean` | `tinyint` | `boolean` | `bit` |
+| `datetime` | `datetime` | `timestamp` | `datetime2` |
+| `text` | `text` | `text` | `nvarchar` |
+| `varchar` | `varchar` | `varchar` | `nvarchar` |
+| `decimal` | `decimal` | `numeric` | `decimal` |
+
+---
+
+## 2. Physical -> Logical (`convertPhysicalToLogical`)
+
+### Muc dich
+
+Chuyen `PhysicalModelPayload` thanh `LogicalModelPayload`. Loai bo thong tin physical, giu lai cau truc quan he.
+
+### Quy tac chuyen doi
+
+| Truong | Hanh vi |
+|---|---|
+| `col.id` | Remap prefix: `pid_` -> `lid_` |
+| `col.dataType`, `length`, `autoIncrement`, `defaultValue` | **Bo** |
+| `table.indexes` | **Bo** |
+| `table.comment` | Merge vao `table.notes` (comment uu tien hon notes) |
+| `col.comment` | Merge vao `col.notes` (comment uu tien hon notes) |
+| `model.dbms`, `model.description` | **Bo** (logical la DBMS-agnostic) |
+| Con lai | Giu nguyen |
+
+---
+
+## 3. Logical -> Conceptual (`convertLogicalToConceptual`)
+
+### Muc dich
+
+Chuyen `LogicalModelPayload` thanh `ConceptualModelPayload`. Day la buoc **reverse engineering** chinh -- tu relational schema tai tao lai EER model.
+
+### Table Classification (Reverse Engineering Heuristics)
+
+Moi table duoc phan loai truoc khi chuyen doi. Thu tu uu tien:
+
+| Classification | Dieu kien | Ket qua conceptual |
 |---|---|---|
-| 1 | `roles.primaryKey === true` | `int` |
-| 2 | `roles.foreignKey` có giá trị | `int` |
-| 3 | Tên kết thúc bằng `_at`, `_date`, `_time` | `datetime` |
-| 4 | Tên chứa `date`, `time`, `created`, `updated` | `datetime` |
-| 5 | Tên chứa `count`, `_num`, `qty`, `quantity`, `amount`, `price`, `total`, `score`, `rank`, `age`, `year` | `int` |
-| 6 | Tên bắt đầu bằng `is_`, `has_`, `can_` | `boolean` |
-| 7 | Tên là `active`, `enabled`, `deleted`, `verified`, `published` | `boolean` |
-| 8 | Tên chứa `description`, `content`, `body`, `notes`, `comment`, `bio`, `message` | `text` |
-| 9 | Mặc định | `varchar` |
+| **ISA_CHILD** | Single PK column la FK den table khac | Generalization (IS-A) |
+| **JUNCTION** | >= 2 PK columns, **tat ca** deu la FK | N:M hoac N-ary Relationship |
+| **MULTI_VALUED** | Dung 2 cols, ca hai PK, 1 FK, 0 non-PK | Multi-valued Attribute tren parent entity |
+| **WEAK** | Composite PK, co it nhat 1 PK-FK + 1 PK non-FK, co non-PK cols | Weak Entity + Identifying Relationship |
+| **REGULAR** | Tat ca truong hop con lai | Strong Entity |
 
-> **Lưu ý:** `dataType` chỉ là gợi ý khởi đầu. User có thể chỉnh sửa thủ công trong Properties Panel sau khi convert.
+### Chi tiet tung classification
 
----
-
-## 2. Physical → Logical (`convertPhysicalToLogical`)
-
-### Mục đích
-
-Chuyển `PhysicalModelPayload` thành `LogicalModelPayload`. Logical schema là lớp trừu tượng — không quan tâm đến implementation details như data type, index, auto-increment. Bước chuyển này loại bỏ các thông tin physical và giữ lại cấu trúc quan hệ.
-
-### Quy tắc chuyển đổi — Model level
-
-| Trường | Hành vi |
-|---|---|
-| `model.id` | Tạo mới với prefix `lid_` |
-| `model.name` | Thay "physical"/"Physical" → "Logical"; nếu không thay được thì thêm " (Logical)" |
-| `model.version` | Reset về `1` |
-| `model.notes` | Giữ nguyên |
-
-### Quy tắc chuyển đổi — Table level
-
-| Trường | Hành vi |
-|---|---|
-| `table.id` | **Giữ nguyên** |
-| `table.name` | Giữ nguyên |
-| `table.notes` | Giữ nguyên |
-| `table.indexes` | **Bỏ** (logical không có khái niệm index) |
-| `table.functionalDependencies` | Giữ nguyên |
-
-### Quy tắc chuyển đổi — Column level
-
-| Trường | Hành vi |
-|---|---|
-| `col.id` | Remap prefix: `pid_` → `lid_` |
-| `col.name` | Giữ nguyên |
-| `col.nullable` | Giữ nguyên |
-| `col.unique` | Giữ nguyên |
-| `col.dataType` | **Bỏ** (không có trong logical model) |
-| `col.length` | **Bỏ** |
-| `col.autoIncrement` | **Bỏ** |
-| `col.defaultValue` | **Bỏ** |
-| `col.roles.primaryKey` | Giữ nguyên |
-| `col.roles.candidateKey` | Giữ nguyên |
-| `col.roles.foreignKey.refTableId` | Giữ nguyên |
-| `col.roles.foreignKey.refColumnId` | Remap prefix: `pid_` → `lid_` |
-
----
-
-## 3. Logical → Conceptual (`convertLogicalToConceptual`)
-
-### Mục đích
-
-Chuyển `LogicalModelPayload` thành `ConceptualModelPayload`. Conceptual schema là lớp trừu tượng cao nhất — thể hiện entity, relationship, và generalization, không có thông tin implementation.
-
-### Tại sao `generalizations`, `categories`, `constraints` đôi khi rỗng?
-
-| Trường | Có thể tái tạo? | Lý do |
-|---|---|---|
-| `generalizations` | **Một phần** — dùng heuristic | Detect pattern ISA (xem bên dưới) |
-| `categories` | **Không** | Union type không có dạng chuẩn trong relational schema |
-| `constraints[top-level]` | **Không** | Metadata disjointness/completeness không lưu trong logical |
-
-### ISA detection — Class table inheritance heuristic
-
-Nếu một table có column **vừa là PK vừa là FK** đến table khác → đó là *class table inheritance*, tức là pattern ISA trong conceptual ER:
-
+#### ISA_CHILD (Class table inheritance)
 ```
--- Logical: employee.id là PK và FK → person.id
--- Conceptual: Employee IS-A Person (Generalization)
-
-employee (id PK+FK→person.id, salary)
+employee (id PK+FK->person.id, salary)
 person   (id PK, name, email)
 ```
+- Employee IS-A Person
+- Column `id` (PK+FK) khong tao attribute, khong tao relationship
+- Tao Generalization: parent=person, children=[employee]
+- Defaults: disjoint / partial
 
-Với mỗi nhóm (parent → [children]) phát hiện được, tạo một `Generalization`:
-- `disjointness`: `"disjoint"` (mặc định bảo thủ)
-- `completeness`: `"partial"` (mặc định bảo thủ)
-- User có thể chỉnh sau khi convert
+#### JUNCTION (N:M / N-ary relationship)
+```
+enrollment (student_id PK+FK->student.id, course_id PK+FK->course.id, grade)
+```
+- Khong tao entity cho "enrollment"
+- Tao Relationship "enrollment" giua Student va Course
+- Cardinality: N:N
+- Non-PK column `grade` thanh relationship attribute
 
-Nếu một table có nhiều PK+FK (ít gặp), chỉ lấy **FK đầu tiên** làm parent.
+#### MULTI_VALUED (Multi-valued attribute)
+```
+employee_phones (employee_id PK+FK->employee.id, phone PK)
+```
+- Khong tao entity cho "employee_phones"
+- Them attribute `phone` voi `kind: "multi_valued"` vao entity Employee
 
-### Quy tắc chuyển đổi — Model level
+#### WEAK (Weak entity)
+```
+room (building_id PK+FK->building.id, room_number PK, capacity, type)
+```
+- Tao entity "room" voi `kind: "weak"`
+- Attribute: room_number (isKey: true), capacity, type
+- Building_id FK PK column khong tao attribute
+- Tao Identifying Relationship: building (1) -- room (N), type="identifying"
 
-| Trường | Hành vi |
+#### REGULAR (Strong entity)
+- Moi table -> 1 entity (kind: "strong")
+- PK columns -> key attributes
+- FK-only columns -> N:1 relationships (deduplicated theo entity pair)
+- Candidate key columns -> key attributes
+
+### Relationship deduplication
+
+- Tat ca relationships duoc deduplicate theo entity pair (A, B)
+- Junction table relationships duoc xu ly truoc
+- Weak entity identifying relationships duoc xu ly thu hai
+- Regular FK relationships duoc xu ly cuoi cung
+- Neu pair da co relationship -> skip
+
+### Nhung gi khong the tai tao
+
+| Logical pattern | Ly do |
 |---|---|
-| `model.id` | Tạo mới với prefix `cid_` |
-| `model.name` | Thay "logical"/"Logical" → "Conceptual"; nếu không thay được thì thêm " (Conceptual)" |
-| `model.version` | Reset về `1` |
-| `model.notes` | Giữ nguyên |
-
-### Quy tắc chuyển đổi — Table → Entity
-
-| Logical | Conceptual |
-|---|---|
-| Table | Entity (`kind: "strong"`) |
-| `table.id` | **Giữ nguyên** làm `entity.id` |
-| `table.name` | Giữ nguyên |
-| `table.notes` | Giữ nguyên |
-| `table.functionalDependencies` | **Bỏ** |
-
-### Quy tắc chuyển đổi — Column → Attribute / Relationship / Generalization
-
-| Loại column | Kết quả |
-|---|---|
-| PK column (không phải FK) | Attribute `isKey: true`, kind `"simple"` |
-| Candidate key column | Attribute `isKey: true`, kind `"simple"` |
-| Column thường (không FK) | Attribute `isKey: false`, kind `"simple"` |
-| FK-only column (không phải PK) | **Bỏ** khỏi attributes → tạo **Relationship** N:1 |
-| PK + FK column (ISA pattern) | **Bỏ** khỏi attributes → tạo **Generalization** |
-
-### Quy tắc tạo Relationship từ FK
-
-- Tên: `<sourceTable>_<refTable>`
-- Cardinality: `N` phía source, `1` phía target
-- Nếu cùng một cặp (source, target) xuất hiện nhiều lần → chỉ tạo **1** relationship (deduplicate)
-- ISA FK (PK+FK) **không** tạo relationship, chỉ tạo generalization
+| Categories (union types) | Khong co representation trong relational schema |
+| Disjointness/completeness metadata | Khong luu trong logical model (dung defaults) |
+| Composite/complex attributes | Khong phan biet duoc tu flatten columns |
+| Derived attributes | Khong phan biet duoc tu computed columns |
 
 ---
 
-## 4. Conceptual → Logical (`convertConceptualToLogical`)
+## 4. Conceptual -> Logical (`convertConceptualToLogical`)
 
-### Mục đích
+### Muc dich
 
-Chuyển `ConceptualModelPayload` thành `LogicalModelPayload`. Bước này "hiện thực hóa" schema từ mức thiết kế khái niệm xuống relational schema — ánh xạ entity sang table, attribute sang column, relationship sang FK hoặc junction table, generalization sang class table inheritance.
+Chuyen `ConceptualModelPayload` thanh `LogicalModelPayload`. "Hien thuc hoa" tu conceptual xuong relational.
 
-### Quy tắc chuyển đổi — Model level
+### Quy tac chuyen doi
 
-| Trường | Hành vi |
-|---|---|
-| `model.id` | Tạo mới với prefix `lid_` |
-| `model.name` | Thay "conceptual"/"Conceptual" → "Logical"; nếu không thay được thì thêm " (Logical)" |
-| `model.version` | Reset về `1` |
-| `model.notes` | Giữ nguyên |
+**Step 1: Entity -> Table**
+- Moi entity -> 1 table
+- `isKey` attributes -> PK columns
+- `composite` attributes -> flatten thanh leaf columns
+- `multi_valued` attributes -> **skip** (xu ly o Step 4)
+- `derived` attributes -> **skip**
+- Entity khong co key -> auto-prepend `id` PK column
 
-### Quy tắc chuyển đổi — Entity → Table
+**Step 2: Generalization -> Class table inheritance**
+- Child PK duoc them FK -> parent PK
+- Neu child chua co PK -> prepend `{parentName}_id` PK+FK
 
-| Trường | Hành vi |
-|---|---|
-| `entity.id` | **Giữ nguyên** làm `table.id` (FK references vẫn resolve đúng) |
-| `entity.name` | Giữ nguyên |
-| `entity.notes` | Giữ nguyên |
+**Step 3: Relationship -> FK / Junction table**
+- 1:N/N:1 -> FK column tren phia N
+- 1:1 -> FK column tren phia optional
+- N:M -> junction table voi 2 PK+FK columns
+- N-ary -> junction table voi N PK+FK columns
+- Relationship attributes -> columns tren FK table hoac junction table
+- Self-referential -> `parent_{tableName}_id`
 
-### Quy tắc chuyển đổi — Attribute → Column
-
-| Loại attribute | Kết quả |
-|---|---|
-| `isKey: true` | Column PK (`nullable: false`, `unique: true`, `roles.primaryKey: true`) |
-| `kind: "derived"` | **Bỏ** (giá trị tính toán, không lưu trong relational) |
-| `kind: "composite"` có components | **Flatten** — mỗi leaf component thành 1 column riêng |
-| Còn lại | Column thường (`nullable: true`, `unique: false`) |
-
-> **Entity không có key attribute** → tự động thêm cột `id` PK ở đầu.
-
-### Quy tắc chuyển đổi — Generalization → Class table inheritance
-
-Mỗi Generalization tạo ra quan hệ ISA (class table inheritance) giữa parent và các child:
-
-| Trường hợp | Hành vi |
-|---|---|
-| Child đã có PK column | PK column đó thêm FK → parent's PK; tên column được align với tên PK của parent |
-| Child chưa có PK | Prepend cột `<parentName>_id` với `primaryKey: true` + `foreignKey → parent PK` |
-
-### Quy tắc chuyển đổi — Relationship → FK / Junction table
-
-Phân theo cardinality của hai đầu:
-
-| Loại quan hệ | Chiến lược |
-|---|---|
-| **1:N hoặc N:1** | FK column (`<refTableName>_id`) trên phía N |
-| **1:1** | FK column trên phía có `optional: true`; nếu cả hai optional thì chọn endA |
-| **N:M** | Junction table mới với hai cột PK+FK (một cho mỗi bên) |
-| **N-ary (3+ ends)** | Junction table mới với một cột PK+FK cho mỗi participant |
-| **Self-referential** | FK column được đặt tên `parent_<tableName>_id` để tránh trùng |
-
-**Relationship attributes** được thêm vào bảng nhận FK (1:N, 1:1) hoặc junction table (N:M, N-ary).
-
-**Junction table:**
-- `id` = `tbl_<relationship.id>`
-- `name` = `relationship.name` hoặc `<tableA>_<tableB>` nếu không có tên
-
-**FK column:**
-- `nullable` = giá trị `optional` của end tương ứng (mặc định `true` nếu không xác định)
-- `unique: true` cho 1:1
-- `roles.foreignKey.refTableId` = entity id phía được tham chiếu
-- `roles.foreignKey.refColumnId` = PK column id của bảng tham chiếu
-
-### Những gì không thể convert
-
-| Conceptual | Logical |
-|---|---|
-| `categories` (union/category types) | Tạo table bình thường **không có FK** — user tự thêm liên kết |
-| `kind: "weak"` entity | Tạo table bình thường (weak entity phụ thuộc vào identifying relationship cần map thủ công) |
-| Composite attribute (nested > 2 cấp) | Chỉ flatten 1 cấp components; nested sâu hơn cần chỉnh tay |
+**Step 4: Multi-valued attributes -> Separate tables** *(MỚI)*
+- Moi `kind: "multi_valued"` attribute tao 1 table rieng
+- Table co 2 columns: `{entity_name}_id` (PK+FK) + `{attr_name}` (PK)
+- Table name: `{entity_name}_{attr_name}`
 
 ---
 
-## 5. Physical → Conceptual (`convertPhysicalToConceptual`)
+## 5. Physical -> Conceptual (`convertPhysicalToConceptual`)
 
-### Mục đích
-
-Chuyển `PhysicalModelPayload` thành `ConceptualModelPayload`. Thực hiện qua chuỗi hai bước:
-
-```
-Physical → Logical  (xem Section 2)
-    └── Logical → Conceptual  (xem Section 3)
-```
-
-Không có quy tắc bổ sung — toàn bộ logic nằm trong hai hàm trung gian. Tên model được thay "Physical" → "Conceptual" trực tiếp (không qua tên "Logical" trung gian).
+Chain 2 buoc: Physical -> Logical -> Conceptual.
+Ten model thay "Physical" -> "Conceptual" truc tiep.
 
 ---
 
-## 6. Conceptual → Physical (`convertConceptualToPhysical`)
+## 6. Conceptual -> Physical (`convertConceptualToPhysical`)
 
-### Mục đích
+Chain 2 buoc: Conceptual -> Logical -> Physical.
 
-Chuyển `ConceptualModelPayload` thành `PhysicalModelPayload`. Thực hiện qua chuỗi hai bước:
+### Options bo sung
 
-```
-Conceptual → Logical  (xem Section 4)
-    └── Logical → Physical  (xem Section 1 — infer data types, add indexes)
-```
-
-Không có quy tắc bổ sung — toàn bộ logic nằm trong hai hàm trung gian. Tên model được thay "Conceptual" → "Physical" trực tiếp.
+| Option | Mo ta |
+|---|---|
+| `dbms` | Truyen xuong `convertLogicalToPhysical` de dung DBMS-specific type mapping |
 
 ---
 
-## Ví dụ
+## Roundtrip correctness
 
-### Logical → Physical
+Cac classification patterns duoc thiet ke de dam bao **roundtrip** (C -> L -> C hoac L -> C -> L) khong mat thong tin quan trong:
 
-```json
-// Input: LogicalModelPayload
-{
-  "tables": [{
-    "id": "tbl-1", "name": "users",
-    "columns": [
-      { "id": "lid_1", "name": "id",         "nullable": false, "unique": true,  "roles": { "primaryKey": true } },
-      { "id": "lid_2", "name": "email",      "nullable": false, "unique": true,  "roles": {} },
-      { "id": "lid_3", "name": "created_at", "nullable": true,  "unique": false, "roles": {} },
-      { "id": "lid_4", "name": "is_active",  "nullable": false, "unique": false, "roles": {} }
-    ]
-  }]
-}
-
-// Output: PhysicalModelPayload
-{
-  "tables": [{
-    "id": "tbl-1", "name": "users",
-    "columns": [
-      { "id": "pid_1", "name": "id",         "dataType": "int",      "nullable": false },
-      { "id": "pid_2", "name": "email",      "dataType": "varchar",  "nullable": false },
-      { "id": "pid_3", "name": "created_at", "dataType": "datetime", "nullable": true  },
-      { "id": "pid_4", "name": "is_active",  "dataType": "boolean",  "nullable": false }
-    ],
-    "indexes": []
-  }]
-}
-```
-
-### Logical → Conceptual (thường)
-
-```json
-// Input: orders (id PK, user_id FK→users.id, total)  |  users (id PK, email)
-// Output:
-{
-  "entities": [
-    { "id": "tbl-orders", "name": "orders", "kind": "strong",
-      "attributes": [{ "name": "id", "isKey": true }, { "name": "total", "isKey": false }] },
-    { "id": "tbl-users",  "name": "users",  "kind": "strong",
-      "attributes": [{ "name": "id", "isKey": true }, { "name": "email", "isKey": false }] }
-  ],
-  "relationships": [
-    { "name": "orders_users", "type": "association",
-      "ends": [
-        { "entityId": "tbl-orders", "cardinality": "N" },
-        { "entityId": "tbl-users",  "cardinality": "1" }
-      ]
-    }
-  ],
-  "generalizations": []
-}
-```
-
-### Logical → Conceptual (có ISA)
-
-```json
-// Input: employee.id là PK + FK → person.id
-// Output:
-{
-  "entities": [
-    { "id": "person",   "name": "person",   "attributes": [{ "name": "id", "isKey": true }, { "name": "name" }] },
-    { "id": "employee", "name": "employee", "attributes": [{ "name": "salary" }] }
-  ],
-  "relationships": [],
-  "generalizations": [
-    {
-      "parentEntityId": "person",
-      "childEntityIds": ["employee"],
-      "constraints": { "disjointness": "disjoint", "completeness": "partial" }
-    }
-  ]
-}
-```
-
-### Conceptual → Logical (N:M relationship)
-
-```json
-// Input: ConceptualModelPayload
-{
-  "entities": [
-    { "id": "e-student", "name": "student",
-      "attributes": [{ "id": "a-1", "name": "id", "isKey": true, "kind": "simple" },
-                     { "id": "a-2", "name": "name", "isKey": false, "kind": "simple" }] },
-    { "id": "e-course",  "name": "course",
-      "attributes": [{ "id": "a-3", "name": "id", "isKey": true, "kind": "simple" },
-                     { "id": "a-4", "name": "title", "isKey": false, "kind": "simple" }] }
-  ],
-  "relationships": [
-    { "id": "r-1", "name": "enrollment", "type": "association",
-      "ends": [
-        { "entityId": "e-student", "cardinality": "N" },
-        { "entityId": "e-course",  "cardinality": "N" }
-      ],
-      "attributes": [{ "name": "enrolled_at", "isKey": false, "kind": "simple" }]
-    }
-  ],
-  "generalizations": []
-}
-
-// Output: LogicalModelPayload
-{
-  "tables": [
-    { "id": "e-student", "name": "student",
-      "columns": [
-        { "name": "id",   "nullable": false, "unique": true,  "roles": { "primaryKey": true } },
-        { "name": "name", "nullable": true,  "unique": false, "roles": {} }
-      ]
-    },
-    { "id": "e-course", "name": "course",
-      "columns": [
-        { "name": "id",    "nullable": false, "unique": true,  "roles": { "primaryKey": true } },
-        { "name": "title", "nullable": true,  "unique": false, "roles": {} }
-      ]
-    },
-    { "id": "tbl_r-1", "name": "enrollment",
-      "columns": [
-        { "name": "student_id",   "nullable": false, "unique": false,
-          "roles": { "primaryKey": true, "foreignKey": { "refTableId": "e-student", "refColumnId": "<student.id col id>" } } },
-        { "name": "course_id",    "nullable": false, "unique": false,
-          "roles": { "primaryKey": true, "foreignKey": { "refTableId": "e-course",  "refColumnId": "<course.id col id>"  } } },
-        { "name": "enrolled_at",  "nullable": true,  "unique": false }
-      ]
-    }
-  ]
-}
-```
-
-### Conceptual → Logical (Generalization / ISA)
-
-```json
-// Input: Person IS-A [ Employee, Customer ]
-{
-  "entities": [
-    { "id": "e-person",   "name": "person",
-      "attributes": [{ "name": "id", "isKey": true, "kind": "simple" }, { "name": "name", "isKey": false, "kind": "simple" }] },
-    { "id": "e-employee", "name": "employee",
-      "attributes": [{ "name": "salary", "isKey": false, "kind": "simple" }] },
-    { "id": "e-customer", "name": "customer",
-      "attributes": [{ "name": "tier", "isKey": false, "kind": "simple" }] }
-  ],
-  "relationships": [],
-  "generalizations": [
-    { "id": "g-1", "parentEntityId": "e-person",
-      "childEntityIds": ["e-employee", "e-customer"],
-      "constraints": { "disjointness": "disjoint", "completeness": "total" } }
-  ]
-}
-
-// Output: LogicalModelPayload
-{
-  "tables": [
-    { "id": "e-person",   "name": "person",
-      "columns": [
-        { "name": "id",   "nullable": false, "unique": true,  "roles": { "primaryKey": true } },
-        { "name": "name", "nullable": true,  "unique": false }
-      ]
-    },
-    { "id": "e-employee", "name": "employee",
-      "columns": [
-        { "name": "id",     "nullable": false, "unique": true,
-          "roles": { "primaryKey": true, "foreignKey": { "refTableId": "e-person", "refColumnId": "<person.id col id>" } } },
-        { "name": "salary", "nullable": true,  "unique": false }
-      ]
-    },
-    { "id": "e-customer", "name": "customer",
-      "columns": [
-        { "name": "id",   "nullable": false, "unique": true,
-          "roles": { "primaryKey": true, "foreignKey": { "refTableId": "e-person", "refColumnId": "<person.id col id>" } } },
-        { "name": "tier", "nullable": true,  "unique": false }
-      ]
-    }
-  ]
-}
-```
+| Conceptual | Logical (C->L) | Conceptual (L->C) |
+|---|---|---|
+| N:M relationship | Junction table (all PK are FK) | JUNCTION -> N:M relationship |
+| Multi-valued attr | 2-col table (PK+FK, PK) | MULTI_VALUED -> multi_valued attr |
+| ISA generalization | Child PK is FK | ISA_CHILD -> generalization |
+| Weak entity + identifying rel | Composite PK with partial FK | WEAK -> weak entity + identifying rel |
 
 ---
 
-## Hành vi của nút Convert schema trong UI
+## Hanh vi cua nut Convert schema trong UI
 
-- **Hiển thị:** Nút chỉ xuất hiện khi đang ở một schema có type xác định (conceptual / logical / physical). Menu dropdown liệt kê các target type còn lại.
-- **Loading state:** Trong khi đang gọi API (createSchema + saveSchemaModel), nút chuyển sang trạng thái loading với text "Converting…" và bị disabled hoàn toàn — kể cả dropdown menu không mở được.
-- **Khi thành công:** `setIsConverting(false)` được gọi trước `router.push()` để tắt loading, sau đó navigate sang schema mới.
-- **Khi lỗi:** Loading tắt, nút trở lại bình thường, hiện error notification.
-- **Tất cả 6 chiều đều deterministic** — không còn chiều nào cần AI.
+- **Hien thi:** Nut chi xuat hien khi dang o mot schema co type xac dinh. Menu dropdown liet ke cac target type con lai.
+- **Loading state:** Trong khi dang goi API, nut chuyen sang loading va bi disabled.
+- **Khi thanh cong:** Navigate sang schema moi.
+- **Khi loi:** Hien error notification.
+- **Tat ca 6 chieu deu deterministic** -- khong con chieu nao can AI.

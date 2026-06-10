@@ -2,7 +2,7 @@ import type { StoredPhysicalDiagramEdge, StoredPhysicalDiagramNode, StoredPhysic
 import type { NodeData } from "../index";
 import { computeELKTableLayout, type LayoutTable } from "./auto-layout";
 
-import type { FKAction, IndexType, ColumnSortOrder } from "./dbms-config";
+import type { FKAction, IndexType, ColumnSortOrder, DBMSType } from "./dbms-config";
 
 const generatePid = () => {
     if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -31,6 +31,7 @@ type ModelColumn = {
         };
         candidateKey?: boolean;
     };
+    comment?: string;
     notes?: string;
 };
 
@@ -51,6 +52,7 @@ type ModelTable = {
     columns: ModelColumn[];
     indexes?: ModelIndex[];
     functionalDependencies?: ModelFunctionalDependency[];
+    comment?: string;
     notes?: string;
 };
 
@@ -67,6 +69,8 @@ export type PhysicalModelPayload = {
         id: string;
         name: string;
         version: number;
+        dbms?: DBMSType;
+        description?: string;
         notes?: string;
     };
     tables: ModelTable[];
@@ -144,10 +148,16 @@ const buildPhysicalModel = ({
 
     // Build tables with columns
     // Get column data from stored node data (RelationTableData)
-    type ActualColumnData = { name: string; type?: string; length?: string; isPrimary?: boolean; isNullable?: boolean; isUnique?: boolean; isAutoIncrement?: boolean; defaultValue?: string };
-    type ActualTableData = { name: string; columns: ActualColumnData[]; indexes?: Array<{ id: string; name: string; type: string; columns: Array<{ columnName: string; order: string }>; isUnique: boolean }> };
+    type ActualColumnData = { name: string; type?: string; length?: string; isPrimary?: boolean; isCandidateKey?: boolean; isNullable?: boolean; isUnique?: boolean; isAutoIncrement?: boolean; defaultValue?: string };
+    type NodeFD = { id: string; left: string[]; right: string[] };
+    type ActualTableData = {
+        name: string;
+        columns: ActualColumnData[];
+        indexes?: Array<{ id: string; name: string; type: string; columns: Array<{ columnName: string; order: string }>; isUnique: boolean }>;
+        functionalDependencies?: NodeFD[];
+    };
     const tableDataMap = new Map<string, ActualTableData>();
-    
+
     tableNodes.forEach((tableNode) => {
         if (tableNode.tableId) {
             // Get column data from node data (RelationTableData)
@@ -157,6 +167,7 @@ const buildPhysicalModel = ({
                     name: nodeData.name || tableNode.name || tableNode.tableId,
                     columns: nodeData.columns,
                     indexes: nodeData.indexes,
+                    functionalDependencies: nodeData.functionalDependencies,
                 });
             }
         }
@@ -181,6 +192,8 @@ const buildPhysicalModel = ({
                   const fkInfo = fkMap.get(tableId)?.get(idx);
                   const isPrimaryKey = actualCol.isPrimary ?? false;
 
+                  const isCandidateKey = actualCol.isCandidateKey ?? false;
+
                   const column: ModelColumn = {
                       id: columnId,
                       name: columnName,
@@ -192,6 +205,7 @@ const buildPhysicalModel = ({
                       defaultValue: actualCol.defaultValue,
                       roles: {
                           primaryKey: isPrimaryKey,
+                          ...(isCandidateKey ? { candidateKey: true } : {}),
                           ...(fkInfo
                               ? {
                                     foreignKey: {
@@ -218,7 +232,7 @@ const buildPhysicalModel = ({
                   const column: ModelColumn = {
                       id: columnId,
                       name: columnName,
-                      nullable: true, // Default to nullable
+                      nullable: !isPrimaryKey, // PK columns must NOT be nullable
                       unique: false,
                       roles: {
                           primaryKey: isPrimaryKey,
@@ -247,12 +261,20 @@ const buildPhysicalModel = ({
             isUnique: idx.isUnique,
         }));
 
+        // Extract FDs from node data
+        const nodeFDs = tableData?.functionalDependencies ?? [];
+        const modelFDs: ModelFunctionalDependency[] = nodeFDs.map((fd) => ({
+            id: fd.id,
+            left: fd.left,
+            right: fd.right,
+        }));
+
         return {
             id: tableId,
             name: tableName,
             columns,
             indexes: indexes.length > 0 ? indexes : undefined,
-            functionalDependencies: [], // TODO: Extract from diagram if needed
+            functionalDependencies: modelFDs.length > 0 ? modelFDs : undefined,
             notes: undefined,
         };
     });
@@ -349,8 +371,21 @@ export const buildDiagramFromPhysicalModel = async ({
         if (!posLookup.has(table.id)) newTableIds.push(table.id);
     }
 
-    let autoPositions = new Map<string, { x: number; y: number }>();
+    const autoPositions = new Map<string, { x: number; y: number }>();
     if (newTableIds.length > 0) {
+        // Compute bounding box of existing tables so new tables are placed below
+        let existingMaxY = 0;
+        let existingMinX = Infinity;
+        for (const table of model.tables ?? []) {
+            const pos = posLookup.get(table.id);
+            if (!pos) continue;
+            const size = tableSizes.get(table.id) ?? { w: 220, h: 120 };
+            existingMaxY = Math.max(existingMaxY, pos.y + size.h);
+            existingMinX = Math.min(existingMinX, pos.x);
+        }
+        if (!isFinite(existingMinX)) existingMinX = 50;
+
+        // ELK layout for new tables among themselves
         const layoutTables: LayoutTable[] = (model.tables ?? [])
             .filter((t) => newTableIds.includes(t.id))
             .map((t) => ({
@@ -360,7 +395,16 @@ export const buildDiagramFromPhysicalModel = async ({
                     .filter((c) => c.roles?.foreignKey?.refTableId)
                     .map((c) => c.roles!.foreignKey!.refTableId),
             }));
-        autoPositions = await computeELKTableLayout(layoutTables);
+        const rawPositions = await computeELKTableLayout(layoutTables);
+
+        // Offset new tables below existing tables
+        const offsetY = existingMaxY > 0 ? existingMaxY + 80 : 0;
+        for (const [id, pos] of rawPositions) {
+            autoPositions.set(id, {
+                x: pos.x + existingMinX,
+                y: pos.y + offsetY,
+            });
+        }
     }
 
     // ── Tables ───────────────────────────────────────────────────────
@@ -386,6 +430,18 @@ export const buildDiagramFromPhysicalModel = async ({
             }),
         );
 
+        // Convert model FDs (column names) → node FDs
+        const nodeFDs = (table.functionalDependencies ?? []).map((fd) => ({
+            id: fd.id,
+            left: fd.left,
+            right: fd.right,
+        }));
+
+        // Preserve showFDs from existing node data if available
+        const existingNodeData = existingNodes?.find(
+            (n) => n.tableId === table.id || n.id === table.id,
+        )?.data as { showFDs?: boolean } | undefined;
+
         nodes.push({
             id: table.id,
             type: "table",
@@ -401,6 +457,7 @@ export const buildDiagramFromPhysicalModel = async ({
                     type: col.dataType ?? "varchar",
                     length: col.length,
                     isPrimary: col.roles?.primaryKey ?? false,
+                    ...(col.roles?.candidateKey ? { isCandidateKey: true } : {}),
                     isNullable: col.nullable ?? true,
                     isUnique: col.unique ?? false,
                     isAutoIncrement: col.autoIncrement ?? false,
@@ -413,6 +470,8 @@ export const buildDiagramFromPhysicalModel = async ({
                     columns: idx.columns,
                     isUnique: idx.isUnique,
                 })),
+                ...(nodeFDs.length > 0 ? { functionalDependencies: nodeFDs } : {}),
+                ...(existingNodeData?.showFDs != null ? { showFDs: existingNodeData.showFDs } : {}),
             } as NodeData,
         });
     }
@@ -456,7 +515,11 @@ export const buildDiagramFromPhysicalModel = async ({
 
     if (preserveUnmodeledNodes && existingNodes) {
         const modelNodeIds = new Set(nodes.map((n) => n.id));
-        const unmodeledNodes = existingNodes.filter((n) => !modelNodeIds.has(n.id));
+        const ANNOTATION_TYPES = new Set(["sticky-note", "text-label", "drawing-path", "note"]);
+        // Only preserve annotation/drawing nodes — table nodes not in the model should be removed
+        const unmodeledNodes = existingNodes.filter(
+            (n) => !modelNodeIds.has(n.id) && ANNOTATION_TYPES.has(n.type ?? ""),
+        );
         nodes.push(...unmodeledNodes);
     }
 
