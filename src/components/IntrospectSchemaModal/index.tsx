@@ -331,7 +331,7 @@ export default function IntrospectSchemaModal({
                     </div>
                 </div>
             }
-            destroyOnClose
+            destroyOnHidden
         >
             <div
                 style={{ maxHeight: "65vh", overflowY: "auto", padding: "12px 24px" }}

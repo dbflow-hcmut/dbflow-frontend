@@ -14,11 +14,20 @@ import { KeyRound, Link2 } from "lucide-react";
 type LogicalColumn = {
     name: string;
     isKey?: boolean;
+    isCandidateKey?: boolean;
+};
+
+export type LogicalFD = {
+    id: string;
+    left: string[];   // column names
+    right: string[];  // column names
 };
 
 export type LogicalTableData = {
     name: string;
     columns: LogicalColumn[];
+    functionalDependencies?: LogicalFD[];
+    showFDs?: boolean;
 };
 
 const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
@@ -277,7 +286,10 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
                                             isHovered={isHovered}
                                         />
                                         {col.isKey && (
-                                            <KeyRound size={14} className="text-amber-500" />
+                                            <span title="Primary Key"><KeyRound size={14} className="text-amber-500" /></span>
+                                        )}
+                                        {col.isCandidateKey && !col.isKey && (
+                                            <span title="Candidate Key"><KeyRound size={14} className="text-purple-500" /></span>
                                         )}
                                         {isFK && (
                                             <Link2 size={14} className="text-blue-500" />
@@ -308,6 +320,27 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
                         </DatabaseSchemaTableRow>
                     )}
                 </DatabaseSchemaNodeBody>
+
+                {/* Functional Dependencies (toggleable) */}
+                {data.showFDs && data.functionalDependencies && data.functionalDependencies.length > 0 && (
+                    <div
+                        className="border-t border-gray-200 px-2 py-1"
+                        style={{ fontSize: 10, lineHeight: '16px', color: '#666' }}
+                    >
+                        {data.functionalDependencies.map((fd) => (
+                            <div key={fd.id} className="flex items-center gap-0.5 truncate">
+                                <span className="font-medium" style={{ color: '#1677ff' }}>
+                                    {fd.left.length > 0 ? fd.left.join(', ') : '?'}
+                                </span>
+                                <span style={{ color: '#999' }}>{' → '}</span>
+                                <span className="font-medium" style={{ color: '#52c41a' }}>
+                                    {fd.right.length > 0 ? fd.right.join(', ') : '?'}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
                 </div>
             </DatabaseSchemaNode>
         </div>

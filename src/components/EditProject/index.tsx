@@ -47,6 +47,8 @@ import DrawingOverlay from "./components/DrawingOverlay";
 import ExportModal, { ExportSettings, ExportFormat, ExportScope } from "./components/ExportModal";
 import DDLExportModal from "./components/DDLExportModal";
 import DDLImportModal from "./components/DDLImportModal";
+import ConvertToPhysicalModal from "./components/ConvertToPhysicalModal";
+import type { DBMSType } from "./utils/dbms-config";
 import HTMLDocsExportModal from "./components/HTMLDocsExportModal";
 import VersionHistoryDrawer from "./components/VersionHistoryDrawer";
 import CommentPin, { type CommentData, type MentionableUser } from "./components/CommentPin";
@@ -98,6 +100,8 @@ import type { StoredDiagramNode as StoredConceptualNode, StoredDiagramEdge as St
 import { runConceptualLinter, runLogicalLinter, runPhysicalLinter } from "./utils/schema-linter";
 import type { LintResult } from "./utils/schema-linter";
 import LinterPanel from "./components/LinterPanel";
+import NormalizationPanel from "./components/NormalizationPanel";
+import type { DecomposedTable } from "./utils/normalization";
 
 export type EntityField = {
     id: string;
@@ -348,9 +352,14 @@ const EditProject = (props: IPropsEditProject) => {
     const [isVersionHistoryOpen, setIsVersionHistoryOpen] = useState(false);
     const [isConverting, setIsConverting] = useState(false);
     const [isSyncing, setIsSyncing] = useState(false);
+    const [pendingPhysicalConvert, setPendingPhysicalConvert] = useState<{
+        sourceLevel: "logical" | "conceptual";
+        freshModel: LogicalModelPayload | ConceptualModelPayload;
+    } | null>(null);
     const [isShareProjectOpen, setIsShareProjectOpen] = useState(false);
     const [exportInitialConfig, setExportInitialConfig] = useState<{ format: ExportFormat; scope: ExportScope }>({ format: 'png', scope: 'all' });
     const [isLinterOpen, setIsLinterOpen] = useState(false);
+    const [isNormalizationOpen, setIsNormalizationOpen] = useState(false);
 
     const isUserSelectingSchemaRef = useRef(false);
 
@@ -673,6 +682,14 @@ const EditProject = (props: IPropsEditProject) => {
         removeLogicalTableAttribute,
         updateLogicalTableAttribute,
         reorderLogicalTableAttributes,
+        addLogicalFD,
+        removeLogicalFD,
+        updateLogicalFD,
+        toggleLogicalFDDisplay,
+        addPhysicalFD,
+        removePhysicalFD,
+        updatePhysicalFD,
+        togglePhysicalFDDisplay,
     } = useMemo(
         () => createUpdateFunctions(setNodes, selectedNode),
         [setNodes, selectedNode]
@@ -1087,6 +1104,30 @@ const EditProject = (props: IPropsEditProject) => {
         selectedSchema?.id, selectedSchema?.name,
     ]);
 
+    // Build fresh model from current canvas for normalization panel (reactive)
+    const normalizationModelData = useMemo(() => {
+        if (isLogicalSchema) {
+            const storedNodes = mapLogicalReactToStored(nodes);
+            const storedEdges = mapLogicalReactEdgesToStored(edges, nodes);
+            return storedNodes.length > 0
+                ? buildLogicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
+                : _logicalModelData;
+        }
+        if (isPhysicalSchema) {
+            const storedNodes = mapPhysicalReactToStored(nodes);
+            const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
+            return storedNodes.length > 0
+                ? buildPhysicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
+                : _physicalModelData;
+        }
+        return null;
+    }, [
+        isLogicalSchema, isPhysicalSchema,
+        nodes, edges,
+        _logicalModelData, _physicalModelData,
+        selectedSchema?.id, selectedSchema?.name,
+    ]);
+
     // Override entity/relationship creators with model-first versions when
     // operating on a conceptual schema (model-as-truth architecture).
     const modelAwareCreators = useMemo(
@@ -1354,6 +1395,246 @@ const EditProject = (props: IPropsEditProject) => {
         }
     }, [isConceptualSchema, isLogicalSchema, isPhysicalSchema, applyModelPayload, applyLogicalModelPayload, applyPhysicalModelPayload, projectData?.id, router]);
 
+    // ── Normalization decomposition ──────────────────────────────────────────
+    const handleApplyDecomposition = useCallback(
+        (tableName: string, decomposition: DecomposedTable[]) => {
+            const generateId = (prefix: string) =>
+                `${prefix}_${crypto.randomUUID?.() ?? `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`}`;
+
+            /**
+             * Generic decomposition logic shared between logical & physical.
+             * Returns new tables with FK rewiring:
+             *  1. Outgoing FKs (orig → other): moved to sub-table that has the FK column
+             *  2. Incoming FKs (other → orig): redirected to sub-table that has the referenced column
+             *  3. Inter-decomposition FKs: sub-tables link to the sub-table that "owns" each shared PK column
+             */
+            type AnyColumn = {
+                id: string;
+                name: string;
+                nullable: boolean;
+                unique: boolean;
+                roles?: {
+                    primaryKey?: boolean;
+                    foreignKey?: { refTableId: string; refColumnId: string; [k: string]: unknown };
+                    candidateKey?: boolean;
+                };
+                [k: string]: unknown;
+            };
+            type AnyTable = {
+                id: string;
+                name: string;
+                columns: AnyColumn[];
+                functionalDependencies?: { id: string; left: string[]; right: string[] }[];
+                [k: string]: unknown;
+            };
+
+            const applyDecomposition = <T extends AnyTable>(
+                allTables: T[],
+                origTable: T,
+                idPrefix: string,
+                buildColumn: (colName: string, idx: number, tableId: string) => AnyColumn,
+            ): T[] => {
+                const origId = origTable.id;
+
+                // ── 1. Build new sub-tables ─────────────────────────────────
+                const newTables: (T & { _colNameToId: Map<string, string> })[] = decomposition.map((dt) => {
+                    const tableId = generateId(idPrefix);
+                    const colNameToId = new Map<string, string>();
+
+                    const columns = dt.attributes.map((colName, idx) => {
+                        const col = buildColumn(colName, idx, tableId);
+                        // Set PK/nullable from THIS decomposed table's primaryKey
+                        const isPK = dt.primaryKey.includes(colName);
+                        col.nullable = !isPK;
+                        col.roles = {
+                            ...col.roles,
+                            primaryKey: isPK || undefined,
+                        };
+                        colNameToId.set(colName.toLowerCase(), col.id);
+                        return col;
+                    });
+
+                    return {
+                        ...({} as T),
+                        id: tableId,
+                        name: dt.name,
+                        columns,
+                        functionalDependencies: dt.fds.map((fd) => ({
+                            id: generateId("fd"),
+                            left: fd.left,
+                            right: fd.right,
+                        })),
+                        _colNameToId: colNameToId,
+                    };
+                });
+
+                // Helper: find which new sub-table contains a column by name
+                const findSubTableByColName = (colName: string) =>
+                    newTables.find((t) => t._colNameToId.has(colName.toLowerCase()));
+
+                // Helper: find the "owner" sub-table for a PK column
+                // (the sub-table where this column is PK and the table has
+                // the fewest columns — i.e., the "dimension" table)
+                const findPKOwner = (colName: string) => {
+                    const lc = colName.toLowerCase();
+                    const candidates = newTables.filter((t) => {
+                        const col = t.columns.find((c) => c.name.toLowerCase() === lc);
+                        return col?.roles?.primaryKey;
+                    });
+                    if (candidates.length <= 1) return candidates[0] ?? null;
+                    // Prefer the smaller table (dimension table, not the join table)
+                    return candidates.reduce((a, b) =>
+                        a.columns.length <= b.columns.length ? a : b,
+                    );
+                };
+
+                // ── 2. Move outgoing FKs (orig → other) to correct sub-table ─
+                for (const origCol of origTable.columns) {
+                    const fk = origCol.roles?.foreignKey;
+                    if (!fk) continue;
+                    const sub = findSubTableByColName(origCol.name);
+                    if (!sub) continue;
+                    const subCol = sub.columns.find(
+                        (c) => c.name.toLowerCase() === origCol.name.toLowerCase(),
+                    );
+                    if (subCol) {
+                        subCol.roles = {
+                            ...subCol.roles,
+                            foreignKey: { ...fk },
+                        };
+                    }
+                }
+
+                // ── 3. Redirect incoming FKs (other → orig) to correct sub-table ─
+                const updatedOtherTables = allTables
+                    .filter((t) => t.id !== origId)
+                    .map((t) => {
+                        let changed = false;
+                        const cols = t.columns.map((col) => {
+                            const fk = col.roles?.foreignKey;
+                            if (!fk || fk.refTableId !== origId) return col;
+
+                            // Find the referenced column name in orig table
+                            const refOrigCol = origTable.columns.find((c) => c.id === fk.refColumnId);
+                            if (!refOrigCol) return col;
+
+                            // Find which sub-table now owns that column
+                            const sub = findPKOwner(refOrigCol.name) ?? findSubTableByColName(refOrigCol.name);
+                            if (!sub) return col;
+
+                            const newRefColId = sub._colNameToId.get(refOrigCol.name.toLowerCase());
+                            if (!newRefColId) return col;
+
+                            changed = true;
+                            return {
+                                ...col,
+                                roles: {
+                                    ...col.roles,
+                                    foreignKey: {
+                                        ...fk,
+                                        refTableId: sub.id,
+                                        refColumnId: newRefColId,
+                                    },
+                                },
+                            };
+                        });
+                        return changed ? { ...t, columns: cols } : t;
+                    });
+
+                // ── 4. Create inter-decomposition FKs ───────────────────────
+                // For each sub-table, if it has a column that is PK of another
+                // (smaller) sub-table, add FK: thisTable.column → ownerTable.PK
+                for (const sub of newTables) {
+                    for (const col of sub.columns) {
+                        const owner = findPKOwner(col.name);
+                        // Only add FK if owner is a DIFFERENT table and col is NOT PK in this table
+                        if (owner && owner.id !== sub.id && !col.roles?.primaryKey) {
+                            const refColId = owner._colNameToId.get(col.name.toLowerCase());
+                            if (refColId) {
+                                col.roles = {
+                                    ...col.roles,
+                                    foreignKey: { refTableId: owner.id, refColumnId: refColId },
+                                };
+                            }
+                        }
+                        // Also handle composite PK in "join" tables: if col is PK here
+                        // AND there's a smaller sub-table where col is also PK, add FK
+                        if (owner && owner.id !== sub.id && col.roles?.primaryKey) {
+                            // This is a join table referencing a dimension table
+                            const refColId = owner._colNameToId.get(col.name.toLowerCase());
+                            if (refColId) {
+                                col.roles = {
+                                    ...col.roles,
+                                    foreignKey: { refTableId: owner.id, refColumnId: refColId },
+                                };
+                            }
+                        }
+                    }
+                }
+
+                // ── 5. Assemble final table list ─────────────────────────────
+                // Strip the helper _colNameToId before returning
+                const cleanNewTables = newTables.map(({ _colNameToId, ...rest }) => rest as unknown as T);
+                return [...updatedOtherTables, ...cleanNewTables];
+            };
+
+            if (isLogicalSchema && logicalMutateModel) {
+                logicalMutateModel((model) => {
+                    const origIdx = model.tables.findIndex((t) => t.name === tableName);
+                    if (origIdx === -1) return model;
+                    const origTable = model.tables[origIdx];
+
+                    const tables = applyDecomposition(
+                        model.tables,
+                        origTable,
+                        "lid",
+                        (colName, idx, tableId) => ({
+                            id: `lid_${tableId}_col_${idx}`,
+                            name: colName,
+                            nullable: true, // will be overridden by applyDecomposition
+                            unique: false,
+                            roles: {},
+                        }),
+                    );
+
+                    return { ...model, tables };
+                });
+            } else if (isPhysicalSchema && physicalMutateModel) {
+                physicalMutateModel((model) => {
+                    const origIdx = model.tables.findIndex((t) => t.name === tableName);
+                    if (origIdx === -1) return model;
+                    const origTable = model.tables[origIdx];
+                    const origColMap = new Map(
+                        origTable.columns.map((c) => [c.name.toLowerCase(), c]),
+                    );
+
+                    const tables = applyDecomposition(
+                        model.tables,
+                        origTable,
+                        "pid",
+                        (colName, idx, tableId) => {
+                            const origCol = origColMap.get(colName.toLowerCase());
+                            return {
+                                id: `pid_${tableId}_col_${idx}`,
+                                name: colName,
+                                dataType: origCol?.dataType,
+                                length: origCol?.length,
+                                nullable: true, // will be overridden by applyDecomposition
+                                unique: false,
+                                autoIncrement: origCol?.autoIncrement,
+                                defaultValue: origCol?.defaultValue,
+                                roles: {},
+                            };
+                        },
+                    );
+
+                    return { ...model, tables };
+                });
+            }
+        },
+        [isLogicalSchema, isPhysicalSchema, logicalMutateModel, physicalMutateModel],
+    );
+
     // ── Schema conversion (logical ↔ physical done directly; others via AI) ──
     const handleConvertSchema = useCallback(async (targetType: string) => {
         // Helper: rebuild fresh model from current canvas nodes/edges,
@@ -1385,31 +1666,14 @@ const EditProject = (props: IPropsEditProject) => {
             return _conceptualModelData;
         };
 
-        // Direct, deterministic conversion: logical → physical
+        // Direct, deterministic conversion: logical → physical (opens DBMS picker first)
         if (isLogicalSchema && targetType === SchemaType.PHYSICAL && projectData?.id) {
             const freshModel = buildFreshLogicalModel();
             if (!freshModel) {
                 notificationProvider.open({ type: "error", message: "Logical model is not loaded yet. Please wait and try again." });
                 return;
             }
-            setIsConverting(true);
-            try {
-                const physicalModel = convertLogicalToPhysical(freshModel, {
-                    newModelName: `${diagramName} (Physical)`,
-                });
-                const newSchema = await createSchema(projectData.id, {
-                    name: `${selectedSchema?.name ?? diagramName} (Physical)`,
-                    type: SchemaType.PHYSICAL,
-                });
-                await saveSchemaModel(projectData.id, newSchema.id, physicalModel as Record<string, unknown>);
-                notificationProvider.open({ type: "success", message: "Physical schema created — switching now" });
-                setIsConverting(false);
-                router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
-            } catch (error) {
-                console.error("Failed to convert logical to physical:", error);
-                notificationProvider.open({ type: "error", message: "Failed to convert schema. Please try again." });
-                setIsConverting(false);
-            }
+            setPendingPhysicalConvert({ sourceLevel: "logical", freshModel });
             return;
         }
 
@@ -1525,31 +1789,14 @@ const EditProject = (props: IPropsEditProject) => {
             return;
         }
 
-        // Direct, deterministic conversion: conceptual → physical
+        // Direct, deterministic conversion: conceptual → physical (opens DBMS picker first)
         if (isConceptualSchema && targetType === SchemaType.PHYSICAL && projectData?.id) {
             const freshModel = buildFreshConceptualModel();
             if (!freshModel) {
                 notificationProvider.open({ type: "error", message: "Conceptual model is not loaded yet. Please wait and try again." });
                 return;
             }
-            setIsConverting(true);
-            try {
-                const physicalModel = convertConceptualToPhysical(freshModel, {
-                    newModelName: `${diagramName} (Physical)`,
-                });
-                const newSchema = await createSchema(projectData.id, {
-                    name: `${selectedSchema?.name ?? diagramName} (Physical)`,
-                    type: SchemaType.PHYSICAL,
-                });
-                await saveSchemaModel(projectData.id, newSchema.id, physicalModel as Record<string, unknown>);
-                notificationProvider.open({ type: "success", message: "Physical schema created — switching now" });
-                setIsConverting(false);
-                router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
-            } catch (error) {
-                console.error("Failed to convert conceptual to physical:", error);
-                notificationProvider.open({ type: "error", message: "Failed to convert schema. Please try again." });
-                setIsConverting(false);
-            }
+            setPendingPhysicalConvert({ sourceLevel: "conceptual", freshModel });
             return;
         }
 
@@ -1651,6 +1898,39 @@ const EditProject = (props: IPropsEditProject) => {
         selectedSchema?.id, selectedSchema?.name,
         projectData?.id,
     ]);
+
+    // ── Execute pending convert-to-physical after DBMS selection ──
+    const handleConfirmConvertToPhysical = useCallback(async (dbms: DBMSType) => {
+        if (!pendingPhysicalConvert || !projectData?.id) return;
+        const { sourceLevel, freshModel } = pendingPhysicalConvert;
+
+        setIsConverting(true);
+        try {
+            const physicalModel = sourceLevel === "logical"
+                ? convertLogicalToPhysical(freshModel as LogicalModelPayload, {
+                      newModelName: `${diagramName} (Physical)`,
+                      dbms,
+                  })
+                : convertConceptualToPhysical(freshModel as ConceptualModelPayload, {
+                      newModelName: `${diagramName} (Physical)`,
+                      dbms,
+                  });
+
+            const newSchema = await createSchema(projectData.id, {
+                name: `${selectedSchema?.name ?? diagramName} (Physical)`,
+                type: SchemaType.PHYSICAL,
+            });
+            await saveSchemaModel(projectData.id, newSchema.id, physicalModel as Record<string, unknown>);
+            notificationProvider.open({ type: "success", message: "Physical schema created — switching now" });
+            setPendingPhysicalConvert(null);
+            setIsConverting(false);
+            router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
+        } catch (error) {
+            console.error("Failed to convert to physical:", error);
+            notificationProvider.open({ type: "error", message: "Failed to convert schema. Please try again." });
+            setIsConverting(false);
+        }
+    }, [pendingPhysicalConvert, projectData?.id, selectedSchema?.name, diagramName, router]);
 
     const projectAwareness = useProjectAwareness({
         enabled: Boolean(projectData?.id && sessionId && hasPermission && isValidSchema === true && !!token),
@@ -1931,6 +2211,8 @@ const EditProject = (props: IPropsEditProject) => {
                     onToggleLinterPanel={() => setIsLinterOpen((v) => !v)}
                     linterCounts={lintResult.counts}
                     projectId={projectData?.id}
+                    normalizationOpen={isNormalizationOpen}
+                    onToggleNormalizationPanel={(isLogicalSchema || isPhysicalSchema) ? () => setIsNormalizationOpen((v) => !v) : undefined}
                 />
                 <ShareProject
                     projectId={projectData?.id}
@@ -1960,6 +2242,13 @@ const EditProject = (props: IPropsEditProject) => {
                         }
                     }}
                     diagramName={diagramName}
+                />
+                <ConvertToPhysicalModal
+                    isOpen={pendingPhysicalConvert !== null}
+                    onClose={() => setPendingPhysicalConvert(null)}
+                    onConfirm={handleConfirmConvertToPhysical}
+                    loading={isConverting}
+                    sourceLevel={pendingPhysicalConvert?.sourceLevel}
                 />
                 <HTMLDocsExportModal
                     isOpen={isHTMLDocsExportOpen}
@@ -2194,6 +2483,14 @@ const EditProject = (props: IPropsEditProject) => {
                         onRemoveLogicalTableAttribute={removeLogicalTableAttribute}
                         onUpdateLogicalTableAttribute={updateLogicalTableAttribute}
                         onReorderLogicalTableAttributes={reorderLogicalTableAttributes}
+                        onAddLogicalFD={addLogicalFD}
+                        onRemoveLogicalFD={removeLogicalFD}
+                        onUpdateLogicalFD={updateLogicalFD}
+                        onToggleLogicalFDDisplay={toggleLogicalFDDisplay}
+                        onAddPhysicalFD={addPhysicalFD}
+                        onRemovePhysicalFD={removePhysicalFD}
+                        onUpdatePhysicalFD={updatePhysicalFD}
+                        onTogglePhysicalFDDisplay={togglePhysicalFDDisplay}
                         onUpdateLogicalEdgeCardinality={(side, value) => {
                             if (!selectedEdge) return;
                             setEdges((existingEdges) =>
@@ -2520,6 +2817,24 @@ const EditProject = (props: IPropsEditProject) => {
                     isOpen={isLinterOpen}
                     onClose={() => setIsLinterOpen(false)}
                     onIssueClick={(nodeId) => {
+                        const node = nodes.find((n) => n.id === nodeId);
+                        if (node) {
+                            setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === nodeId })));
+                            reactFlowInstanceRef.current?.fitView({
+                                nodes: [{ id: nodeId }],
+                                duration: 500,
+                                padding: 0.5,
+                            });
+                        }
+                    }}
+                />
+                <NormalizationPanel
+                    isOpen={isNormalizationOpen}
+                    onClose={() => setIsNormalizationOpen(false)}
+                    schemaLevel={isLogicalSchema ? "logical" : "physical"}
+                    modelData={normalizationModelData}
+                    onApplyDecomposition={handleApplyDecomposition}
+                    onTableClick={(nodeId) => {
                         const node = nodes.find((n) => n.id === nodeId);
                         if (node) {
                             setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === nodeId })));

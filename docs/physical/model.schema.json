@@ -1,0 +1,517 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://example.com/physical/model.schema.json",
+  "title": "Physical Relational Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["model", "tables"],
+
+  "properties": {
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "version"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^pid_" },
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "integer", "minimum": 1 },
+
+        "dbms": {
+          "type": "string",
+          "enum": ["postgres", "mysql", "sqlserver", "oracle", "bigquery", "snowflake"],
+          "description": "Target DBMS for this physical schema."
+        },
+
+        "description": {
+          "type": "string",
+          "description": "Short description of the schema, optionally noting its origin."
+        },
+
+        "defaultDatabase": {
+          "type": "string",
+          "description": "Default database name when the file describes multiple databases."
+        },
+
+        "notes": { "type": "string" }
+      }
+    },
+
+    "tables": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/table" }
+    },
+
+    "views": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/view" },
+      "description": "Optional list of views / materialized views."
+    },
+
+    "sequences": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/sequence" },
+      "description": "Optional list of sequences for auto-increment columns."
+    },
+
+    "triggers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/trigger" },
+      "description": "Schema-level triggers."
+    },
+
+    "functions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/function" },
+      "description": "Stored functions and procedures."
+    },
+
+    "sourceInfo": { "$ref": "#/$defs/sourceInfo" }
+  },
+
+  "$defs": {
+
+    "table": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "columns"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^pid_" },
+        "name": { "type": "string", "minLength": 1 },
+        "comment": { "type": "string", "description": "Table description / comment." },
+
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/column" }
+        },
+
+        "primaryKey": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Table-level primary key constraint.",
+          "properties": {
+            "name": { "type": "string" },
+            "columns": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "pattern": "^pid_" },
+              "description": "Array of column IDs composing the PK."
+            }
+          },
+          "required": ["columns"]
+        },
+
+        "uniqueConstraints": {
+          "type": "array",
+          "description": "Table-level UNIQUE constraints (composite or single).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["columns"],
+            "properties": {
+              "name": { "type": "string" },
+              "columns": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string", "pattern": "^pid_" }
+              }
+            }
+          }
+        },
+
+        "foreignKeys": {
+          "type": "array",
+          "description": "Table-level foreign key constraints (composite FK support).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["columns", "refTableId", "refColumns"],
+            "properties": {
+              "name": { "type": "string" },
+              "columns": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string", "pattern": "^pid_" },
+                "description": "Local column IDs."
+              },
+              "refTableId": { "type": "string", "pattern": "^pid_" },
+              "refColumns": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string", "pattern": "^pid_" },
+                "description": "Referenced column IDs."
+              },
+              "onDelete": {
+                "type": "string",
+                "enum": ["NO ACTION", "CASCADE", "SET NULL", "SET DEFAULT", "RESTRICT"],
+                "default": "NO ACTION"
+              },
+              "onUpdate": {
+                "type": "string",
+                "enum": ["NO ACTION", "CASCADE", "SET NULL", "SET DEFAULT", "RESTRICT"],
+                "default": "NO ACTION"
+              }
+            }
+          }
+        },
+
+        "checkConstraints": {
+          "type": "array",
+          "description": "CHECK constraints on the table.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["expression"],
+            "properties": {
+              "name": { "type": "string" },
+              "expression": {
+                "type": "string",
+                "description": "SQL CHECK expression (e.g. 'price > 0')."
+              }
+            }
+          }
+        },
+
+        "indexes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/index" }
+        },
+
+        "partitioning": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Partitioning configuration if the table is partitioned.",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["RANGE", "LIST", "HASH"],
+              "description": "Partitioning strategy."
+            },
+            "columns": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string" },
+              "description": "Column names used as partition key."
+            },
+            "expression": {
+              "type": "string",
+              "description": "Partition expression if not a simple column."
+            }
+          }
+        },
+
+        "storageOptions": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "DBMS-specific storage hints (tablespace, filegroup, compression, etc.).",
+          "properties": {
+            "tablespace": { "type": "string" },
+            "filegroup": { "type": "string" },
+            "compression": { "type": "string" }
+          }
+        },
+
+        "triggers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/trigger" },
+          "description": "Triggers bound to this table."
+        },
+
+        "functionalDependencies": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/functionalDependency" }
+        },
+
+        "notes": { "type": "string" }
+      }
+    },
+
+    "column": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "nullable", "unique"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^pid_" },
+        "name": { "type": "string", "minLength": 1 },
+        "position": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Ordinal position of the column in the table."
+        },
+
+        "dataType": {
+          "type": "string",
+          "description": "Normalized base SQL type without length (e.g. varchar, integer, decimal)."
+        },
+
+        "dataTypeOriginal": {
+          "type": "string",
+          "description": "Original data type as defined in the source DBMS (e.g. 'INT UNSIGNED', 'SERIAL')."
+        },
+
+        "dataTypeNormalized": {
+          "type": "string",
+          "description": "Data type normalized to a smaller canonical set for cross-DBMS analysis."
+        },
+
+        "length": {
+          "type": "string",
+          "description": "Length or precision shorthand (e.g. '255', '10,2'). Prefer precision/scale when possible."
+        },
+
+        "precision": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Numeric precision (total digits) or string max length."
+        },
+
+        "scale": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Numeric scale (digits after decimal point)."
+        },
+
+        "nullable": { "type": "boolean", "default": true },
+        "unique": { "type": "boolean", "default": false },
+
+        "autoIncrement": {
+          "type": "boolean",
+          "default": false
+        },
+
+        "defaultValue": {
+          "type": "string",
+          "description": "SQL default expression (e.g. NOW(), '0', 'true')."
+        },
+
+        "roles": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "primaryKey": { "type": "boolean" },
+
+            "foreignKey": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["refTableId", "refColumnId"],
+              "properties": {
+                "refTableId": { "type": "string", "pattern": "^pid_" },
+                "refColumnId": { "type": "string", "pattern": "^pid_" },
+                "onDelete": {
+                  "type": "string",
+                  "enum": ["NO ACTION", "CASCADE", "SET NULL", "SET DEFAULT", "RESTRICT"],
+                  "default": "NO ACTION"
+                },
+                "onUpdate": {
+                  "type": "string",
+                  "enum": ["NO ACTION", "CASCADE", "SET NULL", "SET DEFAULT", "RESTRICT"],
+                  "default": "NO ACTION"
+                }
+              }
+            },
+
+            "candidateKey": { "type": "boolean" }
+          }
+        },
+
+        "comment": { "type": "string", "description": "Column-level comment or description." },
+        "notes": { "type": "string" }
+      }
+    },
+
+    "index": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "type", "columns"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "minLength": 1 },
+
+        "type": {
+          "type": "string",
+          "enum": ["BTREE", "HASH", "GIN", "GIST", "BRIN"],
+          "default": "BTREE"
+        },
+
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["columnName", "order"],
+            "properties": {
+              "columnName": { "type": "string", "minLength": 1 },
+              "order": {
+                "type": "string",
+                "enum": ["ASC", "DESC"],
+                "default": "ASC"
+              }
+            }
+          }
+        },
+
+        "isUnique": { "type": "boolean", "default": false }
+      }
+    },
+
+    "view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "definition"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^pid_" },
+        "name": { "type": "string", "minLength": 1 },
+        "definition": {
+          "type": "string",
+          "description": "The SQL SELECT statement defining the view."
+        },
+        "isMaterialized": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether this is a materialized view."
+        },
+        "columns": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Output column names of the view."
+        },
+        "comment": { "type": "string" }
+      }
+    },
+
+    "sequence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^pid_" },
+        "name": { "type": "string", "minLength": 1 },
+        "startValue": { "type": "integer" },
+        "increment": { "type": "integer", "default": 1 },
+        "minValue": { "type": "integer" },
+        "maxValue": { "type": "integer" },
+        "cycle": { "type": "boolean", "default": false },
+        "comment": { "type": "string" }
+      }
+    },
+
+    "trigger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^pid_" },
+        "name": { "type": "string", "minLength": 1 },
+        "timing": {
+          "type": "string",
+          "enum": ["BEFORE", "AFTER", "INSTEAD OF"]
+        },
+        "event": {
+          "type": "string",
+          "enum": ["INSERT", "UPDATE", "DELETE"]
+        },
+        "forEach": {
+          "type": "string",
+          "enum": ["ROW", "STATEMENT"],
+          "default": "ROW"
+        },
+        "body": {
+          "type": "string",
+          "description": "Trigger function body or reference."
+        },
+        "comment": { "type": "string" }
+      }
+    },
+
+    "function": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^pid_" },
+        "name": { "type": "string", "minLength": 1 },
+        "language": {
+          "type": "string",
+          "description": "Language of the function body (e.g. plpgsql, sql, javascript)."
+        },
+        "parameters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "dataType": { "type": "string" },
+              "mode": {
+                "type": "string",
+                "enum": ["IN", "OUT", "INOUT"],
+                "default": "IN"
+              }
+            }
+          }
+        },
+        "returnType": { "type": "string" },
+        "body": { "type": "string", "description": "Function/procedure body." },
+        "comment": { "type": "string" }
+      }
+    },
+
+    "functionalDependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "left", "right"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^pid_" },
+        "name": { "type": "string" },
+
+        "left": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^pid_" }
+        },
+
+        "right": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^pid_" }
+        },
+
+        "notes": { "type": "string" }
+      }
+    },
+
+    "sourceInfo": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Metadata about the origin of this physical schema (e.g. reverse-engineered from DDL).",
+      "properties": {
+        "origin": {
+          "type": "string",
+          "enum": ["manual", "forward-engineering", "reverse-engineering", "import-ddl", "ai-generated"],
+          "description": "How this schema was created."
+        },
+        "sourceFile": {
+          "type": "string",
+          "description": "Original DDL file or connection string used."
+        },
+        "reversedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of the reverse engineering."
+        },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Warnings captured during reverse engineering or import."
+        },
+        "logicalMappable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this physical schema can be mapped back to a logical/conceptual model."
+        }
+      }
+    }
+  }
+}
