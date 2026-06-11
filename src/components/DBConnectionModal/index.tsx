@@ -10,6 +10,7 @@ import {
     Switch,
     Radio,
     Divider,
+    InputNumber,
 } from "antd";
 import {
     PlugZap,
@@ -420,11 +421,11 @@ export default function DBConnectionModal({
                         validateStatus={fh("port")}
                         hasFeedback={!!fh("port")}
                     >
-                        <Input
-                            type="number"
+                        <InputNumber
                             placeholder="5432"
-                            className="!h-9"
-                            disabled={false}
+                            className="!h-9 w-full"
+                            min={1}
+                            max={65535}
                         />
                     </Form.Item>
                 </div>

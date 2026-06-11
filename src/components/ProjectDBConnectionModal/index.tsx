@@ -84,7 +84,14 @@ export default function ProjectDBConnectionModal({
         setUnlinkingId(conn.id);
         try {
             await unlinkDbConnectionFromProject(projectId, conn.id);
-            await mutate(`project-db-connections-${projectId}`);
+            const cacheKey = `project-db-connections-${projectId}`;
+            await mutate(
+                cacheKey,
+                (current: DBConnection[] | undefined) =>
+                    (current ?? []).filter((item) => item.id !== conn.id),
+                { revalidate: false },
+            );
+            await mutate(cacheKey);
             notificationProvider.open({
                 type: "success",
                 message: "Disconnected",
@@ -357,7 +364,7 @@ function SelectOrCreateDBModal({
                 open={isCreateOpen}
                 onClose={() => setIsCreateOpen(false)}
                 projectId={projectId}
-                onSaved={async (conn) => {
+                onSaved={async () => {
                     setIsCreateOpen(false);
                     // newly created connection is already linked via projectId in form
                     await mutate(`project-db-connections-${projectId}`);
