@@ -1,0 +1,19 @@
+---
+description: Keep docs-v2 synchronized with feature implementation changes
+alwaysApply: true
+---
+
+When editing this repo, follow:
+
+`docs-v2/AI_DOCS_V2_MAINTENANCE_GUIDE.md`
+
+If you change feature flow, algorithm, data model, ReactFlow/stored/model mapping, collaboration sync, conversion, DDL import/export, migration SQL, linter, or normalization logic, update the related docs in `docs-v2`.
+
+If you implement a new feature with meaningful algorithmic or business rules, create a new `docs-v2/<feature-name>-implementation-rules.md` file.
+
+Simple CRUD/UI-only changes can skip new docs, but explain why in the final response.
+
+In the final response, include either:
+
+- `Docs v2 updated: <files>`
+- `Docs v2 checked: no update needed because <reason>`
