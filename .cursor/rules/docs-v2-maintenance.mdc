@@ -9,6 +9,10 @@ When editing this repo, follow:
 
 If you change feature flow, algorithm, data model, ReactFlow/stored/model mapping, collaboration sync, conversion, DDL import/export, migration SQL, linter, or normalization logic, update the related docs in `docs-v2`.
 
+If you change the stored JSON structure for conceptual/logical/physical schemas, update the matching canonical contract files in `docs/<level>/`: `model.schema.json`, `model-schema.md`, `diagram.schema.json`, and/or `diagram-schema.md`.
+
+Stored JSON structure includes model payloads, diagram payloads, ReactFlow/stored mappings, persisted fields, enum values, required fields, and ID/reference conventions.
+
 If you implement a new feature with meaningful algorithmic or business rules, create a new `docs-v2/<feature-name>-implementation-rules.md` file.
 
 Simple CRUD/UI-only changes can skip new docs, but explain why in the final response.

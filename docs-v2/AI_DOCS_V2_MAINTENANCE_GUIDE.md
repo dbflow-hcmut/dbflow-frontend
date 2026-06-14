@@ -4,6 +4,7 @@ Tài liệu này là rule chung cho mọi AI agent khi sửa code trong repo `db
 
 Mục tiêu: nếu AI sửa flow, thuật toán, data model, mapping, hoặc rule của một tính năng thì phải cập nhật lại tài liệu tương ứng trong `docs-v2`.
 Nếu AI implement một tính năng mới có logic thuật toán hoặc rule nghiệp vụ đáng kể thì phải tạo docs-v2 mới cho tính năng đó.
+Nếu AI sửa cấu trúc JSON lưu trữ của schema thì phải cập nhật contract tương ứng trong `docs/`.
 
 ## 1. Rule bắt buộc
 
@@ -18,6 +19,30 @@ Khi sửa code của một tính năng đã có docs trong `docs-v2`, AI phải 
 - Yjs collaboration sync behavior.
 - UI control làm thay đổi semantic model.
 - Edge case, limitation, hoặc warning đã ghi trong docs.
+
+Khi sửa cấu trúc JSON lưu trữ của schema conceptual/logical/physical, AI phải cập nhật các file contract tương ứng trong `docs/<level>/`.
+
+Cấu trúc JSON lưu trữ bao gồm:
+
+- Model payload (`model`, `entities`, `relationships`, `tables`, `columns`, `indexes`, constraints, metadata).
+- Diagram payload (`nodes`, `edges`, viewport, render metadata, labels, end styles).
+- ReactFlow/stored/model mapping.
+- Persisted fields mới hoặc bị xóa.
+- Enum values, required fields, defaults, validation constraints.
+- Quy ước ID prefix, ID uniqueness, foreign-reference/cross-reference fields.
+
+File cần cập nhật:
+
+| Loại thay đổi | File cần kiểm tra/cập nhật |
+|---|---|
+| Conceptual model JSON | `docs/conceptual/model.schema.json`, `docs/conceptual/model-schema.md` |
+| Conceptual diagram JSON | `docs/conceptual/diagram.schema.json`, `docs/conceptual/diagram-schema.md` |
+| Logical model JSON | `docs/logical/model.schema.json`, `docs/logical/model-schema.md` |
+| Logical diagram JSON | `docs/logical/diagram.schema.json`, `docs/logical/diagram-schema.md` |
+| Physical model JSON | `docs/physical/model.schema.json`, `docs/physical/model-schema.md` |
+| Physical diagram JSON | `docs/physical/diagram.schema.json`, `docs/physical/diagram-schema.md` |
+
+Nếu cùng thay đổi cũng ảnh hưởng flow/thuật toán/rule implementation, vẫn phải cập nhật `docs-v2` tương ứng.
 
 Khi implement tính năng mới, AI phải tạo docs-v2 mới nếu tính năng có một trong các yếu tố sau:
 
@@ -55,6 +80,8 @@ Nếu docs đã được cập nhật, final response phải liệt kê file doc
 - Không sửa code flow mà bỏ qua docs.
 - Không viết docs theo suy đoán nếu chưa đọc code liên quan.
 - Không chỉ update docs-feature cũ mà bỏ qua `docs-v2`.
+- Không đổi stored JSON schema/model/diagram rồi bỏ qua `docs/`.
+- Không chỉ update markdown trong `docs/` mà quên JSON Schema file tương ứng khi validation contract đổi.
 - Không xóa warning/limitation khỏi docs nếu code vẫn còn limitation đó.
 - Không ghi "model-as-truth" tuyệt đối nếu code vẫn đang hybrid diagram/model.
 
@@ -63,10 +90,11 @@ Nếu docs đã được cập nhật, final response phải liệt kê file doc
 1. Xác định tính năng bị ảnh hưởng.
 2. Đọc code implementation liên quan trước khi sửa docs.
 3. Sửa code.
-4. Nếu là tính năng mới có thuật toán/rule đáng kể, tạo docs-v2 mới.
-5. Nếu là tính năng đã có docs, đọc lại docs-v2 tương ứng.
-6. Cập nhật docs theo rule thực tế trong code.
-7. Final response phải có mục docs:
+4. Nếu thay đổi cấu trúc JSON lưu trữ, cập nhật `docs/<level>/*.schema.json` và markdown schema tương ứng.
+5. Nếu là tính năng mới có thuật toán/rule đáng kể, tạo docs-v2 mới.
+6. Nếu là tính năng đã có docs, đọc lại docs-v2 tương ứng.
+7. Cập nhật docs theo rule thực tế trong code.
+8. Final response phải có mục docs:
    - `Docs v2 updated: ...`, hoặc
    - `Docs v2 checked: no update needed because ...`.
 
@@ -185,6 +213,8 @@ Trước khi trả lời user, AI phải tự kiểm:
 
 - Có sửa feature flow/rule/model/mapping không?
 - Docs-v2 tương ứng đã update chưa?
+- Có sửa stored JSON structure không?
+- Nếu có, `docs/<level>/model.schema.json`, `model-schema.md`, `diagram.schema.json`, hoặc `diagram-schema.md` tương ứng đã update chưa?
 - Có implement tính năng mới có thuật toán/rule đáng kể không?
 - Nếu có, đã tạo docs-v2 mới chưa?
 - Nếu chỉ là CRUD/UI đơn giản và không tạo docs, lý do đã rõ chưa?
