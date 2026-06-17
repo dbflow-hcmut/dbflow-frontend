@@ -367,7 +367,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
       conversationPromise = createConversation(threadId)
         .then(() => {
           setConversationCreated(true);
-          router.replace(`/ai-chat/c/${threadId}`, { scroll: false });
+          window.history.replaceState(null, "", `/ai-chat/c/${threadId}`);
         })
         .catch((error) => {
           console.error("Failed to create conversation:", error);
