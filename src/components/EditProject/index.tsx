@@ -2190,7 +2190,6 @@ const EditProject = (props: IPropsEditProject) => {
                     canEdit={canEdit}
                     onSetDiagramName={setDiagramName}
                     onSetIsEditingDiagramName={setIsEditingDiagramName}
-                    onOpenSearchModal={() => setIsSearchModalOpen(true)}
                     collaborators={remoteUsers}
                     onFollowUser={handleFollowUserViewport}
                     onDownload={handleDownload}

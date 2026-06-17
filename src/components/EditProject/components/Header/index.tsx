@@ -24,7 +24,6 @@ type HeaderProps = {
     canEdit?: boolean;
     onSetDiagramName: (name: string) => void;
     onSetIsEditingDiagramName: (isEditing: boolean) => void;
-    onOpenSearchModal: () => void;
     collaborators: RemoteCollaborator[];
     onFollowUser: (user: RemoteCollaborator) => void;
     onDownload: () => void;
