@@ -17,11 +17,11 @@ import {
   cancelRun,
   type Attachment,
   readFileAsAttachment,
-  uploadAttachmentForAI,
   buildChatInputFromAttachments,
   ATTACHMENT_ACCEPT,
   ATTACHMENT_MAX_COUNT,
   ATTACHMENT_MAX_TOTAL_BYTES,
+  uploadAttachmentForAIRecord,
 } from "@/api/ai/client";
 import {
   createConversation,
@@ -34,6 +34,9 @@ import { createSchema, saveSchemaModel } from "@/components/EditProject/api/clie
 import { AttachmentPreviews } from "@/components/AttachmentPreviews";
 import { SchemaType } from "@/utils/constants";
 import type { UserResponse } from "@/types/user.type";
+import {
+  createProjectDocument,
+} from "@/api/project-documents/client";
 
 const { TextArea } = Input;
 
@@ -63,14 +66,29 @@ interface AIChatViewProps {
 const ATT_MARKER = "<!-- __att__:";
 const ATT_END = " -->";
 
+function attachmentMimeType(attachment: Attachment): string {
+  if (attachment.mimeType) return attachment.mimeType;
+  if (attachment.fileType === "pdf") return "application/pdf";
+  if (attachment.fileType === "docx") {
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  }
+  if (attachment.fileType === "json") return "application/json";
+  if (attachment.fileType === "csv") return "text/csv";
+  if (attachment.fileType === "sql") return "text/plain";
+  if (attachment.fileType === "image") return "application/octet-stream";
+  return "application/octet-stream";
+}
+
 function encodeAttachmentMetadata(content: string, attachments: Attachment[]): string {
   if (attachments.length === 0) return content;
-  const meta = attachments.map(({ id, name, fileType, size, url }) => ({
+  const meta = attachments.map(({ id, name, fileType, size, url, s3Key, mimeType }) => ({
     id,
     name,
     fileType,
     size,
+    ...(mimeType ? { mimeType } : {}),
     ...(url ? { url } : {}),
+    ...(s3Key ? { s3Key } : {}),
   }));
   return `${content}\n${ATT_MARKER}${JSON.stringify(meta)}${ATT_END}`;
 }
@@ -88,7 +106,9 @@ function decodeAttachmentMetadata(raw: string): { content: string; attachments: 
       name: string;
       fileType: Attachment["fileType"];
       size: number;
+      mimeType?: string;
       url?: string;
+      s3Key?: string;
     }>;
     return {
       content: cleanContent,
@@ -97,6 +117,14 @@ function decodeAttachmentMetadata(raw: string): { content: string; attachments: 
   } catch {
     return { content: raw, attachments: [] };
   }
+}
+
+function mergePendingAttachments(current: Attachment[], additions: Attachment[]): Attachment[] {
+  const seen = new Set(current.map((attachment) => attachment.id));
+  return [
+    ...current,
+    ...additions.filter((attachment) => attachment.s3Key && !seen.has(attachment.id)),
+  ];
 }
 
 function getStoredUserName(): string {
@@ -115,6 +143,7 @@ function buildRandomGreeting(): string {
   const template = GREETING_TEMPLATES[Math.floor(Math.random() * GREETING_TEMPLATES.length)];
   return template.replace("{name}", getStoredUserName());
 }
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function AIChatView({ threadId: initialThreadId }: AIChatViewProps) {
@@ -150,6 +179,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
   const abortControllerRef = useRef<AbortController | null>(null);
   /** Track run_id for cancelling via LangGraph API */
   const runIdRef = useRef<string | null>(null);
+  const pendingProjectDocumentAttachmentsRef = useRef<Attachment[]>([]);
 
   const resetToNewChat = useCallback(() => {
     abortControllerRef.current?.abort();
@@ -159,6 +189,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
     currentIntentRef.current = null;
     detectedLevelRef.current = null;
     lastUserMessageRef.current = "";
+    pendingProjectDocumentAttachmentsRef.current = [];
 
     setMessages([]);
     setInputValue("");
@@ -191,6 +222,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
     currentIntentRef.current = null;
     detectedLevelRef.current = null;
     lastUserMessageRef.current = "";
+    pendingProjectDocumentAttachmentsRef.current = [];
 
     setMessages([]);
     setInputValue("");
@@ -242,9 +274,11 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
         const conversation = await getConversation(initialThreadId);
         const msgs = conversation?.messages ?? [];
         if (msgs.length > 0) {
+          const restoredPendingAttachments: Attachment[] = [];
           const loadedMessages: Message[] = msgs.map((msg, index) => {
             if (msg.role === "user") {
               const { content, attachments } = decodeAttachmentMetadata(msg.content);
+              restoredPendingAttachments.push(...attachments.filter((attachment) => attachment.s3Key));
               return {
                 id: `loaded-${index}-${msg.id}`,
                 role: msg.role as "user",
@@ -261,6 +295,10 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
             };
           });
           setMessages(loadedMessages);
+          pendingProjectDocumentAttachmentsRef.current = mergePendingAttachments(
+            pendingProjectDocumentAttachmentsRef.current,
+            restoredPendingAttachments,
+          );
         }
       } catch (error) {
         console.error("Failed to load conversation:", error);
@@ -288,25 +326,28 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
     }
     if (pairs.length === 0) return;
 
-    // Mark files that need S3 upload as uploading immediately
-    const needsUpload = (fileType: Attachment["fileType"]) =>
-      fileType === "image" || fileType === "pdf" || fileType === "docx";
-    const newAttachments = pairs.map(({ att }) =>
-      needsUpload(att.fileType) ? { ...att, uploading: true } : att,
+    const newAttachments = pairs.map(({ att, file }) =>
+      ({ ...att, originalFile: file, uploading: true }),
     );
     setAttachments((prev) => [...prev, ...newAttachments]);
 
-    // Upload image/pdf/docx to S3 in background so AI receives a URL instead of base64
+    // Upload once to AI attachment storage. If a project is created later,
+    // the document hub record points to this same S3 key instead of re-uploading.
     for (const { att, file } of pairs) {
-      if (needsUpload(att.fileType)) {
-        uploadAttachmentForAI(file, att.id).then((url) => {
-          setAttachments((prev) =>
-            prev.map((a) =>
-              a.id === att.id ? { ...a, uploading: false, ...(url ? { url } : {}) } : a,
-            ),
-          );
-        });
-      }
+      uploadAttachmentForAIRecord(file, att.id).then((uploaded) => {
+        setAttachments((prev) =>
+          prev.map((a) =>
+            a.id === att.id
+              ? {
+                  ...a,
+                  uploading: false,
+                  ...(uploaded?.url ? { url: uploaded.url } : {}),
+                  ...(uploaded?.key ? { s3Key: uploaded.key } : {}),
+                }
+              : a,
+          ),
+        );
+      });
     }
   }, [attachments]);
 
@@ -316,11 +357,17 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
 
   const isUploading = attachments.some((a) => a.uploading);  const handleSend = useCallback(async (retryMessage?: string) => {
     const messageToSend = retryMessage || inputValue.trim();
-    if ((!messageToSend && attachments.length === 0) || isLoading) return;
+    if ((!messageToSend && attachments.length === 0) || isLoading || isUploading) return;
 
     const userMessageContent = messageToSend || "(attached files)";
     if (!retryMessage) setInputValue("");
     const currentAttachments = retryMessage ? [] : attachments;
+    if (!createdProjectId && currentAttachments.length > 0) {
+      pendingProjectDocumentAttachmentsRef.current = mergePendingAttachments(
+        pendingProjectDocumentAttachmentsRef.current,
+        currentAttachments,
+      );
+    }
     if (!retryMessage) setAttachments([]);
     redirectTriggeredRef.current = false;
     lastUserMessageRef.current = userMessageContent;
@@ -437,6 +484,29 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
           projectIdToUse = project.id;
           setCreatedProjectId(project.id);
         }
+
+        const attachmentsToPersist = [
+          ...pendingProjectDocumentAttachmentsRef.current,
+          ...currentAttachments,
+        ].filter((attachment, index, all) => (
+          attachment.s3Key &&
+          all.findIndex((candidate) => candidate.id === attachment.id) === index
+        ));
+
+        await Promise.allSettled(
+          attachmentsToPersist
+            .map(async (attachment) => {
+              await createProjectDocument(projectIdToUse!, {
+                title: attachment.name.replace(/\.[^/.]+$/, ""),
+                fileName: attachment.name,
+                s3Key: attachment.s3Key!,
+                mimeType: attachmentMimeType(attachment),
+                size: attachment.size,
+                source: "ai_chat_upload",
+              });
+            }),
+        );
+        pendingProjectDocumentAttachmentsRef.current = [];
 
         const level = detectedLevelRef.current
           // For engineering intents without explicit level, infer from model structure.
@@ -602,7 +672,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
     );
     if (returnedRunId) runIdRef.current = returnedRunId;
     abortControllerRef.current = null;
-  }, [inputValue, attachments, isLoading, threadId, conversationCreated, router, createdProjectId]);
+  }, [inputValue, attachments, isLoading, isUploading, threadId, conversationCreated, router, createdProjectId]);
 
   const handleRetry = useCallback(() => {
     if (lastUserMessageRef.current) {

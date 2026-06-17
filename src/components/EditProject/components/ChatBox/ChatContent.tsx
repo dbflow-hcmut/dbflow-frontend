@@ -14,6 +14,10 @@ import {
     ATTACHMENT_MAX_TOTAL_BYTES,
 } from "@/api/ai/client";
 import { AttachmentPreviews } from "@/components/AttachmentPreviews";
+import {
+    createProjectDocument,
+    uploadProjectDocumentFile,
+} from "@/api/project-documents/client";
 
 export interface Message {
     id: string;
@@ -34,6 +38,7 @@ interface ChatContentProps {
     onRetry?: () => void;
     isStreamingJson?: boolean;
     onStop?: () => void;
+    projectId?: string;
 }
 
 export const ChatContent: React.FC<ChatContentProps> = ({ 
@@ -44,6 +49,7 @@ export const ChatContent: React.FC<ChatContentProps> = ({
     onRetry,
     isStreamingJson = false,
     onStop,
+    projectId,
 }) => {
     const [internalMessages] = useState<Message[]>([]);
     const [inputValue, setInputValue] = useState("");
@@ -67,27 +73,56 @@ export const ChatContent: React.FC<ChatContentProps> = ({
         }
         if (pairs.length === 0) return;
 
-        // Mark files that need S3 upload as uploading immediately
+        // Mark files that need S3 upload as uploading immediately.
+        // In project chat, every file is uploaded so it can be saved to the Document Hub.
         const needsUpload = (fileType: Attachment["fileType"]) =>
-            fileType === "image" || fileType === "pdf" || fileType === "docx";
-        const newAtts = pairs.map(({ att }) =>
-            needsUpload(att.fileType) ? { ...att, uploading: true } : att,
+            projectId || fileType === "image" || fileType === "pdf" || fileType === "docx";
+        const newAtts = pairs.map(({ att, file }) =>
+            needsUpload(att.fileType) ? { ...att, originalFile: file, uploading: true } : { ...att, originalFile: file },
         );
         setAttachments((prev) => [...prev, ...newAtts]);
 
-        // Upload image/pdf/docx to S3 in background so AI receives a URL instead of base64
+        // Upload project chat files to Document Hub; otherwise upload only heavy files for AI URLs.
         for (const { att, file } of pairs) {
             if (needsUpload(att.fileType)) {
-                uploadAttachmentForAI(file, att.id).then((url) => {
-                    setAttachments((prev) =>
-                        prev.map((a) =>
-                            a.id === att.id ? { ...a, uploading: false, ...(url ? { url } : {}) } : a,
-                        ),
-                    );
-                });
+                const uploadPromise = projectId
+                    ? uploadProjectDocumentFile(projectId, file).then(async (uploaded) => {
+                        await createProjectDocument(projectId, {
+                            title: file.name.replace(/\.[^/.]+$/, ""),
+                            fileName: file.name,
+                            s3Key: uploaded.key,
+                            mimeType: file.type || "application/octet-stream",
+                            size: file.size,
+                            source: "ai_chat_upload",
+                        });
+                        return uploaded;
+                    })
+                    : uploadAttachmentForAI(file, att.id).then((url) => ({ key: undefined, url: url ?? undefined }));
+
+                uploadPromise
+                    .then((uploaded) => {
+                        setAttachments((prev) =>
+                            prev.map((a) =>
+                                a.id === att.id
+                                    ? {
+                                        ...a,
+                                        uploading: false,
+                                        ...(uploaded.url ? { url: uploaded.url } : {}),
+                                        ...(uploaded.key ? { s3Key: uploaded.key } : {}),
+                                    }
+                                    : a,
+                            ),
+                        );
+                    })
+                    .catch((error) => {
+                        console.error("Failed to upload attachment", error);
+                        setAttachments((prev) =>
+                            prev.map((a) => (a.id === att.id ? { ...a, uploading: false } : a)),
+                        );
+                    });
             }
         }
-    }, [attachments]);
+    }, [attachments, projectId]);
 
     const removeAttachment = (id: string) => setAttachments((prev) => prev.filter((a) => a.id !== id));
 

@@ -13,6 +13,7 @@ export interface Attachment {
   /** text content for sql/csv/json; base64 data URL for image/pdf preview; empty string for docx */
   content: string;
   size: number;
+  mimeType?: string;
   /** Parsed model payload when fileType=json and the JSON looks like a schema model */
   modelJson?: Record<string, unknown>;
   /**
@@ -20,8 +21,12 @@ export interface Attachment {
    * Populated asynchronously after upload. While undefined the file is still uploading.
    */
   url?: string;
+  /** S3 key when the attachment has been persisted as a project document */
+  s3Key?: string;
   /** True while the S3 upload is in progress */
   uploading?: boolean;
+  /** Browser-only file handle used to persist chat uploads after a project is created */
+  originalFile?: File;
 }
 
 /** Max attachments per message */
@@ -72,7 +77,15 @@ export async function readFileAsAttachment(file: File): Promise<Attachment | nul
     }
   }
 
-  return { id: crypto.randomUUID(), name: file.name, fileType, content, size: file.size, modelJson };
+  return {
+    id: crypto.randomUUID(),
+    name: file.name,
+    fileType,
+    content,
+    size: file.size,
+    mimeType: file.type || "application/octet-stream",
+    modelJson,
+  };
 }
 
 /**
@@ -83,10 +96,10 @@ export async function readFileAsAttachment(file: File): Promise<Attachment | nul
  *   3. Return url — sent to AI instead of base64, keeping request body small.
  * Returns null on any failure (caller falls back to base64).
  */
-export async function uploadAttachmentForAI(
+export async function uploadAttachmentForAIRecord(
   file: File,
   attachmentId: string,
-): Promise<string | null> {
+): Promise<{ key: string; url: string } | null> {
   try {
     const key = `ai-attachments/${attachmentId}/${Date.now()}-${file.name}`;
     const formData = new FormData();
@@ -106,11 +119,19 @@ export async function uploadAttachmentForAI(
 
     const data = (await res.json()) as { key: string; url: string };
     console.log("[uploadAttachmentForAI] upload success, url:", data.url);
-    return data.url ?? null;
+    return data;
   } catch (err) {
     console.error("[uploadAttachmentForAI] unexpected error", err);
     return null;
   }
+}
+
+export async function uploadAttachmentForAI(
+  file: File,
+  attachmentId: string,
+): Promise<string | null> {
+  const uploaded = await uploadAttachmentForAIRecord(file, attachmentId);
+  return uploaded?.url ?? null;
 }
 
 // ── Multimodal ChatMessage support ───────────────────────────────────────────

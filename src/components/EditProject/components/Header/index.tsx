@@ -2,13 +2,14 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Avatar, Button, Tooltip, Dropdown, Modal } from "antd";
-import { Download, History, Send, ArrowRightLeft, DatabaseZap, MessageSquareWarning, Layers, RefreshCw, FileCode2 } from "lucide-react";
+import { Download, History, Send, ArrowRightLeft, DatabaseZap, MessageSquareWarning, Layers, RefreshCw, FileCode2, FolderOpen } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { RemoteCollaborator } from "../../hooks/useCollaborationAwareness";
 import ProjectDBConnectionModal from "@/components/ProjectDBConnectionModal";
 import SQLGenerator from "@/components/SQLGenerator";
 import { introspectDbConnection, useProjectDbConnections } from "@/api/db-connections/client";
+import ProjectDocumentsHub from "@/components/ProjectDocumentsHub";
 
 type SchemaType = 'conceptual' | 'logical' | 'physical';
 
@@ -44,6 +45,7 @@ type HeaderProps = {
     onToggleLinterPanel?: () => void;
     linterCounts?: { error: number; warning: number; info: number };
     projectId?: string;
+    projectVisibility?: string;
     normalizationOpen?: boolean;
     onToggleNormalizationPanel?: () => void;
 };
@@ -84,6 +86,7 @@ const Header: React.FC<HeaderProps> = ({
     onToggleLinterPanel,
     linterCounts,
     projectId,
+    projectVisibility,
     normalizationOpen = false,
     onToggleNormalizationPanel,
 }) => {
@@ -91,6 +94,7 @@ const Header: React.FC<HeaderProps> = ({
     const router = useRouter();
     const [isDBConnectionOpen, setIsDBConnectionOpen] = useState(false);
     const [isSQLGeneratorOpen, setIsSQLGeneratorOpen] = useState(false);
+    const [isDocumentsOpen, setIsDocumentsOpen] = useState(false);
     const [sqlGeneratorTables, setSqlGeneratorTables] = useState<SQLGeneratorTable[]>([]);
     const [loadingTables, setLoadingTables] = useState(false);
     const { data: projectConns } = useProjectDbConnections(projectId ?? null);
@@ -259,6 +263,17 @@ const Header: React.FC<HeaderProps> = ({
                         </Button>
                     </Tooltip>
                 </Dropdown>
+                {projectId && canEdit && (
+                    <Tooltip title="Project Documents" placement="bottom">
+                        <Button
+                            type="text"
+                            className="!px-2"
+                            onClick={() => setIsDocumentsOpen(true)}
+                        >
+                            <FolderOpen size={18} />
+                        </Button>
+                    </Tooltip>
+                )}
 
                 <Button
                     id="tour-share-btn"
@@ -436,6 +451,20 @@ const Header: React.FC<HeaderProps> = ({
                 )}
             </div>
         </div>
+            <Modal
+                title={"Project Documents"}
+                open={isDocumentsOpen}
+                onCancel={() => setIsDocumentsOpen(false)}
+                footer={null}
+                width="min(1100px, calc(100vw - 48px))"
+                destroyOnHidden
+            >
+                <ProjectDocumentsHub
+                    projectId={projectId}
+                    projectVisibility={projectVisibility}
+                    embedded
+                />
+            </Modal>
             <Modal
                 title="SQL Query Generator"
                 open={isSQLGeneratorOpen}

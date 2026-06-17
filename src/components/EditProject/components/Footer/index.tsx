@@ -132,8 +132,11 @@ const Footer: React.FC<FooterProps> = ({
 
                 <div 
                     id="tour-ai-chatbox"
-                    onClick={onToggleChatBox}
-                    className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12 w-12 justify-center cursor-pointer hover:bg-gray-50 transition-colors"
+                    onClick={canEdit ? onToggleChatBox : undefined}
+                    className={`flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12 w-12 justify-center transition-colors ${
+                        canEdit ? 'cursor-pointer hover:bg-gray-50 opacity-100' : 'cursor-not-allowed opacity-40'
+                    }`}
+                    title={canEdit ? "AI Assistant" : "Read-only mode"}
                 >                        
                     <svg
                         xmlns="http://www.w3.org/2000/svg"
@@ -204,4 +207,3 @@ const Footer: React.FC<FooterProps> = ({
 };
 
 export default Footer;
-

@@ -367,8 +367,10 @@ const EditProject = (props: IPropsEditProject) => {
     useEffect(() => {
         const openChat = searchParams.get("openChat");
         const chatThread = searchParams.get("chatThread");
-        if (openChat === "true") {
-            setIsChatBoxOpen(true);
+        if (openChat === "true" && userPermission !== null) {
+            if (canEdit) {
+                setIsChatBoxOpen(true);
+            }
             if (chatThread) {
                 setChatThreadId(chatThread);
             }
@@ -380,7 +382,7 @@ const EditProject = (props: IPropsEditProject) => {
                 router.replace(`/projects/${projectData.id}?${params.toString()}`, { scroll: false });
             }
         }
-    }, [searchParams, projectData?.id, router]);
+    }, [searchParams, projectData?.id, router, userPermission, canEdit]);
 
     const updateUrlWithSchemaId = useCallback((schemaId: string) => {
         if (!projectData?.id) return;
@@ -2210,6 +2212,7 @@ const EditProject = (props: IPropsEditProject) => {
                     onToggleLinterPanel={() => setIsLinterOpen((v) => !v)}
                     linterCounts={lintResult.counts}
                     projectId={projectData?.id}
+                    projectVisibility={projectData?.visibility}
                     normalizationOpen={isNormalizationOpen}
                     onToggleNormalizationPanel={(isLogicalSchema || isPhysicalSchema) ? () => setIsNormalizationOpen((v) => !v) : undefined}
                 />

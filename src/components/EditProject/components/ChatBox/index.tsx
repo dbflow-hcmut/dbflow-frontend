@@ -38,6 +38,50 @@ interface ChatBoxProps {
     onModelGenerated?: (modelJson: Record<string, unknown>, detectedLevel?: string) => void;
 }
 
+const ATT_MARKER = "<!-- __att__:";
+const ATT_END = " -->";
+
+function encodeAttachmentMetadata(content: string, attachments: Attachment[]): string {
+    if (attachments.length === 0) return content;
+    const meta = attachments.map(({ id, name, fileType, size, url, s3Key, mimeType }) => ({
+        id,
+        name,
+        fileType,
+        size,
+        ...(mimeType ? { mimeType } : {}),
+        ...(url ? { url } : {}),
+        ...(s3Key ? { s3Key } : {}),
+    }));
+    return `${content}\n${ATT_MARKER}${JSON.stringify(meta)}${ATT_END}`;
+}
+
+function decodeAttachmentMetadata(raw: string): { content: string; attachments: Attachment[] } {
+    const markerIdx = raw.lastIndexOf(ATT_MARKER);
+    if (markerIdx === -1) return { content: raw, attachments: [] };
+    const endIdx = raw.lastIndexOf(ATT_END);
+    if (endIdx <= markerIdx) return { content: raw, attachments: [] };
+
+    const jsonStr = raw.slice(markerIdx + ATT_MARKER.length, endIdx);
+    const cleanContent = raw.slice(0, markerIdx).trimEnd();
+    try {
+        const parsed = JSON.parse(jsonStr) as Array<{
+            id: string;
+            name: string;
+            fileType: Attachment["fileType"];
+            size: number;
+            mimeType?: string;
+            url?: string;
+            s3Key?: string;
+        }>;
+        return {
+            content: cleanContent,
+            attachments: parsed.map((attachment) => ({ ...attachment, content: "" })),
+        };
+    } catch {
+        return { content: raw, attachments: [] };
+    }
+}
+
 const ChatBox: React.FC<ChatBoxProps> = ({
     isOpen,
     onClose,
@@ -85,6 +129,12 @@ const ChatBox: React.FC<ChatBoxProps> = ({
         const toUiMessages = (msgs: { id: string; content: string; role: string; createdAt: string }[]): Message[] =>
             msgs.map((msg, index) => {
                 let displayText = msg.content;
+                let attachments: Attachment[] | undefined;
+                if (msg.role === "user") {
+                    const decoded = decodeAttachmentMetadata(msg.content);
+                    displayText = decoded.content;
+                    attachments = decoded.attachments.length > 0 ? decoded.attachments : undefined;
+                }
                 if (msg.role === "assistant") {
                     const extracted = extractModelJsonFromContent(msg.content);
                     if (extracted.hasDiagram && extracted.textDescription) {
@@ -98,6 +148,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                     text: displayText,
                     sender: msg.role === "user" ? "user" as const : "ai" as const,
                     timestamp: new Date(msg.createdAt),
+                    attachments,
                 };
             });
 
@@ -402,7 +453,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                 if (finalContent) {
                     try {
                         await saveMessages(threadId, [
-                            { role: "user", content: trimmed },
+                            { role: "user", content: encodeAttachmentMetadata(trimmed, atts) },
                             { role: "assistant", content: finalContent },
                         ]);
                     } catch (error) {
@@ -542,14 +593,14 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                     onMessagesChange={setMessages}
                     isLoading={isLoading}
                     reasoningText={reasoningText}
-                    onRetry={handleRetry}
-                    isStreamingJson={isStreamingJson}
-                    onStop={handleStop}
-                />
+                onRetry={handleRetry}
+                isStreamingJson={isStreamingJson}
+                onStop={handleStop}
+                projectId={projectId}
+            />
             )}
         </div>
     );
 };
 
 export default ChatBox;
-
