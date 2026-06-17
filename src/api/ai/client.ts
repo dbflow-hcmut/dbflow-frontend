@@ -1,6 +1,12 @@
 "use client";
 
-import { LANGGRAPH_THREADS, LANGGRAPH_STREAM, LANGGRAPH_CANCEL_RUN, FE_UPLOAD_ATTACHMENT } from "@/api";
+import {
+  LANGGRAPH_THREADS,
+  LANGGRAPH_STREAM,
+  LANGGRAPH_CANCEL_RUN,
+  PROXY_S3_AI_ATTACHMENT_PRESIGNED_UPLOAD,
+} from "@/api";
+import { apiPost } from "@/lib/clientFetch";
 
 // ── Attachment types ──────────────────────────────────────────────────────────
 
@@ -89,35 +95,41 @@ export async function readFileAsAttachment(file: File): Promise<Attachment | nul
 }
 
 /**
- * Upload a file (image or PDF) to S3 via the backend and return a presigned read URL.
+ * Upload a file to S3 using a backend-issued presigned PUT URL.
  * Flow:
- *   1. POST /api/upload-attachment (multipart) → backend PUT to S3
- *   2. Backend returns { key, url } where url is a presigned read URL (1h)
- *   3. Return url — sent to AI instead of base64, keeping request body small.
+ *   1. POST /api/proxy/s3/presigned-ai-attachment with metadata
+ *   2. Browser PUTs the file directly to S3 using uploadUrl
+ *   3. Return { key, url } where url is a presigned read URL for AI
  * Returns null on any failure (caller falls back to base64).
  */
 export async function uploadAttachmentForAIRecord(
   file: File,
   attachmentId: string,
-): Promise<{ key: string; url: string } | null> {
+): Promise<{ key: string; uploadUrl: string; url: string } | null> {
   try {
-    const key = `ai-attachments/${attachmentId}/${Date.now()}-${file.name}`;
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("key", key);
-
-    const res = await fetch(FE_UPLOAD_ATTACHMENT!, {
-      method: "POST",
-      body: formData,
+    const data = await apiPost<
+      { key: string; uploadUrl: string; url: string },
+      { fileName: string; mimeType: string; size: number }
+    >(PROXY_S3_AI_ATTACHMENT_PRESIGNED_UPLOAD, {
+      fileName: file.name,
+      mimeType: file.type || "application/octet-stream",
+      size: file.size,
     });
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => res.status.toString());
-      console.error("[uploadAttachmentForAI] upload failed", res.status, errText);
+    const putRes = await fetch(data.uploadUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Type": file.type || "application/octet-stream",
+      },
+      body: file,
+    });
+
+    if (!putRes.ok) {
+      const errText = await putRes.text().catch(() => putRes.status.toString());
+      console.error("[uploadAttachmentForAI] upload failed", putRes.status, errText);
       return null;
     }
 
-    const data = (await res.json()) as { key: string; url: string };
     console.log("[uploadAttachmentForAI] upload success, url:", data.url);
     return data;
   } catch (err) {

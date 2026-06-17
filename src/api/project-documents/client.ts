@@ -1,8 +1,8 @@
 import useSWR from "swr";
 import {
-  FE_UPLOAD_PROJECT_DOCUMENT,
   PROXY_PROJECT_DOCUMENT_DETAIL,
   PROXY_PROJECT_DOCUMENT_DOWNLOAD_URL,
+  PROXY_PROJECT_DOCUMENT_PRESIGNED_UPLOAD,
   PROXY_PROJECT_DOCUMENTS,
 } from "@/api";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/clientFetch";
@@ -68,20 +68,29 @@ export function useProjectDocuments(
 }
 
 export async function uploadProjectDocumentFile(projectId: string, file: File) {
-  const formData = new FormData();
-  formData.append("file", file);
-
-  const res = await fetch(FE_UPLOAD_PROJECT_DOCUMENT(projectId), {
-    method: "POST",
-    body: formData,
+  const uploaded = await apiPost<
+    { key: string; uploadUrl: string; url: string },
+    { fileName: string; mimeType: string; size: number }
+  >(PROXY_PROJECT_DOCUMENT_PRESIGNED_UPLOAD(projectId), {
+    fileName: file.name,
+    mimeType: file.type || "application/octet-stream",
+    size: file.size,
   });
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(text || "Failed to upload document");
+  const putRes = await fetch(uploaded.uploadUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": file.type || "application/octet-stream",
+    },
+    body: file,
+  });
+
+  if (!putRes.ok) {
+    const text = await putRes.text().catch(() => "");
+    throw new Error(text || "Failed to upload document to storage");
   }
 
-  return (await res.json()) as { key: string; url: string };
+  return uploaded;
 }
 
 export async function createProjectDocument(
