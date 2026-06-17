@@ -287,6 +287,17 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
                 attachments: attachments.length > 0 ? attachments : undefined,
               };
             }
+            if (msg.role === "assistant") {
+              const extracted = extractModelJsonFromContent(msg.content);
+              return {
+                id: `loaded-${index}-${msg.id}`,
+                role: msg.role,
+                content: extracted.hasDiagram && extracted.textDescription
+                  ? extracted.textDescription
+                  : msg.content,
+                timestamp: new Date(msg.createdAt),
+              };
+            }
             return {
               id: `loaded-${index}-${msg.id}`,
               role: msg.role,
@@ -543,18 +554,28 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
         // Save model JSON to S3 so HocusPocus loads it on connect
         await saveSchemaModel(projectIdToUse, schema.id, extracted.modelJson);
 
+        const editorUrl = `/projects/${projectIdToUse}?schemaId=${schema.id}&openChat=true&chatThread=${threadId}`;
+        const assistantContentWithLink = `${fullContent}\n\n[Open created schema](${editorUrl})`;
+        const visibleAssistantContent = `${extracted.textDescription || "Project created successfully."}\n\n[Open created schema](${editorUrl})`;
+
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === assistantMessageId
+              ? { ...msg, content: visibleAssistantContent }
+              : msg
+          )
+        );
+
         // Save messages and link conversation to this project
         await ensureConversationReady();
         await saveMessages(threadId, [
           { role: "user", content: encodeAttachmentMetadata(userMsg, currentAttachments) },
-          { role: "assistant", content: fullContent },
+          { role: "assistant", content: assistantContentWithLink },
         ]);
         await linkConversationToProject(threadId, projectIdToUse, schema.id);
 
         // Navigate to editor with ChatBox auto-opened showing this conversation
-        router.push(
-          `/projects/${projectIdToUse}?schemaId=${schema.id}&openChat=true&chatThread=${threadId}`
-        );
+        router.push(editorUrl);
       } catch (err) {
         console.error("Failed to create project:", err);
         redirectTriggeredRef.current = false;

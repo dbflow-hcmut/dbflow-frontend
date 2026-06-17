@@ -1368,6 +1368,11 @@ const EditProject = (props: IPropsEditProject) => {
                 notificationProvider.open({ type: "success", message: `Created new ${detectedLevel} schema — switching now` });
                 // Navigate to the new schema (page will re-render with updated schema list)
                 router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
+                return {
+                    projectId: projectData.id,
+                    schemaId: newSchema.id,
+                    label: `Open ${detectedLevel} schema`,
+                };
             } catch (error) {
                 console.error("Failed to create cross-schema from chat:", error);
                 notificationProvider.open({ type: "error", message: "Failed to create new schema. Please try again." });
@@ -1395,7 +1400,15 @@ const EditProject = (props: IPropsEditProject) => {
                 console.error("Failed to apply physical model from chat:", error);
             }
         }
-    }, [isConceptualSchema, isLogicalSchema, isPhysicalSchema, applyModelPayload, applyLogicalModelPayload, applyPhysicalModelPayload, projectData?.id, router]);
+
+        if (projectData?.id && selectedSchema?.id) {
+            return {
+                projectId: projectData.id,
+                schemaId: selectedSchema.id,
+                label: "Open updated schema",
+            };
+        }
+    }, [isConceptualSchema, isLogicalSchema, isPhysicalSchema, applyModelPayload, applyLogicalModelPayload, applyPhysicalModelPayload, projectData?.id, router, selectedSchema?.id]);
 
     // ── Normalization decomposition ──────────────────────────────────────────
     const handleApplyDecomposition = useCallback(

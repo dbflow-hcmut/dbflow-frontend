@@ -35,7 +35,10 @@ interface ChatBoxProps {
     /** If provided, load this thread's history and continue from it */
     initialThreadId?: string;
     /** Callback when AI generates a model JSON (for applying to diagram) */
-    onModelGenerated?: (modelJson: Record<string, unknown>, detectedLevel?: string) => void;
+    onModelGenerated?: (
+        modelJson: Record<string, unknown>,
+        detectedLevel?: string,
+    ) => Promise<{ projectId: string; schemaId: string; label?: string } | void> | { projectId: string; schemaId: string; label?: string } | void;
 }
 
 const ATT_MARKER = "<!-- __att__:";
@@ -117,6 +120,11 @@ const ChatBox: React.FC<ChatBoxProps> = ({
     const abortControllerRef = useRef<AbortController | null>(null);
     const runIdRef = useRef<string | null>(null);
 
+    const buildOpenSchemaLink = useCallback((link: { projectId: string; schemaId: string; label?: string }) => {
+        const href = `/projects/${link.projectId}?schemaId=${link.schemaId}&openChat=true&chatThread=${threadId}`;
+        return `[${link.label ?? "Open schema"}](${href})`;
+    }, [threadId]);
+
     // Load chat history when opened
     useEffect(() => {
         if (!isOpen || historyLoaded) return;
@@ -138,9 +146,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                 if (msg.role === "assistant") {
                     const extracted = extractModelJsonFromContent(msg.content);
                     if (extracted.hasDiagram && extracted.textDescription) {
-                        displayText = extracted.modelJson
-                            ? `${extracted.textDescription}\n\nDiagram updated successfully!`
-                            : extracted.textDescription;
+                        displayText = extracted.textDescription;
                     }
                 }
                 return {
@@ -329,6 +335,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
         const chatMessages: ChatMessage[] = [enrichedMessage];
 
         let finalContent = "";
+        let assistantContentToSave = "";
         let modelAlreadyApplied = false;
 
         const effectiveModel = modelOverride ?? currentModel ?? undefined;
@@ -403,27 +410,11 @@ const ChatBox: React.FC<ChatBoxProps> = ({
 
                 if (isDiagramIntentFinal) {
                     const extracted = extractModelJsonFromContent(finalContent);
-                    const isEngineering =
-                        currentIntentRef.current === "forward_engineer" ||
-                        currentIntentRef.current === "reverse_engineer";
-                    const displayText = extracted.textDescription ||
-                        (isEngineering ? "Schema generated!" : "Diagram updated!");
+                    const displayText = extracted.textDescription || "Schema ready.";
 
-                    setMessages((prev) =>
-                        prev.map((msg) =>
-                            msg.id === aiMessageId
-                                ? {
-                                    ...msg,
-                                    text: extracted.modelJson
-                                        ? (isEngineering
-                                            ? `${displayText}\n\nCreating new schema...`
-                                            : `${displayText}\n\nDiagram updated successfully!`)
-                                        : displayText,
-                                    isStreaming: false,
-                                  }
-                                : msg
-                        )
-                    );
+                    let finalDisplayText = extracted.modelJson
+                        ? displayText
+                        : displayText;
 
                     // Apply final model JSON — only here in onComplete, after validator has run.
                     // During streaming, we intentionally don't apply to avoid creating
@@ -435,10 +426,32 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                                 : currentIntentRef.current === "reverse_engineer"
                                     ? (schemaLevel === "physical" ? "logical" : schemaLevel === "logical" ? "conceptual" : undefined)
                                     : undefined);
-                        onModelGenerated(extracted.modelJson, effectiveTargetLevel);
+                        const openLink = await onModelGenerated(extracted.modelJson, effectiveTargetLevel);
+                        if (openLink) {
+                            const linkMarkdown = buildOpenSchemaLink(openLink);
+                            finalDisplayText = `${finalDisplayText}\n\n${linkMarkdown}`;
+                            assistantContentToSave = `${finalContent}\n\n${linkMarkdown}`;
+                        }
                         modelAlreadyApplied = true;
                     }
+
+                    if (!assistantContentToSave) {
+                        assistantContentToSave = finalContent;
+                    }
+
+                    setMessages((prev) =>
+                        prev.map((msg) =>
+                            msg.id === aiMessageId
+                                ? {
+                                    ...msg,
+                                    text: finalDisplayText,
+                                    isStreaming: false,
+                                  }
+                                : msg
+                        )
+                    );
                 } else {
+                    assistantContentToSave = finalContent;
                     // Final state for normal messages
                     setMessages((prev) =>
                         prev.map((msg) =>
@@ -454,7 +467,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                     try {
                         await saveMessages(threadId, [
                             { role: "user", content: encodeAttachmentMetadata(trimmed, atts) },
-                            { role: "assistant", content: finalContent },
+                            { role: "assistant", content: assistantContentToSave || finalContent },
                         ]);
                     } catch (error) {
                         console.error("Failed to save messages:", error);
@@ -498,7 +511,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
         );
         if (returnedRunId) runIdRef.current = returnedRunId;
         abortControllerRef.current = null;
-    }, [isLoading, threadId, conversationCreated, projectId, schemaId, schemaLevel, currentModel, onModelGenerated]);
+    }, [isLoading, threadId, conversationCreated, projectId, schemaId, schemaLevel, currentModel, onModelGenerated, buildOpenSchemaLink]);
 
     const handleRetry = useCallback(() => {
         if (!lastUserMessageRef.current) return;
