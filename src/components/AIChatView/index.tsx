@@ -1,13 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { ArrowUp, Loader2, RefreshCw, Square, Paperclip } from "lucide-react";
-import { Input } from "antd";
+import { ArrowUp, Loader2, RefreshCw, Square, Plus } from "lucide-react";
+import { Input, Tooltip } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import LogoHeader from "@/components/LogoHeader";
 import {
   streamChatToLangGraph,
   generateThreadId,
@@ -34,8 +33,17 @@ import { createProject } from "@/components/CreateProject/api/client";
 import { createSchema, saveSchemaModel } from "@/components/EditProject/api/client";
 import { AttachmentPreviews } from "@/components/AttachmentPreviews";
 import { SchemaType } from "@/utils/constants";
+import type { UserResponse } from "@/types/user.type";
 
 const { TextArea } = Input;
+
+const GREETING_TEMPLATES = [
+  "Good to see you, {name}.",
+  "Ready when you are, {name}.",
+  "What are we designing today, {name}?",
+  "Let's build something clean, {name}.",
+  "Where should we start, {name}?",
+];
 
 interface Message {
   id: string;
@@ -90,10 +98,28 @@ function decodeAttachmentMetadata(raw: string): { content: string; attachments: 
     return { content: raw, attachments: [] };
   }
 }
+
+function getStoredUserName(): string {
+  try {
+    const cachedUser = localStorage.getItem("user_data");
+    if (!cachedUser) return "there";
+    const user = JSON.parse(cachedUser) as Partial<UserResponse>;
+    const name = user.firstName || user.fullName || user.email?.split("@")[0];
+    return name?.trim() || "there";
+  } catch {
+    return "there";
+  }
+}
+
+function buildRandomGreeting(): string {
+  const template = GREETING_TEMPLATES[Math.floor(Math.random() * GREETING_TEMPLATES.length)];
+  return template.replace("{name}", getStoredUserName());
+}
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function AIChatView({ threadId: initialThreadId }: AIChatViewProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -109,6 +135,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
   /** Track the project created in this conversation to reuse it */
   const [createdProjectId, setCreatedProjectId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [greeting, setGreeting] = useState("Good to see you.");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textAreaRef = useRef<TextAreaRef>(null);
@@ -123,6 +150,80 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
   const abortControllerRef = useRef<AbortController | null>(null);
   /** Track run_id for cancelling via LangGraph API */
   const runIdRef = useRef<string | null>(null);
+
+  const resetToNewChat = useCallback(() => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    runIdRef.current = null;
+    redirectTriggeredRef.current = false;
+    currentIntentRef.current = null;
+    detectedLevelRef.current = null;
+    lastUserMessageRef.current = "";
+
+    setMessages([]);
+    setInputValue("");
+    setIsLoading(false);
+    setReasoningInfo(null);
+    setIsRedirecting(false);
+    setIsStreamingJson(false);
+    setCreatedProjectId(null);
+    setAttachments([]);
+    setGreeting(buildRandomGreeting());
+    setThreadId(generateThreadId());
+    setConversationCreated(false);
+    setIsLoadingHistory(false);
+  }, []);
+
+  useEffect(() => {
+    if (pathname?.startsWith("/ai-chat/c/") && !initialThreadId) {
+      return;
+    }
+
+    if (pathname === "/ai-chat") {
+      resetToNewChat();
+      return;
+    }
+
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    runIdRef.current = null;
+    redirectTriggeredRef.current = false;
+    currentIntentRef.current = null;
+    detectedLevelRef.current = null;
+    lastUserMessageRef.current = "";
+
+    setMessages([]);
+    setInputValue("");
+    setIsLoading(false);
+    setReasoningInfo(null);
+    setIsRedirecting(false);
+    setIsStreamingJson(false);
+    setCreatedProjectId(null);
+    setAttachments([]);
+    setGreeting(buildRandomGreeting());
+
+    if (initialThreadId) {
+      setThreadId(initialThreadId);
+      setConversationCreated(true);
+      setIsLoadingHistory(true);
+      return;
+    }
+
+    setThreadId(generateThreadId());
+    setConversationCreated(false);
+    setIsLoadingHistory(false);
+  }, [initialThreadId, pathname, resetToNewChat]);
+
+  useEffect(() => {
+    const handleNewChat = () => {
+      if (window.location.pathname.startsWith("/ai-chat")) {
+        resetToNewChat();
+      }
+    };
+
+    window.addEventListener("dbflow:new-ai-chat", handleNewChat);
+    return () => window.removeEventListener("dbflow:new-ai-chat", handleNewChat);
+  }, [resetToNewChat]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -266,7 +367,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
       conversationPromise = createConversation(threadId)
         .then(() => {
           setConversationCreated(true);
-          window.history.replaceState(null, "", `/ai-chat/c/${threadId}`);
+          router.replace(`/ai-chat/c/${threadId}`, { scroll: false });
         })
         .catch((error) => {
           console.error("Failed to create conversation:", error);
@@ -556,42 +657,51 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
       {messages.length === 0 && !isLoadingHistory && !initialThreadId ? (
         <div className="flex-1 flex items-center justify-center px-4 pb-12">
           <div className="w-full max-w-3xl">
-            <div className="flex justify-center mb-6">
-              <LogoHeader size="extra-large" />
+            <div className="mb-6 text-center">
+              <h1 className="text-2xl font-semibold text-gray-950 sm:text-3xl">
+                {greeting}
+              </h1>
             </div>
 
             <div>
-              <div className="relative border border-gray-300 rounded-xl focus-within:border-primary-500 focus-within:ring-2 focus-within:ring-primary-100 bg-white">
+              <div className="rounded-[26px] border border-gray-200 bg-white p-2 transition-colors focus-within:border-gray-300">
                 {attachments.length > 0 && (
-                  <div className="px-3 pt-3 pb-1">
+                  <div className="px-2 pt-2 pb-2">
                     <AttachmentPreviews attachments={attachments} onRemove={removeAttachment} />
                   </div>
                 )}
-                <TextArea
-                  ref={textAreaRef}
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Ask me anything about databases..."
-                  className="!resize-none !pl-10 !pr-12 !py-4 !rounded-xl !border-0 !shadow-none !outline-none focus:!border-0 focus:!ring-0 focus:!shadow-none !text-sm"
-                  autoSize={{ minRows: 1, maxRows: 10 }}
-                  autoFocus
-                />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isLoading || attachments.length >= ATTACHMENT_MAX_COUNT}
-                  className="absolute cursor-pointer left-3 bottom-[10px] p-1.5 text-gray-500! hover:text-gray-600! disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                  title="Attach file (.sql, .csv, .json, image)"
-                >
-                  <Paperclip size={18} />
-                </button>
-                <button
-                  onClick={() => handleSend()}
-                  disabled={(!inputValue.trim() && attachments.length === 0) || isLoading || isUploading}
-                  className="absolute cursor-pointer right-3 bottom-[8px] p-2 bg-primary-500 text-white rounded-full hover:bg-primary-500 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                >
-                  <ArrowUp className="w-5 h-5 font-bold text-white" />
-                </button>
+                <div className="flex items-end gap-1">
+                  <Tooltip title="Attach file">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isLoading || attachments.length >= ATTACHMENT_MAX_COUNT}
+                      className="flex h-10 w-10 flex-shrink-0 cursor-pointer items-center justify-center rounded-full text-gray-500! transition-colors hover:bg-gray-100 hover:text-gray-700! disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <Plus size={19} />
+                    </button>
+                  </Tooltip>
+                  <div className="min-w-0 flex-1">
+                    <TextArea
+                      ref={textAreaRef}
+                      value={inputValue}
+                      onChange={(e) => setInputValue(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      placeholder="Ask me anything about databases..."
+                      className="!resize-none !rounded-2xl !border-0 !px-2 !py-2.5 !text-sm !shadow-none !outline-none focus:!border-0 focus:!ring-0 focus:!shadow-none"
+                      autoSize={{ minRows: 1, maxRows: 10 }}
+                      autoFocus
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleSend()}
+                    disabled={(!inputValue.trim() && attachments.length === 0) || isLoading || isUploading}
+                    className="flex h-10 w-10 flex-shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary-500 text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:bg-gray-300"
+                  >
+                    <ArrowUp className="w-5 h-5 font-bold text-white" />
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -776,45 +886,53 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
           <div>
             <div className="max-w-3xl mx-auto px-4 py-4">
               <div>
-                <div className="relative border border-gray-300 rounded-xl focus-within:border-primary-500 focus-within:ring-2 focus-within:ring-primary-100 bg-white">
+                <div className="rounded-[26px] border border-gray-200 bg-white p-2 transition-colors focus-within:border-gray-300">
                   {attachments.length > 0 && (
-                    <div className="px-3 pt-3 pb-1">
+                    <div className="px-2 pt-2 pb-2">
                       <AttachmentPreviews attachments={attachments} onRemove={removeAttachment} />
                     </div>
                   )}
-                  <TextArea
-                    ref={textAreaRef}
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder="Ask me anything about databases..."
-                    className="!resize-none !pl-10 !pr-12 !py-4 !text-sm !rounded-xl !border-0 !shadow-none !outline-none focus:!border-0 focus:!ring-0 focus:!shadow-none"
-                    autoSize={{ minRows: 1, maxRows: 6 }}
-                  />
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isLoading || attachments.length >= ATTACHMENT_MAX_COUNT}
-                    className="absolute cursor-pointer left-3 bottom-[10px] p-1.5 text-gray-500! hover:text-gray-600! disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                    title="Attach file (.sql, .csv, .json, image)"
-                  >
-                    <Paperclip size={18} />
-                  </button>
-                  {isLoading ? (
+                  <div className="flex items-end gap-1">
+                    <Tooltip title="Attach file">
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isLoading || attachments.length >= ATTACHMENT_MAX_COUNT}
+                        className="flex h-10 w-10 flex-shrink-0 cursor-pointer items-center justify-center rounded-full text-gray-500! transition-colors hover:bg-gray-100 hover:text-gray-700! disabled:cursor-not-allowed disabled:opacity-30"
+                      >
+                        <Plus size={19} />
+                      </button>
+                    </Tooltip>
+                    <div className="min-w-0 flex-1">
+                      <TextArea
+                        ref={textAreaRef}
+                        value={inputValue}
+                        onChange={(e) => setInputValue(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        placeholder="Ask me anything about databases..."
+                        className="!resize-none !rounded-2xl !border-0 !px-2 !py-2.5 !text-sm !shadow-none !outline-none focus:!border-0 focus:!ring-0 focus:!shadow-none"
+                        autoSize={{ minRows: 1, maxRows: 6 }}
+                      />
+                    </div>
+                    {isLoading ? (
+                      <button
+                        type="button"
+                        onClick={handleStop}
+                        className="flex h-10 w-10 flex-shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary-500 text-white transition-colors hover:bg-primary-500"
+                      >
+                        <Square className="w-5 h-5" fill="white" color="white" />
+                      </button>
+                    ) : (
                     <button
-                      onClick={handleStop}
-                      className="absolute cursor-pointer right-3 bottom-[10px] p-2 bg-primary-500 text-white rounded-full hover:bg-primary-500 transition-colors"
-                    >
-                      <Square className="w-5 h-5" fill="white" color="white" />
-                    </button>
-                  ) : (
-                    <button
+                      type="button"
                       onClick={() => handleSend()}
                       disabled={(!inputValue.trim() && attachments.length === 0) || isUploading}
-                      className="absolute cursor-pointer right-3 bottom-[8px] p-2 bg-primary-500 text-white rounded-full hover:bg-primary-500 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                      className="flex h-10 w-10 flex-shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary-500 text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:bg-gray-300"
                     >
                       <ArrowUp className="w-5 h-5 font-bold text-white" />
                     </button>
-                  )}
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

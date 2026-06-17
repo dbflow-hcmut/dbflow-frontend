@@ -188,7 +188,12 @@ export default function Sidebar({ mobileOpen = false, onMobileClose, mobile = fa
               key={item.path}
               href={item.path}
               prefetch
-              onClick={mobile ? onMobileClose : undefined}
+              onClick={() => {
+                if (item.path === "/ai-chat") {
+                  window.dispatchEvent(new CustomEvent("dbflow:new-ai-chat"));
+                }
+                if (mobile) onMobileClose?.();
+              }}
               className={classNames(
                 "flex h-11 w-full cursor-pointer items-center rounded-lg px-3 transition-colors",
                 showText ? "gap-3" : "justify-center",
