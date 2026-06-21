@@ -242,7 +242,13 @@ Rule:
    - `fkRef.targetColumnName = targetHandle`.
    - `fkRef.onDelete/onUpdate = edge.data.onDelete/onUpdate`.
 
-Điểm cần chú ý: FK direction phụ thuộc vào hướng kéo edge. Phía source được hiểu là FK side, phía target được hiểu là referenced/PK side.
+Điểm cần chú ý: source side của stored edge luôn được hiểu là FK column side, target side là referenced column side. Khi user kéo edge giữa 2 columns, UI chuẩn hoá hướng edge theo rule:
+
+- PK/CK/Unique -> Normal: Normal trở thành FK, PK/CK/Unique là referenced column.
+- Normal -> PK/CK/Unique: Normal trở thành FK, PK/CK/Unique là referenced column.
+- PK/CK/Unique -> PK/CK/Unique: target user kéo tới trở thành FK, source là referenced column; dùng cho 1-1.
+- Normal -> Normal: mở dialog chọn column nào là FK; referenced column còn lại được set `isUnique = true`.
+- Properties panel không cho chỉnh cardinality/FK direction sau khi tạo edge; physical edge panel chỉ giữ FK actions.
 
 ## 7. Thuật toán map stored diagram -> ReactFlow
 
@@ -324,7 +330,7 @@ Với mỗi edge:
 2. Source column index lấy từ `edge.fkRef.foreignKeyIndex`.
 3. Target table node lấy từ `edge.target`.
 4. Target PK column là column đầu tiên của target stored node có `decorations.pk`.
-5. Nếu không có target table hoặc target PK thì skip FK.
+5. Nếu không có target table hoặc không resolve được target column thì fallback về PK đầu tiên hoặc column đầu tiên của target table.
 6. FK map được lưu theo key:
    - `tableId`.
    - `columnIndex`.
@@ -334,7 +340,7 @@ Với mỗi edge:
    - `onDelete = edge.fkRef.onDelete`.
    - `onUpdate = edge.fkRef.onUpdate`.
 
-Điểm quan trọng: dù stored edge có `targetColumnName`, khi build model code vẫn lấy target PK đầu tiên từ target stored node. Vì vậy FK physical model hiện ưu tiên target PK, chưa dùng target column name để resolve chính xác non-PK/candidate-key target.
+Điểm quan trọng: `buildPhysicalModel` ưu tiên `fkRef.targetColumnName` để resolve đúng referenced column, nên FK có thể trỏ tới PK/CK/Unique theo edge user tạo.
 
 ### 8.4. Step 4: build table data map
 
@@ -614,8 +620,8 @@ Rule chọn edge type:
 
 Với physical edge:
 
-- `onConnect` chỉ tạo ReactFlow edge type `relation-table-edge`.
-- FK role trong model được suy ra sau đó từ stored edge khi `buildPhysicalModel`.
+- `onConnect` tạo ReactFlow edge type `relation-table-edge` với source là FK column side.
+- FK role trong model được merge từ stored edge source/target column.
 - FK action `onDelete`/`onUpdate` được chỉnh trong PropertiesPanel và lưu vào `edge.data`.
 
 FK action options:
@@ -726,7 +732,7 @@ Các tính năng trên không đọc trực tiếp ReactFlow nodes khi đã có 
 2. Diagram local save không ghi model. Model chỉ được ghi qua `applyModelPayload` hoặc `mutateModel`.
 3. `buildPhysicalModel` suy FK từ edge, không lấy FK trực tiếp từ column data.
 4. FK source là source side của edge; target là referenced table.
-5. Khi build model từ edge, target column hiện lấy PK đầu tiên của target stored node, chưa resolve theo `targetColumnName`.
+5. Khi build model từ edge, target column ưu tiên `fkRef.targetColumnName`, fallback PK đầu tiên hoặc column đầu tiên.
 6. Column id trong model build từ UI data được generate theo index: `pid_${tableId}_col_${idx}`.
 7. Reorder/delete column có thể ảnh hưởng FK vì stored edge dùng `foreignKeyIndex`.
 8. Index và FD lưu bằng tên column, không bằng column id.
@@ -750,4 +756,3 @@ Các tính năng trên không đọc trực tiếp ReactFlow nodes khi đã có 
 | `buildDiagramFromPhysicalModel` | `PhysicalModelPayload` | Stored diagram | Preserve position/size, auto-layout table mới, tạo FK edge từ column roles |
 | `applyModelPayload` | Full model mới | ReactFlow + Yjs model | Replace model, regenerate diagram |
 | `mutateModel` | Mutator function | Model mới + diagram mới | Rebuild model từ diagram trước, preserve metadata, mutate, regenerate |
-

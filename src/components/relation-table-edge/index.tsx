@@ -154,31 +154,6 @@ const RelationTableEdge: React.FC<EdgeProps<RelationTableEdgeData>> = (props) =>
             </g>
 
             <EdgeLabelRenderer>
-                {/* Source cardinality label */}
-                <div
-                    style={{
-                        position: "absolute",
-                        transform: `translate(-50%, -100%) translate(${sourceX + positionToDir(sourcePosition).dx * 18}px, ${sourceY + positionToDir(sourcePosition).dy * 18 - 6}px)`,
-                        fontSize: 10, fontWeight: 700, color,
-                        pointerEvents: "none", userSelect: "none",
-                    }}
-                    className="nodrag nopan"
-                >
-                    {srcCard}
-                </div>
-                {/* Target cardinality label */}
-                <div
-                    style={{
-                        position: "absolute",
-                        transform: `translate(-50%, -100%) translate(${targetX + positionToDir(targetPosition).dx * 18}px, ${targetY + positionToDir(targetPosition).dy * 18 - 6}px)`,
-                        fontSize: 10, fontWeight: 700, color,
-                        pointerEvents: "none", userSelect: "none",
-                    }}
-                    className="nodrag nopan"
-                >
-                    {tgtCard}
-                </div>
-
                 {data?.label && (
                     <div
                         style={{
@@ -202,4 +177,3 @@ const RelationTableEdge: React.FC<EdgeProps<RelationTableEdgeData>> = (props) =>
 };
 
 export default RelationTableEdge;
-

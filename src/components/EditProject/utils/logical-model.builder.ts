@@ -115,21 +115,12 @@ const buildLogicalModel = ({
             const targetTableNode = tableNodeMap.get(targetNodeId);
             if (!targetTableNode) return;
 
-            // Find key column in target table (pk decoration)
-            const targetColumns = targetTableNode.columns || [];
-            const keyColumn = targetColumns.find((col) => col.decorations?.pk);
-
-            // Extract target column index from columnId
-            const targetColMatch = edge.target.match(/_col_(\d+)$/);
-            const targetColIdx = targetColMatch ? parseInt(targetColMatch[1], 10) : 0;
-            const targetColId = keyColumn?.columnId ?? `lid_${targetNodeId}_col_${targetColIdx}`;
-
             if (!fkMap.has(sourceTableId)) {
                 fkMap.set(sourceTableId, new Map());
             }
             fkMap.get(sourceTableId)!.set(columnIndex, {
                 refTableId: targetNodeId,
-                refColumnId: targetColId,
+                refColumnId: edge.target,
             });
         });
 

@@ -43,8 +43,6 @@ type PropertiesPanelProps = {
         updates: Partial<{ name: string; isKey: boolean; isCandidateKey: boolean }>
     ) => void;
     onReorderLogicalTableAttributes?: (fromIndex: number, toIndex: number) => void;
-    onUpdateLogicalEdgeCardinality?: (side: 'source' | 'target', value: '1' | 'N') => void;
-    onUpdatePhysicalEdgeCardinality?: (side: 'source' | 'target', value: '1' | 'N') => void;
     // Functional dependency callbacks (logical)
     onAddLogicalFD?: () => void;
     onRemoveLogicalFD?: (fdId: string) => void;
@@ -86,8 +84,6 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     onRemoveLogicalTableAttribute,
     onUpdateLogicalTableAttribute,
     onReorderLogicalTableAttributes,
-    onUpdateLogicalEdgeCardinality,
-    onUpdatePhysicalEdgeCardinality,
     onAddLogicalFD,
     onRemoveLogicalFD,
     onUpdateLogicalFD,
@@ -795,35 +791,12 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                 const srcCol = srcData?.columns?.[srcColIdx];
                                 const tgtCol = tgtData?.columns?.[tgtColIdx];
 
-                                const srcCard: string = (selectedEdge.data as Record<string, unknown>)?.sourceCardinality as string || 'N';
-                                const tgtCard: string = (selectedEdge.data as Record<string, unknown>)?.targetCardinality as string || '1';
-
                                 return (
                                     <div className="flex flex-col gap-4">
-                                        {/* Cardinality selector */}
-                                        <div>
-                                            <label className="block text-sm font-medium mb-2">Cardinality</label>
-                                            <Select
-                                                value={`${srcCard}:${tgtCard}`}
-                                                onChange={(val: string) => {
-                                                    const [s, t] = val.split(':') as ['1' | 'N', '1' | 'N'];
-                                                    onUpdateLogicalEdgeCardinality?.('source', s);
-                                                    setTimeout(() => onUpdateLogicalEdgeCardinality?.('target', t), 0);
-                                                }}
-                                                className="w-full"
-                                                options={[
-                                                    { label: 'N : 1 (Many-to-One)', value: 'N:1' },
-                                                    { label: '1 : 1 (One-to-One)', value: '1:1' },
-                                                    { label: '1 : N (One-to-Many)', value: '1:N' },
-                                                    { label: 'N : N (Many-to-Many)', value: 'N:N' },
-                                                ]}
-                                            />
-                                        </div>
-
                                         {/* Source side */}
                                         <div className="border border-gray-200 rounded-lg p-3">
                                             <div className="text-xs font-semibold mb-2 text-gray-500">
-                                                {srcCard} — Source
+                                                FK Column
                                             </div>
                                             <div className="space-y-1">
                                                 <div className="flex items-center justify-between">
@@ -847,7 +820,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                         {/* Target side */}
                                         <div className="border border-gray-200 rounded-lg p-3">
                                             <div className="text-xs font-semibold mb-2 text-gray-500">
-                                                {tgtCard} — Target
+                                                Referenced Column
                                             </div>
                                             <div className="space-y-1">
                                                 <div className="flex items-center justify-between">
@@ -878,8 +851,6 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                 const srcColName = selectedEdge.sourceHandle || '';
                                 const tgtColName = selectedEdge.targetHandle || '';
 
-                                const srcCard: string = (selectedEdge.data as Record<string, unknown>)?.sourceCardinality as string || 'N';
-                                const tgtCard: string = (selectedEdge.data as Record<string, unknown>)?.targetCardinality as string || '1';
                                 const edgeOnDelete: FKAction = (selectedEdge.data as Record<string, unknown>)?.onDelete as FKAction || 'NO ACTION';
                                 const edgeOnUpdate: FKAction = (selectedEdge.data as Record<string, unknown>)?.onUpdate as FKAction || 'NO ACTION';
 
@@ -893,26 +864,6 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
                                 return (
                                     <div className="flex flex-col gap-4">
-                                        {/* Cardinality selector */}
-                                        <div>
-                                            <label className="block text-sm font-medium mb-2">Cardinality</label>
-                                            <Select
-                                                value={`${srcCard}:${tgtCard}`}
-                                                onChange={(val: string) => {
-                                                    const [s, t] = val.split(':') as ['1' | 'N', '1' | 'N'];
-                                                    onUpdatePhysicalEdgeCardinality?.('source', s);
-                                                    setTimeout(() => onUpdatePhysicalEdgeCardinality?.('target', t), 0);
-                                                }}
-                                                className="w-full"
-                                                options={[
-                                                    { label: 'N : 1 (Many-to-One)', value: 'N:1' },
-                                                    { label: '1 : 1 (One-to-One)', value: '1:1' },
-                                                    { label: '1 : N (One-to-Many)', value: '1:N' },
-                                                    { label: 'N : N (Many-to-Many)', value: 'N:N' },
-                                                ]}
-                                            />
-                                        </div>
-
                                         {/* Source side */}
                                         {/* <div className="border border-gray-200 rounded-lg p-3">
                                             <div className="text-xs font-semibold mb-2 text-gray-500">

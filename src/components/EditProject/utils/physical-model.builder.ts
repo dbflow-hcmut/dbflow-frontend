@@ -130,17 +130,19 @@ const buildPhysicalModel = ({
             const targetTableNode = tableNodeMap.get(edge.target);
             if (!targetTableNode) return;
 
-            // Find primary key column in target table
             const targetColumns = targetTableNode.columns || [];
-            const pkColumn = targetColumns.find((col) => col.decorations?.pk);
-            if (!pkColumn) return;
+            const targetColumnIndex = targetColumns.findIndex((col) => col.label === edge.fkRef?.targetColumnName);
+            const refColumnId =
+                targetColumnIndex >= 0
+                    ? `pid_${targetTableNode.tableId}_col_${targetColumnIndex}`
+                    : (targetColumns.find((col) => col.decorations?.pk)?.columnId ?? `pid_${targetTableNode.tableId}_col_0`);
 
             if (!fkMap.has(sourceTableId)) {
                 fkMap.set(sourceTableId, new Map());
             }
             fkMap.get(sourceTableId)!.set(columnIndex, {
                 refTableId: targetTableNode.tableId!,
-                refColumnId: pkColumn.columnId,
+                refColumnId,
                 onDelete: edge.fkRef.onDelete,
                 onUpdate: edge.fkRef.onUpdate,
             });

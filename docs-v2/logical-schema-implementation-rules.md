@@ -13,7 +13,7 @@ Tài liệu này mô tả logical schema đang được hiện thực trong code
 | Node UI của logical table | `src/components/erds-notations/logical-table/index.tsx` |
 | Edge UI của logical FK/cardinality | `src/components/logical-table-edge/index.tsx` |
 | Tạo logical table, sửa column, reorder column, CRUD FD | `src/components/EditProject/utils/functions.ts` |
-| Properties panel cho table, column key, FD, logical edge cardinality | `src/components/EditProject/components/PropertiesPanel/index.tsx` |
+| Properties panel cho table, column key, FD | `src/components/EditProject/components/PropertiesPanel/index.tsx` |
 | Conversion logical <-> conceptual/physical | `src/components/EditProject/utils/schema-conversion.ts` |
 | Linter/normalization dùng logical model | `src/components/EditProject/utils/schema-linter.ts`, `src/components/EditProject/utils/normalization.ts` |
 
@@ -250,7 +250,13 @@ lid_cid_xxx_col_1-left
    - `fkRef.foreignKeyIndex = sourceColumnIndex`.
    - `sourceCardinality`, `targetCardinality`.
 
-Điểm cần chú ý: source side của edge được hiểu là FK column side. Nếu user kéo ngược hướng, FK trong model sẽ theo hướng đó.
+Điểm cần chú ý: source side của stored edge luôn được hiểu là FK column side, target side là referenced column side. Khi user kéo edge giữa 2 columns, UI chuẩn hoá hướng edge theo rule:
+
+- PK/CK -> Normal: Normal trở thành FK, PK/CK là referenced column.
+- Normal -> PK/CK: Normal trở thành FK, PK/CK là referenced column.
+- PK/CK -> PK/CK: target user kéo tới trở thành FK, source là referenced column; dùng cho 1-1.
+- Normal -> Normal: mở dialog chọn column nào là FK; referenced column còn lại được set `isCandidateKey = true`.
+- Properties panel không cho chỉnh cardinality/FK direction sau khi tạo edge.
 
 ## 8. Thuật toán map stored diagram -> ReactFlow
 
@@ -360,7 +366,7 @@ Với mỗi edge:
 }
 ```
 
-Điểm quan trọng: nếu target table có PK decoration, code ưu tiên PK đầu tiên làm `refColumnId`, kể cả edge target đang trỏ một column khác. Nếu target không có PK decoration thì fallback về target column id từ edge.
+Điểm quan trọng: `refColumnId` dùng đúng stored edge `target` column id. UI chuẩn hoá edge target thành referenced column khi user kéo edge.
 
 ### 9.5. Step 5: build tableDataMap từ node.data
 
@@ -657,8 +663,7 @@ Với logical edge:
 
 - `onConnect` tạo edge type `logical-table-edge`.
 - Nếu source/target column đều là key thì default cardinality là `1:1`.
-- Nếu không thì default là `N:1`.
-- FK model sau đó được suy từ stored edge source column.
+- FK direction được quyết định lúc kéo edge theo rule PK/CK/Normal. Properties panel không còn selector đổi cardinality/direction.
 
 ## 15. Collaboration và hybrid model/diagram
 
@@ -767,7 +772,7 @@ Logical không export DDL trực tiếp. Muốn export DDL phải convert sang p
 9. Reorder/delete column có thể ảnh hưởng FK vì `fkRef.foreignKeyIndex` dựa trên index.
 10. `buildLogicalModel` luôn set `nullable: true`, `unique: false`.
 11. Candidate key có thể mất nếu chỉ còn fallback stored columns, vì fallback không đọc `decorations.ck`.
-12. Khi build FK map từ diagram, target refColumnId ưu tiên PK đầu tiên của target table nếu có.
+12. Khi build FK map từ diagram, target `refColumnId` là đúng column id ở stored edge target.
 13. Cardinality visual được lưu trên stored edge nhưng không ảnh hưởng `LogicalModelPayload`.
 14. FD lưu bằng tên column trong UI; build diagram có helper map column id -> name để hiển thị.
 15. `showFDs` là UI state, không phải semantic rule của model.
@@ -786,4 +791,3 @@ Logical không export DDL trực tiếp. Muốn export DDL phải convert sang p
 | `buildDiagramFromLogicalModel` | `LogicalModelPayload` | Stored diagram | Preserve layout, auto-layout table mới, tạo FK edge từ column roles |
 | `applyModelPayload` | Full model mới | ReactFlow + Yjs model | Replace model, regenerate diagram |
 | `mutateModel` | Mutator function | Model mới + diagram mới | Rebuild model từ diagram trước, mutate, regenerate |
-

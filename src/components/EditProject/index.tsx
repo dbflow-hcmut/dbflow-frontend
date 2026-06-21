@@ -21,6 +21,7 @@ import ReactFlow, {
     getViewportForBounds,
 } from "reactflow";
 import { toPng, toSvg } from 'html-to-image';
+import { Modal } from "antd";
 import { notificationProvider } from "@/providers/notification";
 import { apiGet } from "@/lib/clientFetch";
 import { PROXY_PROJECT_DETAIL } from "@/api";
@@ -722,11 +723,209 @@ const EditProject = (props: IPropsEditProject) => {
     );
 
     const onConnect = useCallback<OnConnect>((connection: Connection) => {
+        if (!connection.source || !connection.target) return;
+
         // Check if connection involves relation table nodes or logical table nodes
         const sourceNode = nodes.find(n => n.id === connection.source);
         const targetNode = nodes.find(n => n.id === connection.target);
         const isRelationTableEdge = sourceNode?.type === 'relation' || targetNode?.type === 'relation';
         const isLogicalTableEdge = sourceNode?.type === 'logical-table' || targetNode?.type === 'logical-table';
+
+        const parseLogicalColumnIndex = (handle?: string | null) => {
+            const match = handle?.match(/_col_(\d+)/);
+            return match ? parseInt(match[1], 10) : -1;
+        };
+
+        const resolveLogicalColumn = (node: Node<NodeData> | undefined, handle?: string | null) => {
+            if (node?.type !== 'logical-table') return null;
+            const columnIndex = parseLogicalColumnIndex(handle);
+            const tableData = node.data as LogicalTableData;
+            const column = tableData.columns?.[columnIndex];
+            if (!column) return null;
+            return {
+                node,
+                tableData,
+                column,
+                columnIndex,
+                isReferencedKey: Boolean(column.isKey || column.isCandidateKey),
+                label: `${tableData.name}.${column.name}`,
+            };
+        };
+
+        const resolvePhysicalColumn = (node: Node<NodeData> | undefined, handle?: string | null) => {
+            if (node?.type !== 'relation') return null;
+            const tableData = node.data as RelationTableData;
+            const columnName = handle?.replace("-source", "")?.replace("-target", "") ?? "";
+            const columnIndex = tableData.columns?.findIndex((column) => column.name === columnName) ?? -1;
+            const column = tableData.columns?.[columnIndex];
+            if (!column) return null;
+            return {
+                node,
+                tableData,
+                column,
+                columnIndex,
+                isReferencedKey: Boolean(column.isPrimary || column.isCandidateKey || column.isUnique),
+                label: `${tableData.name}.${column.name}`,
+            };
+        };
+
+        const makeDirectedConnection = (
+            fkSide: 'source' | 'target',
+            data?: Record<string, unknown>,
+        ) => ({
+            id: generateDiagramId(),
+            type: isLogicalTableEdge ? "logical-table-edge" : "relation-table-edge",
+            animated: false,
+            source: fkSide === 'source' ? connection.source! : connection.target!,
+            target: fkSide === 'source' ? connection.target! : connection.source!,
+            sourceHandle: fkSide === 'source' ? connection.sourceHandle : connection.targetHandle,
+            targetHandle: fkSide === 'source' ? connection.targetHandle : connection.sourceHandle,
+            data: {
+                sourceCardinality: data?.sourceCardinality ?? 'N',
+                targetCardinality: data?.targetCardinality ?? '1',
+                ...data,
+            },
+        });
+
+        const addLogicalFkEdge = (fkSide: 'source' | 'target', options?: { oneToOne?: boolean; markReferencedCandidate?: boolean }) => {
+            const referenced = fkSide === 'source'
+                ? resolveLogicalColumn(targetNode, connection.targetHandle)
+                : resolveLogicalColumn(sourceNode, connection.sourceHandle);
+
+            if (options?.markReferencedCandidate && referenced) {
+                setNodes((currentNodes) =>
+                    currentNodes.map((node) => {
+                        if (node.id !== referenced.node.id || node.type !== 'logical-table') return node;
+                        const tableData = node.data as LogicalTableData;
+                        return {
+                            ...node,
+                            data: {
+                                ...tableData,
+                                columns: tableData.columns.map((column, index) =>
+                                    index === referenced.columnIndex
+                                        ? { ...column, isCandidateKey: true }
+                                        : column
+                                ),
+                            },
+                        };
+                    })
+                );
+            }
+
+            setEdges((eds) =>
+                addEdge(
+                    makeDirectedConnection(fkSide, {
+                        sourceCardinality: options?.oneToOne ? '1' : 'N',
+                        targetCardinality: '1',
+                    }),
+                    eds
+                )
+            );
+        };
+
+        const addPhysicalFkEdge = (fkSide: 'source' | 'target', options?: { oneToOne?: boolean; markReferencedUnique?: boolean }) => {
+            const referenced = fkSide === 'source'
+                ? resolvePhysicalColumn(targetNode, connection.targetHandle)
+                : resolvePhysicalColumn(sourceNode, connection.sourceHandle);
+
+            if (options?.markReferencedUnique && referenced) {
+                setNodes((currentNodes) =>
+                    currentNodes.map((node) => {
+                        if (node.id !== referenced.node.id || node.type !== 'relation') return node;
+                        const tableData = node.data as RelationTableData;
+                        return {
+                            ...node,
+                            data: {
+                                ...tableData,
+                                columns: tableData.columns.map((column, index) =>
+                                    index === referenced.columnIndex
+                                        ? { ...column, isUnique: true }
+                                        : column
+                                ),
+                            },
+                        };
+                    })
+                );
+            }
+
+            setEdges((eds) =>
+                addEdge(
+                    makeDirectedConnection(fkSide, {
+                        sourceCardinality: options?.oneToOne ? '1' : 'N',
+                        targetCardinality: '1',
+                    }),
+                    eds
+                )
+            );
+        };
+
+        if (isLogicalTableEdge && sourceNode?.type === 'logical-table' && targetNode?.type === 'logical-table') {
+            const sourceColumn = resolveLogicalColumn(sourceNode, connection.sourceHandle);
+            const targetColumn = resolveLogicalColumn(targetNode, connection.targetHandle);
+            if (!sourceColumn || !targetColumn) return;
+
+            if (sourceColumn.isReferencedKey && !targetColumn.isReferencedKey) {
+                addLogicalFkEdge('target');
+                return;
+            }
+            if (!sourceColumn.isReferencedKey && targetColumn.isReferencedKey) {
+                addLogicalFkEdge('source');
+                return;
+            }
+            if (sourceColumn.isReferencedKey && targetColumn.isReferencedKey) {
+                addLogicalFkEdge('target', { oneToOne: true });
+                return;
+            }
+
+            Modal.confirm({
+                title: "Choose foreign key direction",
+                content: `Both columns are normal. Pick the column that becomes FK. The referenced column will be marked as CK.`,
+                okText: `${sourceColumn.label} is FK`,
+                cancelText: `${targetColumn.label} is FK`,
+                closable: false,
+                maskClosable: false,
+                keyboard: false,
+                onOk: () => addLogicalFkEdge('source', { markReferencedCandidate: true }),
+                onCancel: () => addLogicalFkEdge('target', { markReferencedCandidate: true }),
+            });
+            return;
+        }
+
+        if (isRelationTableEdge && sourceNode?.type === 'relation' && targetNode?.type === 'relation') {
+            const sourceColumn = resolvePhysicalColumn(sourceNode, connection.sourceHandle);
+            const targetColumn = resolvePhysicalColumn(targetNode, connection.targetHandle);
+            if (!sourceColumn || !targetColumn) return;
+
+            if (sourceColumn.isReferencedKey && !targetColumn.isReferencedKey) {
+                addPhysicalFkEdge('target');
+                return;
+            }
+            if (!sourceColumn.isReferencedKey && targetColumn.isReferencedKey) {
+                addPhysicalFkEdge('source');
+                return;
+            }
+            if (sourceColumn.isReferencedKey && targetColumn.isReferencedKey) {
+                addPhysicalFkEdge('target', { oneToOne: true });
+                return;
+            }
+
+            Modal.confirm({
+                title: "Choose foreign key direction",
+                content: `Both columns are normal. Pick the column that becomes FK. The referenced column will be marked as Unique.`,
+                okText: `${sourceColumn.label} is FK`,
+                cancelText: `${targetColumn.label} is FK`,
+                closable: false,
+                maskClosable: false,
+                keyboard: false,
+                onOk: () => addPhysicalFkEdge('source', { markReferencedUnique: true }),
+                onCancel: () => addPhysicalFkEdge('target', { markReferencedUnique: true }),
+            });
+            return;
+        }
+
+        if (isLogicalTableEdge || isRelationTableEdge) {
+            return;
+        }
 
         let edgeType = "erd-edge";
         if (isLogicalTableEdge) {
@@ -790,7 +989,7 @@ const EditProject = (props: IPropsEditProject) => {
 
         };
         setEdges((eds) => addEdge(edgeWithId, eds));
-    }, [setEdges, nodes]);
+    }, [setEdges, setNodes, nodes]);
 
     const edgeReconnectSuccessful = useRef(true);
     const reconnectingEdgeRef = useRef<Edge | null>(null);
@@ -2439,38 +2638,6 @@ const EditProject = (props: IPropsEditProject) => {
                         onRemovePhysicalFD={removePhysicalFD}
                         onUpdatePhysicalFD={updatePhysicalFD}
                         onTogglePhysicalFDDisplay={togglePhysicalFDDisplay}
-                        onUpdateLogicalEdgeCardinality={(side, value) => {
-                            if (!selectedEdge) return;
-                            setEdges((existingEdges) =>
-                                existingEdges.map((edge) =>
-                                    edge.id === selectedEdge.id
-                                        ? {
-                                            ...edge,
-                                            data: {
-                                                ...edge.data,
-                                                [side === 'source' ? 'sourceCardinality' : 'targetCardinality']: value,
-                                            },
-                                        }
-                                        : edge
-                                )
-                            );
-                        }}
-                        onUpdatePhysicalEdgeCardinality={(side, value) => {
-                            if (!selectedEdge) return;
-                            setEdges((existingEdges) =>
-                                existingEdges.map((edge) =>
-                                    edge.id === selectedEdge.id
-                                        ? {
-                                            ...edge,
-                                            data: {
-                                                ...edge.data,
-                                                [side === 'source' ? 'sourceCardinality' : 'targetCardinality']: value,
-                                            },
-                                        }
-                                        : edge
-                                )
-                            );
-                        }}
                     />
                     {commentMode && (
                         <CommentPanel
