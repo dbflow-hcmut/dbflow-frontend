@@ -422,14 +422,15 @@ const Header: React.FC<HeaderProps> = ({
                         placement="bottomRight"
                         align={{ offset: [0, 10] }}
                     >
-                        <Button
-                            type="default"
-                            className="!px-3 gap-2 flex items-center"
-                            loading={isSyncing}
-                        >
-                            {!isSyncing && <RefreshCw size={16} />}
-                            <span className="font-semibold">{isSyncing ? 'Syncing…' : 'Sync to…'}</span>
-                        </Button>
+                        <Tooltip title="Sync to Schema" placement="bottom">
+                            <Button
+                                type={'text'}
+                                className="!px-2"
+                                disabled={isSyncing}
+                            >
+                                <RefreshCw size={16} />
+                            </Button>
+                        </Tooltip>
                     </Dropdown>
                 )}
                 {schemaType && convertItems.length > 0 && (
@@ -445,7 +446,7 @@ const Header: React.FC<HeaderProps> = ({
                             loading={isConverting}
                         >
                             {!isConverting && <ArrowRightLeft className="text-white" size={18} />}
-                            <span className="font-semibold">{isConverting ? 'Converting…' : 'Convert schema'}</span>
+                            <span className="font-semibold">{isConverting ? 'Converting…' : 'Convert'}</span>
                         </Button>
                     </Dropdown>
                 )}

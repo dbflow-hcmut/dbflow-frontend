@@ -64,7 +64,7 @@ const Footer: React.FC<FooterProps> = ({
                         <Tooltip title="Select" placement="top">
                             <Button
                                 type={interactionMode === 'default' && !commentMode && activeToolMode === 'none' ? 'primary' : 'text'}
-                                className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
+                                className="!px-2 !text-[14px] !h-10 !w-10 !flex !items-center !justify-center"
                                 onClick={() => { setInteractionMode('default'); if (onToggleCommentMode && commentMode) onToggleCommentMode(); if (onToolModeChange) onToolModeChange('none'); }}
                             >
                                 <MousePointer2 size={18} />
@@ -73,7 +73,7 @@ const Footer: React.FC<FooterProps> = ({
                         <Tooltip title="Pan" placement="top">
                             <Button
                                 type={interactionMode === 'panning' && !commentMode && activeToolMode === 'none' ? 'primary' : 'text'}
-                                className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
+                                className="!px-2 !text-[14px] !h-10 !w-10 !flex !items-center !justify-center"
                                 onClick={() => { setInteractionMode('panning'); if (onToggleCommentMode && commentMode) onToggleCommentMode(); if (onToolModeChange) onToolModeChange('none'); }}
                             >
                                 <Hand size={18} />
@@ -82,7 +82,7 @@ const Footer: React.FC<FooterProps> = ({
                         <Tooltip title="Sticky Note" placement="top">
                             <Button
                                 type={activeToolMode === 'sticky-note' ? 'primary' : 'text'}
-                                className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
+                                className="!px-2 !text-[14px] !h-10 !w-10 !flex !items-center !justify-center"
                                 onClick={() => {
                                     if (onToolModeChange) onToolModeChange(activeToolMode === 'sticky-note' ? 'none' : 'sticky-note');
                                     if (onToggleCommentMode && commentMode) onToggleCommentMode();
@@ -94,7 +94,7 @@ const Footer: React.FC<FooterProps> = ({
                         <Tooltip title="Text" placement="top">
                             <Button
                                 type={activeToolMode === 'text-label' ? 'primary' : 'text'}
-                                className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
+                                className="!px-2 !text-[14px] !h-10 !w-10 !flex !items-center !justify-center"
                                 onClick={() => {
                                     if (onToolModeChange) onToolModeChange(activeToolMode === 'text-label' ? 'none' : 'text-label');
                                     if (onToggleCommentMode && commentMode) onToggleCommentMode();
@@ -106,7 +106,7 @@ const Footer: React.FC<FooterProps> = ({
                         <Tooltip title="Pen" placement="top">
                             <Button
                                 type={activeToolMode === 'pen' ? 'primary' : 'text'}
-                                className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
+                                className="!px-2 !text-[14px] !h-10 !w-10 !flex !items-center !justify-center"
                                 onClick={() => {
                                     if (onToolModeChange) onToolModeChange(activeToolMode === 'pen' ? 'none' : 'pen');
                                     if (onToggleCommentMode && commentMode) onToggleCommentMode();
@@ -118,7 +118,7 @@ const Footer: React.FC<FooterProps> = ({
                         <Tooltip title="Comment" placement="top">
                             <Button
                                 type={commentMode ? 'primary' : 'text'}
-                                className="!px-2 !text-[14px] !h-8 !w-8 !flex !items-center !justify-center"
+                                className="!px-2 !text-[14px] !h-10 !w-10 !flex !items-center !justify-center"
                                 onClick={() => {
                                     if (onToggleCommentMode) onToggleCommentMode();
                                     if (!commentMode) setInteractionMode('default');
