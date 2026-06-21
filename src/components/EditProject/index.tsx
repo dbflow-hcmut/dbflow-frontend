@@ -765,6 +765,108 @@ const EditProject = (props: IPropsEditProject) => {
             .map((edge) => edge.id);
     }, [edges]);
 
+    const refreshLogicalEdgeCardinalities = useCallback((
+        tableId: string,
+        columnIndex: number,
+        updates: Partial<{ name: string; isKey: boolean; isCandidateKey: boolean }>,
+        removeEdgeIds: string[] = [],
+    ) => {
+        const removeEdgeIdSet = new Set(removeEdgeIds);
+
+        setEdges((existingEdges) =>
+            existingEdges
+                .filter((edge) => !removeEdgeIdSet.has(edge.id))
+                .map((edge) => {
+                    if (edge.type !== 'logical-table-edge') return edge;
+
+                    const parseColumnIndex = (handle?: string | null) => {
+                        const match = handle?.match(/_col_(\d+)/);
+                        return match ? parseInt(match[1], 10) : -1;
+                    };
+
+                    const getColumnIsKey = (edgeTableId: string, edgeColumnIndex: number, edgeHandle?: string | null) => {
+                        if (edgeTableId === tableId && edgeColumnIndex === columnIndex) {
+                            const tableData = selectedNode?.type === 'logical-table'
+                                ? selectedNode.data as LogicalTableData
+                                : undefined;
+                            const column = tableData?.columns?.[columnIndex];
+                            const nextColumn = { ...column, ...updates };
+                            return Boolean(nextColumn.isKey || nextColumn.isCandidateKey);
+                        }
+
+                        const tableData = nodes.find((node) =>
+                            node.id === edgeTableId && node.type === 'logical-table'
+                        )?.data as LogicalTableData | undefined;
+                        const fallbackIndex = parseColumnIndex(edgeHandle);
+                        const column = tableData?.columns?.[edgeColumnIndex >= 0 ? edgeColumnIndex : fallbackIndex];
+                        return Boolean(column?.isKey || column?.isCandidateKey);
+                    };
+
+                    const sourceColumnIndex = parseColumnIndex(edge.sourceHandle);
+                    const targetColumnIndex = parseColumnIndex(edge.targetHandle);
+                    const sourceIsKey = getColumnIsKey(edge.source, sourceColumnIndex, edge.sourceHandle);
+                    const targetIsKey = getColumnIsKey(edge.target, targetColumnIndex, edge.targetHandle);
+
+                    return {
+                        ...edge,
+                        data: {
+                            ...edge.data,
+                            sourceCardinality: sourceIsKey && targetIsKey ? '1' : 'N',
+                            targetCardinality: '1',
+                        },
+                    };
+                })
+        );
+    }, [nodes, selectedNode, setEdges]);
+
+    const refreshPhysicalEdgeCardinalities = useCallback((
+        tableId: string,
+        columnName: string,
+        updates: Partial<RelationColumn>,
+        removeEdgeIds: string[] = [],
+    ) => {
+        const removeEdgeIdSet = new Set(removeEdgeIds);
+
+        setEdges((existingEdges) =>
+            existingEdges
+                .filter((edge) => !removeEdgeIdSet.has(edge.id))
+                .map((edge) => {
+                    if (edge.type !== 'relation-table-edge') return edge;
+
+                    const getColumnIsKey = (edgeTableId: string, edgeColumnName?: string | null) => {
+                        if (!edgeColumnName) return false;
+
+                        if (edgeTableId === tableId && edgeColumnName === columnName) {
+                            const tableData = selectedNode?.type === 'relation'
+                                ? selectedNode.data as RelationTableData
+                                : undefined;
+                            const column = tableData?.columns?.find((col) => col.name === columnName);
+                            const nextColumn = { ...column, ...updates };
+                            return Boolean(nextColumn.isPrimary || nextColumn.isCandidateKey || nextColumn.isUnique);
+                        }
+
+                        const tableData = nodes.find((node) =>
+                            node.id === edgeTableId && node.type === 'relation'
+                        )?.data as RelationTableData | undefined;
+                        const column = tableData?.columns?.find((col) => col.name === edgeColumnName);
+                        return Boolean(column?.isPrimary || column?.isCandidateKey || column?.isUnique);
+                    };
+
+                    const sourceIsKey = getColumnIsKey(edge.source, edge.sourceHandle);
+                    const targetIsKey = getColumnIsKey(edge.target, edge.targetHandle);
+
+                    return {
+                        ...edge,
+                        data: {
+                            ...edge.data,
+                            sourceCardinality: sourceIsKey && targetIsKey ? '1' : 'N',
+                            targetCardinality: '1',
+                        },
+                    };
+                })
+        );
+    }, [nodes, selectedNode, setEdges]);
+
     const updateLogicalTableAttributeWithWarning = useCallback((
         columnIndex: number,
         updates: Partial<{ name: string; isKey: boolean; isCandidateKey: boolean }>
@@ -799,14 +901,10 @@ const EditProject = (props: IPropsEditProject) => {
             cancelText: "Cancel",
             onOk: () => {
                 updateLogicalTableAttribute(columnIndex, updates);
-                if (invalidReferencedEdgeIds.length > 0) {
-                    setEdges((existingEdges) =>
-                        existingEdges.filter((edge) => !invalidReferencedEdgeIds.includes(edge.id))
-                    );
-                }
+                refreshLogicalEdgeCardinalities(selectedNode.id, columnIndex, updates, invalidReferencedEdgeIds);
             },
         });
-    }, [getLogicalReferencedEdgeIds, isLogicalColumnConnectedToRelationship, selectedNode, setEdges, updateLogicalTableAttribute]);
+    }, [getLogicalReferencedEdgeIds, isLogicalColumnConnectedToRelationship, refreshLogicalEdgeCardinalities, selectedNode, updateLogicalTableAttribute]);
 
     const updateRelationTableColumnWithWarning = useCallback((
         columnIndex: number,
@@ -843,14 +941,10 @@ const EditProject = (props: IPropsEditProject) => {
             cancelText: "Cancel",
             onOk: () => {
                 updateRelationTableColumn(columnIndex, updates);
-                if (invalidReferencedEdgeIds.length > 0) {
-                    setEdges((existingEdges) =>
-                        existingEdges.filter((edge) => !invalidReferencedEdgeIds.includes(edge.id))
-                    );
-                }
+                refreshPhysicalEdgeCardinalities(selectedNode.id, column.name, updates, invalidReferencedEdgeIds);
             },
         });
-    }, [getPhysicalReferencedEdgeIds, isPhysicalColumnConnectedToRelationship, selectedNode, setEdges, updateRelationTableColumn]);
+    }, [getPhysicalReferencedEdgeIds, isPhysicalColumnConnectedToRelationship, refreshPhysicalEdgeCardinalities, selectedNode, updateRelationTableColumn]);
 
     const nodeTypes = useMemo(
         () => ({

@@ -146,11 +146,19 @@ const RelationTableEdge: React.FC<EdgeProps<RelationTableEdgeData>> = (props) =>
                     ));
                 })()}
 
-                {/* Source marker — FK side (many) */}
-                <CrowsFoot x={sourceX} y={sourceY} position={sourcePosition} stroke={color} sw={sw} />
+                {/* Source marker — FK side (many by default) */}
+                {srcCard === 'N' ? (
+                    <CrowsFoot x={sourceX} y={sourceY} position={sourcePosition} stroke={color} sw={sw} />
+                ) : (
+                    <OneBar x={sourceX} y={sourceY} position={sourcePosition} stroke={color} sw={sw} />
+                )}
 
-                {/* Target marker — PK side (one) */}
-                <OneBar x={targetX} y={targetY} position={targetPosition} stroke={color} sw={sw} />
+                {/* Target marker — PK side (one by default) */}
+                {tgtCard === 'N' ? (
+                    <CrowsFoot x={targetX} y={targetY} position={targetPosition} stroke={color} sw={sw} />
+                ) : (
+                    <OneBar x={targetX} y={targetY} position={targetPosition} stroke={color} sw={sw} />
+                )}
             </g>
 
             <EdgeLabelRenderer>
