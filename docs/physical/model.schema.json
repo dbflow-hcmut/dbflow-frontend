@@ -223,6 +223,11 @@
           "items": { "$ref": "#/$defs/functionalDependency" }
         },
 
+        "showFunctionalDependencies": {
+          "type": "boolean",
+          "default": false
+        },
+
         "notes": { "type": "string" }
       }
     },

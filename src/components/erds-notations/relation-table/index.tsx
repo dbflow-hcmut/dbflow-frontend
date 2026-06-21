@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { NodeResizer, Position, useNodeId, useStore, useReactFlow, useUpdateNodeInternals } from "reactflow";
+import type { OnResize, OnResizeEnd } from "@reactflow/node-resizer";
 import classNames from "classnames";
 import {
     DatabaseSchemaNode,
@@ -94,6 +95,18 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
     const [nodeWidth, setNodeWidth] = useState(() => getInitialWidth());
     const [minWidth, setMinWidth] = useState(200);
 
+    useEffect(() => {
+        if (typeof node?.style?.width !== 'number') return;
+        setNodeWidth(node.style.width);
+    }, [node?.style?.width]);
+
+    const handleResize: OnResize = (_, params) => {
+        setNodeWidth(params.width);
+    };
+    const handleResizeEnd: OnResizeEnd = (_, params) => {
+        setNodeWidth(params.width);
+    };
+
     // Use ResizeObserver to auto-measure actual rendered height and sync to node
     useEffect(() => {
         const el = contentRef.current;
@@ -178,9 +191,7 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
             // Add padding for safety
             const calculatedMinWidth = Math.max(200, maxWidth + 20);
             setMinWidth(calculatedMinWidth);
-            
-            // Always update width to fit content
-            setNodeWidth(calculatedMinWidth);
+            setNodeWidth((currentWidth) => Math.max(currentWidth, calculatedMinWidth));
         };
         
         // Wait for DOM to be ready
@@ -259,6 +270,8 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
                 isVisible={isSelected}
                 minWidth={minWidth}
                 minHeight={minHeight}
+                onResize={handleResize}
+                onResizeEnd={handleResizeEnd}
             />
 
             <DatabaseSchemaNode className="w-full">
@@ -397,4 +410,3 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
 };
 
 export default memo(RelationTableNode);
-

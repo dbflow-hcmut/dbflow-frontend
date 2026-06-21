@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { NodeResizer, Position, useNodeId, useStore, useReactFlow, useUpdateNodeInternals } from "reactflow";
-import type { OnResize } from "@reactflow/node-resizer";
+import type { OnResize, OnResizeEnd } from "@reactflow/node-resizer";
 import classNames from "classnames";
 import {
     DatabaseSchemaNode,
@@ -93,6 +93,9 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
     }, [node?.style?.width]);
 
     const handleResize: OnResize = (_, params) => {
+        setNodeWidth(params.width);
+    };
+    const handleResizeEnd: OnResizeEnd = (_, params) => {
         setNodeWidth(params.width);
     };
     
@@ -247,7 +250,7 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
                 minWidth={minWidth}
                 minHeight={minHeight}
                 onResize={handleResize}
-                onResizeEnd={handleResize}
+                onResizeEnd={handleResizeEnd}
             />
 
             <DatabaseSchemaNode className="w-full">

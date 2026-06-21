@@ -391,7 +391,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
             sEdges = mapConceptualEdgesReactToStored(effectiveLiveEdges, effectiveLiveNodes);
         }
         const model = isPhysical
-            ? buildPhysicalModel({ storedNodes: sNodes as StoredPhysicalNode[], storedEdges: sEdges as StoredPhysicalDiagramEdge[], schemaId: schemaId ?? undefined, schemaName, diagramName })
+            ? buildPhysicalModel({ storedNodes: sNodes as StoredPhysicalNode[], storedEdges: sEdges as StoredPhysicalDiagramEdge[], runtimeNodes: effectiveLiveNodes, schemaId: schemaId ?? undefined, schemaName, diagramName })
             : null;
         return { currentModel: model, currentStoredNodes: sNodes, currentStoredEdges: sEdges };
     }, [effectiveLiveNodes, effectiveLiveEdges, schemaId, schemaName, diagramName, isPhysical, isLogical]);

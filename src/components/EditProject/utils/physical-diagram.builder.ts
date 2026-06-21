@@ -164,8 +164,6 @@ const mapRelationNode = (node: StoredPhysicalNode): Node<RelationTableData> => {
             name: node.name ?? dataSource?.name ?? node.tableId ?? node.id,
             columns,
             indexes: dataSource?.indexes,
-            functionalDependencies: dataSource?.functionalDependencies,
-            showFDs: dataSource?.showFDs,
         },
         style: ensureStyle(node),
         zIndex: node.zIndex,
@@ -221,7 +219,7 @@ export const mapStoredNodesToReactNodes = (storedNodes: StoredPhysicalNode[] = [
 };
 
 const mapReactRelationNode = (node: Node<RelationTableData>): StoredPhysicalNode => {
-    const { name, columns = [], functionalDependencies, showFDs, indexes } = node.data;
+    const { name, columns = [], indexes } = node.data;
 
     // Map columns to stored format
     const storedColumns: StoredPhysicalDiagramNode["columns"] = columns.map((col, idx) => ({
@@ -249,8 +247,6 @@ const mapReactRelationNode = (node: Node<RelationTableData>): StoredPhysicalNode
             name,
             columns,
             ...(indexes && indexes.length > 0 ? { indexes } : {}),
-            ...(functionalDependencies?.length ? { functionalDependencies } : {}),
-            ...(showFDs != null ? { showFDs } : {}),
         } as RelationTableData,
     };
 };

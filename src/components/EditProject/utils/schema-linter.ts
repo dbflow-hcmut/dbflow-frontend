@@ -884,10 +884,15 @@ function lintPhysical(payload: PhysicalLintPayload): LintIssue[] {
 
     // P020 — Functional dependency references non-existent column
     for (const table of tables) {
-        const colNames = new Set((table.columns ?? []).map((c) => c.name.trim().toLowerCase()));
+        const colRefs = new Set(
+            (table.columns ?? []).flatMap((c) => [
+                c.id.trim().toLowerCase(),
+                c.name.trim().toLowerCase(),
+            ]),
+        );
         for (const fd of table.functionalDependencies ?? []) {
             for (const ref of [...(fd.left ?? []), ...(fd.right ?? [])]) {
-                if (!colNames.has(ref.trim().toLowerCase())) {
+                if (!colRefs.has(ref.trim().toLowerCase())) {
                     issues.push({
                         ruleId: "P020",
                         severity: "warning",

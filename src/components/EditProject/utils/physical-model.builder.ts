@@ -1,4 +1,6 @@
 import type { StoredPhysicalDiagramEdge, StoredPhysicalDiagramNode, StoredPhysicalNode } from "./physical-diagram.builder";
+import type { RelationTableData } from "@/components/erds-notations/relation-table";
+import type { Node } from "reactflow";
 import type { NodeData } from "../index";
 import { computeELKTableLayout, type LayoutTable } from "./auto-layout";
 
@@ -52,6 +54,7 @@ type ModelTable = {
     columns: ModelColumn[];
     indexes?: ModelIndex[];
     functionalDependencies?: ModelFunctionalDependency[];
+    showFunctionalDependencies?: boolean;
     comment?: string;
     notes?: string;
 };
@@ -79,6 +82,7 @@ export type PhysicalModelPayload = {
 type BuildPhysicalModelParams = {
     storedNodes: StoredPhysicalNode[];
     storedEdges: StoredPhysicalDiagramEdge[];
+    runtimeNodes?: Node<NodeData>[];
     schemaId?: string;
     schemaName?: string;
     diagramName?: string;
@@ -98,6 +102,7 @@ export const createEmptyPhysicalModel = (modelId?: string, modelName?: string): 
 const buildPhysicalModel = ({
     storedNodes,
     storedEdges,
+    runtimeNodes,
     schemaId,
     schemaName,
     diagramName,
@@ -114,6 +119,11 @@ const buildPhysicalModel = ({
 
     // Build a map of table nodes by ID
     const tableNodeMap = new Map(tableNodes.map((node) => [node.tableId!, node]));
+    const runtimeTableDataMap = new Map(
+        (runtimeNodes ?? [])
+            .filter((node) => node.type === "relation")
+            .map((node) => [node.id, node.data as RelationTableData]),
+    );
 
     // Build a map of FK relationships: tableId -> columnIndex -> { refTableId, refColumnId, onDelete, onUpdate }
     const fkMap = new Map<string, Map<number, { refTableId: string; refColumnId: string; onDelete?: FKAction; onUpdate?: FKAction }>>();
@@ -151,12 +161,10 @@ const buildPhysicalModel = ({
     // Build tables with columns
     // Get column data from stored node data (RelationTableData)
     type ActualColumnData = { name: string; type?: string; length?: string; isPrimary?: boolean; isCandidateKey?: boolean; isNullable?: boolean; isUnique?: boolean; isAutoIncrement?: boolean; defaultValue?: string };
-    type NodeFD = { id: string; left: string[]; right: string[] };
     type ActualTableData = {
         name: string;
         columns: ActualColumnData[];
         indexes?: Array<{ id: string; name: string; type: string; columns: Array<{ columnName: string; order: string }>; isUnique: boolean }>;
-        functionalDependencies?: NodeFD[];
     };
     const tableDataMap = new Map<string, ActualTableData>();
 
@@ -169,7 +177,6 @@ const buildPhysicalModel = ({
                     name: nodeData.name || tableNode.name || tableNode.tableId,
                     columns: nodeData.columns,
                     indexes: nodeData.indexes,
-                    functionalDependencies: nodeData.functionalDependencies,
                 });
             }
         }
@@ -181,6 +188,7 @@ const buildPhysicalModel = ({
 
         // Get column data from tableDataMap or use stored columns
         const tableData = tableDataMap.get(tableId);
+        const runtimeData = runtimeTableDataMap.get(tableId);
         const actualColumns = tableData?.columns || [];
         const storedColumns = tableNode.columns || [];
 
@@ -263,12 +271,14 @@ const buildPhysicalModel = ({
             isUnique: idx.isUnique,
         }));
 
-        // Extract FDs from node data
-        const nodeFDs = tableData?.functionalDependencies ?? [];
+        const columnIdByName = new Map(columns.map((column) => [column.name, column.id]));
+        const normalizeFdRefs = (refs: string[]) =>
+            refs.map((ref) => columnIdByName.get(ref) ?? ref);
+        const nodeFDs = runtimeData?.functionalDependencies ?? [];
         const modelFDs: ModelFunctionalDependency[] = nodeFDs.map((fd) => ({
             id: fd.id,
-            left: fd.left,
-            right: fd.right,
+            left: normalizeFdRefs(fd.left),
+            right: normalizeFdRefs(fd.right),
         }));
 
         return {
@@ -276,7 +286,8 @@ const buildPhysicalModel = ({
             name: tableName,
             columns,
             indexes: indexes.length > 0 ? indexes : undefined,
-            functionalDependencies: modelFDs.length > 0 ? modelFDs : undefined,
+            ...(runtimeData && "functionalDependencies" in runtimeData ? { functionalDependencies: modelFDs } : {}),
+            ...(runtimeData?.showFDs != null ? { showFunctionalDependencies: runtimeData.showFDs } : {}),
             notes: undefined,
         };
     });
@@ -432,18 +443,6 @@ export const buildDiagramFromPhysicalModel = async ({
             }),
         );
 
-        // Convert model FDs (column names) → node FDs
-        const nodeFDs = (table.functionalDependencies ?? []).map((fd) => ({
-            id: fd.id,
-            left: fd.left,
-            right: fd.right,
-        }));
-
-        // Preserve showFDs from existing node data if available
-        const existingNodeData = existingNodes?.find(
-            (n) => n.tableId === table.id || n.id === table.id,
-        )?.data as { showFDs?: boolean } | undefined;
-
         nodes.push({
             id: table.id,
             type: "table",
@@ -472,8 +471,6 @@ export const buildDiagramFromPhysicalModel = async ({
                     columns: idx.columns,
                     isUnique: idx.isUnique,
                 })),
-                ...(nodeFDs.length > 0 ? { functionalDependencies: nodeFDs } : {}),
-                ...(existingNodeData?.showFDs != null ? { showFDs: existingNodeData.showFDs } : {}),
             } as NodeData,
         });
     }

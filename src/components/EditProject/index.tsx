@@ -1439,7 +1439,7 @@ const EditProject = (props: IPropsEditProject) => {
             const storedNodes = mapPhysicalReactToStored(nodes);
             const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
             const model = storedNodes.length > 0
-                ? buildPhysicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
+                ? buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
                 : _physicalModelData;
             return model ? runPhysicalLinter(model) : empty;
         }
@@ -1464,7 +1464,7 @@ const EditProject = (props: IPropsEditProject) => {
             const storedNodes = mapPhysicalReactToStored(nodes);
             const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
             return storedNodes.length > 0
-                ? buildPhysicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
+                ? buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
                 : _physicalModelData;
         }
         return null;
@@ -1930,7 +1930,7 @@ const EditProject = (props: IPropsEditProject) => {
             const storedNodes = mapPhysicalReactToStored(nodes);
             const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
             if (storedNodes.length > 0) {
-                return buildPhysicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
+                return buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
             }
             return _physicalModelData;
         };
@@ -2117,7 +2117,7 @@ const EditProject = (props: IPropsEditProject) => {
         const buildFreshPhysical = () => {
             const storedNodes = mapPhysicalReactToStored(nodes);
             const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
-            if (storedNodes.length > 0) return buildPhysicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
+            if (storedNodes.length > 0) return buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
             return _physicalModelData;
         };
         const buildFreshConceptual = () => {

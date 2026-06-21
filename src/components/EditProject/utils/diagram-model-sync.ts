@@ -172,7 +172,8 @@ const mergePhysicalFDs = (
     current: PhysicalFD[] | undefined,
     projection: PhysicalFD[] | undefined,
 ): PhysicalFD[] | undefined => {
-    if (!projection?.length) return undefined;
+    if (projection === undefined) return current;
+    if (!projection.length) return [];
     return projection.map((fd) => ({
         ...findById(current, fd.id),
         ...fd,
@@ -199,6 +200,8 @@ export const mergePhysicalModelFromDiagramProjection = (
                     existing?.functionalDependencies,
                     table.functionalDependencies,
                 ),
+                showFunctionalDependencies:
+                    table.showFunctionalDependencies ?? existing?.showFunctionalDependencies,
             };
             if (!merged.indexes?.length) delete merged.indexes;
             if (!merged.functionalDependencies?.length) delete merged.functionalDependencies;

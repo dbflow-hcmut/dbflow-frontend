@@ -40,6 +40,7 @@
 * `storageOptions`: Tuy chon luu tru phu thuoc DBMS (`tablespace`, `filegroup`, `compression`).
 * `triggers`: Danh sach trigger gan voi bang nay.
 * `functionalDependencies`: Danh sach FD noi bo.
+* `showFunctionalDependencies`: Co hien thi FD tren node/table hay khong.
 * `notes`: Ghi chu.
 
 ---

@@ -6,6 +6,7 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import { API_BASE } from "@/api";
 import type { ProjectSchemasResponse } from "@/types/projects.type";
 import type { NodeData } from "../index";
+import type { RelationTableData } from "@/components/erds-notations/relation-table";
 import type { CollaborationAwareness } from "@/types/projects.type";
 import {
     mapStoredNodesToReactNodes,
@@ -72,6 +73,43 @@ export const usePhysicalCollaboration = ({
     edgesRef.current = edges;
     const onDiagramReadyRef = useRef(onDiagramReady);
     onDiagramReadyRef.current = onDiagramReady;
+
+    const hydrateNodesFromModel = useCallback((
+        reactNodes: Node<NodeData>[],
+        model: PhysicalModelPayload | null,
+    ): Node<NodeData>[] => {
+        if (!model?.tables?.length) return reactNodes;
+
+        const tableMap = new Map(model.tables.map((table) => [table.id, table]));
+
+        return reactNodes.map((node) => {
+            if (node.type !== "relation") return node;
+
+            const table = tableMap.get(node.id);
+            if (!table) return node;
+
+            const columnNameByRef = new Map<string, string>();
+            for (const column of table.columns ?? []) {
+                columnNameByRef.set(column.id, column.name);
+                columnNameByRef.set(column.name, column.name);
+            }
+
+            const functionalDependencies = (table.functionalDependencies ?? []).map((fd) => ({
+                id: fd.id,
+                left: fd.left.map((ref) => columnNameByRef.get(ref) ?? ref),
+                right: fd.right.map((ref) => columnNameByRef.get(ref) ?? ref),
+            }));
+
+            return {
+                ...node,
+                data: {
+                    ...(node.data as RelationTableData),
+                    functionalDependencies,
+                    showFDs: table.showFunctionalDependencies ?? false,
+                } as NodeData,
+            };
+        });
+    }, []);
 
     // ── Reset refs when schema or enabled changes ────────────────────────
     useEffect(() => {
@@ -174,6 +212,8 @@ export const usePhysicalCollaboration = ({
                 console.error("[Physical] Error mapping edges:", error);
                 return;
             }
+
+            reactNodes = hydrateNodesFromModel(reactNodes, modelDataRef.current);
 
             isSyncingFromYjsRef.current = true;
             hasLoadedInitialDataRef.current = true;
@@ -391,7 +431,7 @@ export const usePhysicalCollaboration = ({
             ydocRef.current = null;
             setAwareness(null);
         };
-    }, [enabled, sessionId, schema?.id, projectId, token, setNodes, setEdges]);
+    }, [enabled, sessionId, schema?.id, projectId, token, setNodes, setEdges, hydrateNodesFromModel]);
 
     // ── Save diagram to Yjs (diagram only — NOT model) ───────────────
     useEffect(() => {
@@ -420,26 +460,30 @@ export const usePhysicalCollaboration = ({
             return;
         }
 
+        const modelProjection = buildPhysicalModel({
+            storedNodes,
+            storedEdges,
+            runtimeNodes: nodes,
+            schemaId: schema?.id ?? undefined,
+            schemaName: schema?.name ?? undefined,
+        });
+        const nextModel = mergePhysicalModelFromDiagramProjection(
+            modelDataRef.current,
+            modelProjection,
+        );
+        const shouldSyncDiagram = lastSyncedDiagramStringRef.current !== nextDiagramString;
+        const shouldSyncModel = hasModelChanged(modelDataRef.current, nextModel);
+        const nextModelString = shouldSyncModel ? JSON.stringify(nextModel) : null;
+
         const commitDiagramUpdate = () => {
             if (!ydocRef.current || !nextDiagramString) return;
             const doc = ydocRef.current;
             const diagramMap = doc.getMap("diagram");
             const modelMap = doc.getMap("model");
 
-            const modelProjection = buildPhysicalModel({
-                storedNodes,
-                storedEdges,
-                schemaId: schema?.id ?? undefined,
-                schemaName: schema?.name ?? undefined,
-            });
-            const nextModel = mergePhysicalModelFromDiagramProjection(
-                modelDataRef.current,
-                modelProjection,
-            );
-            const shouldSyncModel = hasModelChanged(modelDataRef.current, nextModel);
-            const nextModelString = shouldSyncModel ? JSON.stringify(nextModel) : null;
-
-            lastAppliedDiagramStringRef.current = nextDiagramString;
+            if (shouldSyncDiagram) {
+                lastAppliedDiagramStringRef.current = nextDiagramString;
+            }
             if (nextModelString) {
                 lastAppliedModelStringRef.current = nextModelString;
                 lastSyncedModelStringRef.current = nextModelString;
@@ -448,15 +492,19 @@ export const usePhysicalCollaboration = ({
             }
 
             doc.transact(() => {
-                diagramMap.set("data", nextDiagramString!);
+                if (shouldSyncDiagram) {
+                    diagramMap.set("data", nextDiagramString!);
+                }
                 if (nextModelString) {
                     modelMap.set("data", nextModelString);
                 }
             });
-            lastSyncedDiagramStringRef.current = nextDiagramString;
+            if (shouldSyncDiagram) {
+                lastSyncedDiagramStringRef.current = nextDiagramString;
+            }
         };
 
-        if (nextDiagramString && lastSyncedDiagramStringRef.current !== nextDiagramString) {
+        if (nextDiagramString && (shouldSyncDiagram || shouldSyncModel)) {
             if (!ydocRef.current) {
                 pendingDiagramUpdateRef.current = commitDiagramUpdate;
             } else {
@@ -482,7 +530,10 @@ export const usePhysicalCollaboration = ({
                 preserveUnmodeledNodes: true,
             });
 
-            const reactNodes = mapStoredNodesToReactNodes(storedNodes);
+            const reactNodes = hydrateNodesFromModel(
+                mapStoredNodesToReactNodes(storedNodes),
+                modelPayload,
+            );
             const reactEdges = mapStoredEdgesToReactEdges(storedEdges, reactNodes);
 
             hasLoadedInitialDataRef.current = true;
@@ -500,7 +551,7 @@ export const usePhysicalCollaboration = ({
                 });
             }
         },
-        [setNodes, setEdges],
+        [setNodes, setEdges, hydrateNodesFromModel],
     );
 
     return {
