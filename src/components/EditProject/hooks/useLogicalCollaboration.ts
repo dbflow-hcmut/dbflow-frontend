@@ -17,6 +17,10 @@ import {
 } from "../utils/logical-diagram.builder";
 import { buildDiagramFromLogicalModel, buildLogicalModel, createEmptyLogicalModel } from "../utils/logical-model.builder";
 import type { LogicalModelPayload, MutateLogicalModelFn } from "../utils/logical-model.builder";
+import {
+    hasModelChanged,
+    mergeLogicalModelFromDiagramProjection,
+} from "../utils/diagram-model-sync";
 
 export type { MutateLogicalModelFn };
 
@@ -428,10 +432,34 @@ export const useLogicalCollaboration = ({
         const commitDiagramUpdate = () => {
             if (!ydocRef.current || !nextDiagramString) return;
             const doc = ydocRef.current;
-            const map = doc.getMap("diagram");
+            const diagramMap = doc.getMap("diagram");
+            const modelMap = doc.getMap("model");
+
+            const modelProjection = buildLogicalModel({
+                storedNodes,
+                storedEdges,
+                schemaId: schema?.id ?? undefined,
+                schemaName: schema?.name ?? undefined,
+            });
+            const nextModel = mergeLogicalModelFromDiagramProjection(
+                modelDataRef.current,
+                modelProjection,
+            );
+            const shouldSyncModel = hasModelChanged(modelDataRef.current, nextModel);
+            const nextModelString = shouldSyncModel ? JSON.stringify(nextModel) : null;
+
             lastAppliedDiagramStringRef.current = nextDiagramString;
+            if (nextModelString) {
+                lastAppliedModelStringRef.current = nextModelString;
+                lastSyncedModelStringRef.current = nextModelString;
+                modelDataRef.current = nextModel;
+            }
+
             doc.transact(() => {
-                map.set("data", nextDiagramString!);
+                diagramMap.set("data", nextDiagramString!);
+                if (nextModelString) {
+                    modelMap.set("data", nextModelString);
+                }
             });
             lastSyncedDiagramStringRef.current = nextDiagramString;
         };

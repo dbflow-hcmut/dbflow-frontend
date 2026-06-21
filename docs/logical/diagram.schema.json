@@ -10,9 +10,9 @@
     "diagram": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "nodes", "edges"],
+      "required": ["nodes", "edges"],
       "properties": {
-        "id": { "type": "string", "pattern": "^lid_" },
+        "id": { "type": "string", "minLength": 1 },
         "name": { "type": "string" },
 
         "viewport": {
@@ -67,7 +67,7 @@
       "additionalProperties": false,
       "required": ["id", "type", "position", "size"],
       "properties": {
-        "id": { "type": "string", "pattern": "^lid_" },
+        "id": { "type": "string", "minLength": 1 },
         "type": { "type": "string", "enum": ["table", "note", "sticky-note", "text-label", "drawing-path"] },
         "position": { "$ref": "#/$defs/point" },
         "size": { "$ref": "#/$defs/size" },
@@ -78,7 +78,7 @@
 
         "tableId": {
           "type": "string",
-          "pattern": "^lid_"
+          "minLength": 1
         },
 
         "columns": {
@@ -88,13 +88,14 @@
             "additionalProperties": false,
             "required": ["columnId"],
             "properties": {
-              "columnId": { "type": "string", "pattern": "^lid_" },
+              "columnId": { "type": "string", "minLength": 1 },
               "label": { "type": "string"},
               "decorations": {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
                   "pk": { "type": "boolean", "default": false },
+                  "ck": { "type": "boolean", "default": false },
                   "fk": { "type": "boolean", "default": false },
                   "underline": { "type": "boolean", "default": false },
                   "italic": { "type": "boolean", "default": false }
@@ -106,6 +107,11 @@
 
         "text": {
           "type": "string"
+        },
+
+        "data": {
+          "type": "object",
+          "additionalProperties": true
         }
       },
 
@@ -122,11 +128,11 @@
       "additionalProperties": false,
       "required": ["id", "type", "source", "target"],
       "properties": {
-        "id": { "type": "string", "pattern": "^lid_" },
+        "id": { "type": "string", "minLength": 1 },
         "type": { "type": "string", "enum": ["fk", "noteLink"] },
 
-        "source": { "type": "string", "pattern": "^lid_" },
-        "target": { "type": "string", "pattern": "^lid_" },
+        "source": { "type": "string", "minLength": 1 },
+        "target": { "type": "string", "minLength": 1 },
 
         "sourceSide": { "type": "string", "enum": ["left", "right"] },
         "targetSide": { "type": "string", "enum": ["left", "right"] },
@@ -142,7 +148,7 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "tableId": { "type": "string", "pattern": "^lid_" },
+            "tableId": { "type": "string", "minLength": 1 },
             "foreignKeyIndex": {
               "type": "integer",
               "minimum": 0

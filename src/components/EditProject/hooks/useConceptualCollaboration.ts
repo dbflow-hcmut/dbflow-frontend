@@ -17,6 +17,10 @@ import {
 } from "../utils/conceptual-diagram.builder";
 import { buildDiagramFromModel, buildConceptualModel, createEmptyConceptualModel, normalizeConceptualModel } from "../utils/conceptual-model.builder";
 import type { ConceptualModelPayload } from "../utils/conceptual-model.builder";
+import {
+    hasModelChanged,
+    mergeConceptualModelFromDiagramProjection,
+} from "../utils/diagram-model-sync";
 
 export type MutateModelFn = (
     mutator: (model: ConceptualModelPayload) => ConceptualModelPayload,
@@ -510,10 +514,34 @@ export const useConceptualCollaboration = ({
         const commitDiagramUpdate = () => {
             if (!ydocRef.current || !nextDiagramString) return;
             const doc = ydocRef.current;
-            const map = doc.getMap('diagram');
+            const diagramMap = doc.getMap('diagram');
+            const modelMap = doc.getMap('model');
+
+            const modelProjection = buildConceptualModel({
+                storedNodes,
+                storedEdges,
+                schemaId: schema?.id ?? undefined,
+                schemaName: schema?.name ?? undefined,
+            });
+            const nextModel = mergeConceptualModelFromDiagramProjection(
+                modelDataRef.current,
+                modelProjection,
+            );
+            const shouldSyncModel = hasModelChanged(modelDataRef.current, nextModel);
+            const nextModelString = shouldSyncModel ? JSON.stringify(nextModel) : null;
+
             lastAppliedDiagramStringRef.current = nextDiagramString;
+            if (nextModelString) {
+                lastAppliedModelStringRef.current = nextModelString;
+                lastSyncedModelStringRef.current = nextModelString;
+                modelDataRef.current = nextModel;
+            }
+
             doc.transact(() => {
-                map.set('data', nextDiagramString!);
+                diagramMap.set('data', nextDiagramString!);
+                if (nextModelString) {
+                    modelMap.set('data', nextModelString);
+                }
             });
             lastSyncedDiagramStringRef.current = nextDiagramString;
         };
@@ -650,4 +678,3 @@ export const useConceptualCollaboration = ({
         modelData: modelDataRef.current,
     };
 };
-

@@ -17,6 +17,10 @@ import {
 } from "../utils/physical-diagram.builder";
 import { buildDiagramFromPhysicalModel, buildPhysicalModel, createEmptyPhysicalModel } from "../utils/physical-model.builder";
 import type { PhysicalModelPayload, MutatePhysicalModelFn } from "../utils/physical-model.builder";
+import {
+    hasModelChanged,
+    mergePhysicalModelFromDiagramProjection,
+} from "../utils/diagram-model-sync";
 
 export type { MutatePhysicalModelFn };
 
@@ -421,10 +425,35 @@ export const usePhysicalCollaboration = ({
         const commitDiagramUpdate = () => {
             if (!ydocRef.current || !nextDiagramString) return;
             const doc = ydocRef.current;
-            const map = doc.getMap("diagram");
+            const diagramMap = doc.getMap("diagram");
+            const modelMap = doc.getMap("model");
+
+            const modelProjection = buildPhysicalModel({
+                storedNodes,
+                storedEdges,
+                schemaId: schema?.id ?? undefined,
+                schemaName: schema?.name ?? undefined,
+            });
+            const nextModel = mergePhysicalModelFromDiagramProjection(
+                modelDataRef.current,
+                modelProjection,
+            );
+            const shouldSyncModel = hasModelChanged(modelDataRef.current, nextModel);
+            const nextModelString = shouldSyncModel ? JSON.stringify(nextModel) : null;
+
             lastAppliedDiagramStringRef.current = nextDiagramString;
+            if (nextModelString) {
+                lastAppliedModelStringRef.current = nextModelString;
+                lastSyncedModelStringRef.current = nextModelString;
+                modelDataRef.current = nextModel;
+                setModelDataState(nextModel);
+            }
+
             doc.transact(() => {
-                map.set("data", nextDiagramString!);
+                diagramMap.set("data", nextDiagramString!);
+                if (nextModelString) {
+                    modelMap.set("data", nextModelString);
+                }
             });
             lastSyncedDiagramStringRef.current = nextDiagramString;
         };
