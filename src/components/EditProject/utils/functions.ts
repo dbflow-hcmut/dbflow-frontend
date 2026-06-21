@@ -3,7 +3,6 @@ import { Node } from "reactflow";
 import type { EntityData, RelationshipData, AttributeData, NodeData } from "../index";
 import type { RelationTableData, RelationColumn, TableIndex, PhysicalFD } from "@/components/erds-notations/relation-table";
 import type { LogicalTableData, LogicalFD } from "@/components/erds-notations/logical-table";
-import type { MutateModelFn } from "../hooks/useConceptualCollaboration";
 import type { MutateLogicalModelFn } from "../hooks/useLogicalCollaboration";
 import type { MutatePhysicalModelFn } from "../hooks/usePhysicalCollaboration";
 
@@ -32,9 +31,6 @@ const deselectAllNodes = <T extends NodeData>(nodes: Node<T>[]): Node<T>[] => {
 
 type NodeCreatorOptions = {
     getViewportCenter?: () => { x: number; y: number } | null;
-    /** When provided, entity/relationship additions go through the model
-     *  first (model-as-truth) instead of directly mutating the nodes array. */
-    mutateModel?: MutateModelFn;
     /** When provided, logical table additions go through the model
      *  first (model-as-truth) instead of directly mutating the nodes array. */
     mutateLogicalModel?: MutateLogicalModelFn;
@@ -75,21 +71,6 @@ export const createNodeCreators = (
         getSpawnPosition(existingNodes, options?.getViewportCenter);
 
     const addRelationship = () => {
-        if (options?.mutateModel) {
-            const id = generateDiagramId();
-            const position = options.getViewportCenter?.() ?? { x: 200, y: 200 };
-            options.mutateModel(
-                (model) => ({
-                    ...model,
-                    relationships: [
-                        ...model.relationships,
-                        { id, name: `rel_${model.relationships.length + 1}`, type: "association" as const, ends: [] },
-                    ],
-                }),
-                { selectedNodeId: id, positionHint: position },
-            );
-            return;
-        }
         setNodes((existingNodes) => {
             const id = generateDiagramId();
             const name = `rel_${existingNodes.length + 1}`;
@@ -106,21 +87,6 @@ export const createNodeCreators = (
     };
 
     const addDoubleRelationship = () => {
-        if (options?.mutateModel) {
-            const id = generateDiagramId();
-            const position = options.getViewportCenter?.() ?? { x: 200, y: 200 };
-            options.mutateModel(
-                (model) => ({
-                    ...model,
-                    relationships: [
-                        ...model.relationships,
-                        { id, name: `rel_${model.relationships.length + 1}`, type: "identifying" as const, ends: [] },
-                    ],
-                }),
-                { selectedNodeId: id, positionHint: position },
-            );
-            return;
-        }
         setNodes((existingNodes) => {
             const id = generateDiagramId();
             const name = `rel_${existingNodes.length + 1}`;
@@ -137,21 +103,6 @@ export const createNodeCreators = (
     };
 
     const addEntity = () => {
-        if (options?.mutateModel) {
-            const id = generateDiagramId();
-            const position = options.getViewportCenter?.() ?? { x: 200, y: 200 };
-            options.mutateModel(
-                (model) => ({
-                    ...model,
-                    entities: [
-                        ...model.entities,
-                        { id, name: `ent_${model.entities.length + 1}`, kind: "strong" as const, attributes: [] },
-                    ],
-                }),
-                { selectedNodeId: id, positionHint: position },
-            );
-            return;
-        }
         setNodes((existingNodes) => {
             const id = generateDiagramId();
             const name = `ent_${existingNodes.length + 1}`;
@@ -168,21 +119,6 @@ export const createNodeCreators = (
     };
 
     const addDoubleEntity = () => {
-        if (options?.mutateModel) {
-            const id = generateDiagramId();
-            const position = options.getViewportCenter?.() ?? { x: 200, y: 200 };
-            options.mutateModel(
-                (model) => ({
-                    ...model,
-                    entities: [
-                        ...model.entities,
-                        { id, name: `ent_${model.entities.length + 1}`, kind: "weak" as const, attributes: [] },
-                    ],
-                }),
-                { selectedNodeId: id, positionHint: position },
-            );
-            return;
-        }
         setNodes((existingNodes) => {
             const id = generateDiagramId();
             const name = `ent_${existingNodes.length + 1}`;

@@ -1010,7 +1010,6 @@ const EditProject = (props: IPropsEditProject) => {
     const {
         awareness: conceptualAwareness,
         applyModelPayload,
-        mutateModel: conceptualMutateModel,
         modelData: _conceptualModelData,
     } = useConceptualCollaboration({
         enabled: Boolean(isConceptualSchema && hasPermission && isValidSchema === true && !!token),
@@ -1125,19 +1124,10 @@ const EditProject = (props: IPropsEditProject) => {
         selectedSchema?.id, selectedSchema?.name,
     ]);
 
-    // Override entity/relationship creators with model-first versions when
-    // operating on a conceptual schema (model-as-truth architecture).
-    const modelAwareCreators = useMemo(
-        () =>
-            isConceptualSchema && conceptualMutateModel
-                ? createNodeCreators(setNodes, { getViewportCenter, mutateModel: conceptualMutateModel })
-                : null,
-        [isConceptualSchema, conceptualMutateModel, setNodes, getViewportCenter],
-    );
-    const effectiveAddEntity = modelAwareCreators?.addEntity ?? addEntity;
-    const effectiveAddDoubleEntity = modelAwareCreators?.addDoubleEntity ?? addDoubleEntity;
-    const effectiveAddRelationship = modelAwareCreators?.addRelationship ?? addRelationship;
-    const effectiveAddDoubleRelationship = modelAwareCreators?.addDoubleRelationship ?? addDoubleRelationship;
+    const effectiveAddEntity = addEntity;
+    const effectiveAddDoubleEntity = addDoubleEntity;
+    const effectiveAddRelationship = addRelationship;
+    const effectiveAddDoubleRelationship = addDoubleRelationship;
 
     // Override logical table creators with model-first versions when
     // operating on a logical schema (model-as-truth architecture).
@@ -1177,37 +1167,6 @@ const EditProject = (props: IPropsEditProject) => {
                 x: event.clientX,
                 y: event.clientY,
             });
-
-            // Conceptual: model-first via mutateModel
-            if (isConceptualSchema && conceptualMutateModel) {
-                const id = generateDiagramId();
-                switch (nodeType) {
-                    case "entity":
-                        conceptualMutateModel(
-                            (m) => ({ ...m, entities: [...m.entities, { id, name: `ent_${m.entities.length + 1}`, kind: "strong" as const, attributes: [] }] }),
-                            { selectedNodeId: id, positionHint: position },
-                        );
-                        return;
-                    case "double-entity":
-                        conceptualMutateModel(
-                            (m) => ({ ...m, entities: [...m.entities, { id, name: `ent_${m.entities.length + 1}`, kind: "weak" as const, attributes: [] }] }),
-                            { selectedNodeId: id, positionHint: position },
-                        );
-                        return;
-                    case "relationship":
-                        conceptualMutateModel(
-                            (m) => ({ ...m, relationships: [...m.relationships, { id, name: `rel_${m.relationships.length + 1}`, type: "association" as const, ends: [] }] }),
-                            { selectedNodeId: id, positionHint: position },
-                        );
-                        return;
-                    case "double-relationship":
-                        conceptualMutateModel(
-                            (m) => ({ ...m, relationships: [...m.relationships, { id, name: `rel_${m.relationships.length + 1}`, type: "identifying" as const, ends: [] }] }),
-                            { selectedNodeId: id, positionHint: position },
-                        );
-                        return;
-                }
-            }
 
             // Logical: model-first via logicalMutateModel
             if (isLogicalSchema && logicalMutateModel && nodeType === "logical-table") {
@@ -1289,7 +1248,7 @@ const EditProject = (props: IPropsEditProject) => {
                 return [...deselected, newNode];
             });
         },
-        [setNodes, isConceptualSchema, isLogicalSchema, isPhysicalSchema, conceptualMutateModel, logicalMutateModel, physicalMutateModel],
+        [setNodes, isLogicalSchema, isPhysicalSchema, logicalMutateModel, physicalMutateModel],
     );
 
     // ── Version preview handlers ─────────────────────────────────
