@@ -333,7 +333,7 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
                                         title={col.name}
                                         type="target"
                                         position={Position.Left}
-                                        isConnectable={!isSelected}
+                                        isConnectable={true}
                                         labelClassName="p-0 w-full pl-3 text-left"
                                         showOnHover={true}
                                         isHovered={isHovered}
@@ -363,7 +363,7 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
                                         title={typeDisplay}
                                         type="source"
                                         position={Position.Right}
-                                        isConnectable={!isSelected}
+                                        isConnectable={true}
                                         className="p-0"
                                         handleClassName="p-0"
                                         labelClassName="p-0 w-full pr-3 text-right"
