@@ -30,7 +30,7 @@ import RelationshipNode from "@/components/erds-notations/relationship";
 import AttributeNode from "@/components/erds-notations/attribute";
 import EntityNode from "@/components/erds-notations/entity";
 import ConstraintNode from "@/components/erds-notations/constraint";
-import RelationTableNode, { type RelationTableData } from "@/components/erds-notations/relation-table";
+import RelationTableNode, { type RelationColumn, type RelationTableData } from "@/components/erds-notations/relation-table";
 import LogicalTableNode, { type LogicalTableData } from "@/components/erds-notations/logical-table";
 import StickyNoteNode, { type StickyNoteData } from "@/components/erds-notations/sticky-note";
 import TextLabelNode, { type TextLabelData } from "@/components/erds-notations/text-label";
@@ -697,6 +697,135 @@ const EditProject = (props: IPropsEditProject) => {
         () => createUpdateFunctions(setNodes, selectedNode),
         [setNodes, selectedNode]
     );
+
+    const isLogicalColumnConnectedToRelationship = useCallback((tableId: string, columnIndex: number) => {
+        const columnHandlePrefix = `lid_${tableId}_col_${columnIndex}-`;
+        return edges.some((edge) =>
+            edge.type === 'logical-table-edge' &&
+            (
+                (edge.source === tableId && edge.sourceHandle?.startsWith(columnHandlePrefix)) ||
+                (edge.target === tableId && edge.targetHandle?.startsWith(columnHandlePrefix))
+            )
+        );
+    }, [edges]);
+
+    const isPhysicalColumnConnectedToRelationship = useCallback((tableId: string, columnName: string) => {
+        return edges.some((edge) =>
+            edge.type === 'relation-table-edge' &&
+            (
+                (edge.source === tableId && edge.sourceHandle === columnName) ||
+                (edge.target === tableId && edge.targetHandle === columnName)
+            )
+        );
+    }, [edges]);
+
+    const getLogicalReferencedEdgeIds = useCallback((tableId: string, columnIndex: number) => {
+        const columnHandlePrefix = `lid_${tableId}_col_${columnIndex}-`;
+        return edges
+            .filter((edge) =>
+                edge.type === 'logical-table-edge' &&
+                edge.target === tableId &&
+                edge.targetHandle?.startsWith(columnHandlePrefix)
+            )
+            .map((edge) => edge.id);
+    }, [edges]);
+
+    const getPhysicalReferencedEdgeIds = useCallback((tableId: string, columnName: string) => {
+        return edges
+            .filter((edge) =>
+                edge.type === 'relation-table-edge' &&
+                edge.target === tableId &&
+                edge.targetHandle === columnName
+            )
+            .map((edge) => edge.id);
+    }, [edges]);
+
+    const updateLogicalTableAttributeWithWarning = useCallback((
+        columnIndex: number,
+        updates: Partial<{ name: string; isKey: boolean; isCandidateKey: boolean }>
+    ) => {
+        if (!selectedNode || selectedNode.type !== 'logical-table') {
+            updateLogicalTableAttribute(columnIndex, updates);
+            return;
+        }
+
+        const tableData = selectedNode.data as LogicalTableData;
+        const column = tableData.columns?.[columnIndex];
+        const nextColumn = { ...column, ...updates };
+        const changesKeyState =
+            (updates.isKey !== undefined && updates.isKey !== Boolean(column?.isKey)) ||
+            (updates.isCandidateKey !== undefined && updates.isCandidateKey !== Boolean(column?.isCandidateKey));
+
+        if (!changesKeyState || !isLogicalColumnConnectedToRelationship(selectedNode.id, columnIndex)) {
+            updateLogicalTableAttribute(columnIndex, updates);
+            return;
+        }
+
+        const invalidReferencedEdgeIds = Boolean(nextColumn.isKey || nextColumn.isCandidateKey)
+            ? []
+            : getLogicalReferencedEdgeIds(selectedNode.id, columnIndex);
+
+        Modal.confirm({
+            title: "Column is used by a relationship",
+            content: invalidReferencedEdgeIds.length > 0
+                ? "This column is referenced by an FK relationship. Applying this change will remove invalid relationship edges."
+                : "Changing PK/CK on this column can affect an existing FK relationship. Apply this change?",
+            okText: invalidReferencedEdgeIds.length > 0 ? "Apply and remove edges" : "Apply change",
+            cancelText: "Cancel",
+            onOk: () => {
+                updateLogicalTableAttribute(columnIndex, updates);
+                if (invalidReferencedEdgeIds.length > 0) {
+                    setEdges((existingEdges) =>
+                        existingEdges.filter((edge) => !invalidReferencedEdgeIds.includes(edge.id))
+                    );
+                }
+            },
+        });
+    }, [getLogicalReferencedEdgeIds, isLogicalColumnConnectedToRelationship, selectedNode, setEdges, updateLogicalTableAttribute]);
+
+    const updateRelationTableColumnWithWarning = useCallback((
+        columnIndex: number,
+        updates: Partial<RelationColumn>
+    ) => {
+        if (!selectedNode || selectedNode.type !== 'relation') {
+            updateRelationTableColumn(columnIndex, updates);
+            return;
+        }
+
+        const tableData = selectedNode.data as RelationTableData;
+        const column = tableData.columns?.[columnIndex];
+        const nextColumn = { ...column, ...updates };
+        const changesKeyState =
+            (updates.isPrimary !== undefined && updates.isPrimary !== Boolean(column?.isPrimary)) ||
+            (updates.isCandidateKey !== undefined && updates.isCandidateKey !== Boolean(column?.isCandidateKey)) ||
+            (updates.isUnique !== undefined && updates.isUnique !== Boolean(column?.isUnique));
+
+        if (!changesKeyState || !column || !isPhysicalColumnConnectedToRelationship(selectedNode.id, column.name)) {
+            updateRelationTableColumn(columnIndex, updates);
+            return;
+        }
+
+        const invalidReferencedEdgeIds = Boolean(nextColumn.isPrimary || nextColumn.isCandidateKey || nextColumn.isUnique)
+            ? []
+            : getPhysicalReferencedEdgeIds(selectedNode.id, column.name);
+
+        Modal.confirm({
+            title: "Column is used by a relationship",
+            content: invalidReferencedEdgeIds.length > 0
+                ? "This column is referenced by an FK relationship. Applying this change will remove invalid relationship edges."
+                : "Changing PK/CK/Unique on this column can affect an existing FK relationship. Apply this change?",
+            okText: invalidReferencedEdgeIds.length > 0 ? "Apply and remove edges" : "Apply change",
+            cancelText: "Cancel",
+            onOk: () => {
+                updateRelationTableColumn(columnIndex, updates);
+                if (invalidReferencedEdgeIds.length > 0) {
+                    setEdges((existingEdges) =>
+                        existingEdges.filter((edge) => !invalidReferencedEdgeIds.includes(edge.id))
+                    );
+                }
+            },
+        });
+    }, [getPhysicalReferencedEdgeIds, isPhysicalColumnConnectedToRelationship, selectedNode, setEdges, updateRelationTableColumn]);
 
     const nodeTypes = useMemo(
         () => ({
@@ -2613,7 +2742,7 @@ const EditProject = (props: IPropsEditProject) => {
                         }}
                         onAddRelationTableColumn={addRelationTableColumn}
                         onRemoveRelationTableColumn={removeRelationTableColumn}
-                        onUpdateRelationTableColumn={updateRelationTableColumn}
+                        onUpdateRelationTableColumn={updateRelationTableColumnWithWarning}
                         onAddTableIndex={addTableIndex}
                         onRemoveTableIndex={removeTableIndex}
                         onUpdateTableIndex={updateTableIndex}
@@ -2628,7 +2757,7 @@ const EditProject = (props: IPropsEditProject) => {
                         }}
                         onAddLogicalTableAttribute={addLogicalTableAttribute}
                         onRemoveLogicalTableAttribute={removeLogicalTableAttribute}
-                        onUpdateLogicalTableAttribute={updateLogicalTableAttribute}
+                        onUpdateLogicalTableAttribute={updateLogicalTableAttributeWithWarning}
                         onReorderLogicalTableAttributes={reorderLogicalTableAttributes}
                         onAddLogicalFD={addLogicalFD}
                         onRemoveLogicalFD={removeLogicalFD}

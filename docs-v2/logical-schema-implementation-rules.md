@@ -257,6 +257,7 @@ lid_cid_xxx_col_1-left
 - PK/CK -> PK/CK: target user kéo tới trở thành FK, source là referenced column; dùng cho 1-1.
 - Normal -> Normal: mở dialog chọn column nào là FK; referenced column còn lại được set `isCandidateKey = true`.
 - Properties panel không cho chỉnh cardinality/FK direction sau khi tạo edge.
+- Nếu column đã tham gia `logical-table-edge`, thao tác đổi PK/CK trong Properties panel phải hiện confirm modal trước khi apply. Nếu column đó là target/referenced side và sau update không còn PK/CK, các FK edge invalid trỏ tới column đó bị xoá.
 
 ## 8. Thuật toán map stored diagram -> ReactFlow
 
@@ -664,6 +665,7 @@ Với logical edge:
 - `onConnect` tạo edge type `logical-table-edge`.
 - Nếu source/target column đều là key thì default cardinality là `1:1`.
 - FK direction được quyết định lúc kéo edge theo rule PK/CK/Normal. Properties panel không còn selector đổi cardinality/direction.
+- Đổi PK/CK của column đã nối FK edge không được apply thẳng; UI confirm trước để tránh user vô tình làm sai FK/reference rule. Nếu referenced column mất PK/CK, edge liên quan bị xoá sau khi user confirm.
 
 ## 15. Collaboration và hybrid model/diagram
 

@@ -249,6 +249,7 @@ Rule:
 - PK/CK/Unique -> PK/CK/Unique: target user kéo tới trở thành FK, source là referenced column; dùng cho 1-1.
 - Normal -> Normal: mở dialog chọn column nào là FK; referenced column còn lại được set `isUnique = true`.
 - Properties panel không cho chỉnh cardinality/FK direction sau khi tạo edge; physical edge panel chỉ giữ FK actions.
+- Nếu column đã tham gia `relation-table-edge`, thao tác đổi PK/CK/Unique trong Properties panel phải hiện confirm modal trước khi apply. Nếu column đó là target/referenced side và sau update không còn PK/CK/Unique, các FK edge invalid trỏ tới column đó bị xoá.
 
 ## 7. Thuật toán map stored diagram -> ReactFlow
 
@@ -623,6 +624,7 @@ Với physical edge:
 - `onConnect` tạo ReactFlow edge type `relation-table-edge` với source là FK column side.
 - FK role trong model được merge từ stored edge source/target column.
 - FK action `onDelete`/`onUpdate` được chỉnh trong PropertiesPanel và lưu vào `edge.data`.
+- Đổi PK/CK/Unique của column đã nối FK edge không được apply thẳng; UI confirm trước để tránh user vô tình làm sai FK/reference rule. Nếu referenced column mất PK/CK/Unique, edge liên quan bị xoá sau khi user confirm.
 
 FK action options:
 
