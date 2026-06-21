@@ -31,6 +31,7 @@ type PropertiesPanelProps = {
         columnIndex: number,
         updates: Partial<RelationColumn>
     ) => void;
+    onReorderRelationTableColumns?: (fromIndex: number, toIndex: number) => void;
     onAddTableIndex?: () => void;
     onRemoveTableIndex?: (indexId: string) => void;
     onUpdateTableIndex?: (indexId: string, updates: Partial<TableIndex>) => void;
@@ -75,6 +76,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     onAddRelationTableColumn,
     onRemoveRelationTableColumn,
     onUpdateRelationTableColumn,
+    onReorderRelationTableColumns,
     onAddTableIndex,
     onRemoveTableIndex,
     onUpdateTableIndex,
@@ -416,8 +418,32 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                                 const typeOptions = dataTypeOptions ?? GENERIC_DATA_TYPES;
                                                 const selectedTypeConfig = typeOptions.find(t => t.value === col.type);
                                                 return (
-                                                <div key={idx} className="border border-gray-200 rounded p-2 space-y-2">
+                                                <div
+                                                    key={idx}
+                                                    className="border border-gray-200 rounded p-2 space-y-2 cursor-move hover:border-blue-300 transition-colors"
+                                                    draggable
+                                                    onDragStart={(e) => {
+                                                        setDraggedIndex(idx);
+                                                        e.dataTransfer.effectAllowed = 'move';
+                                                    }}
+                                                    onDragOver={(e) => {
+                                                        e.preventDefault();
+                                                        e.dataTransfer.dropEffect = 'move';
+                                                    }}
+                                                    onDrop={(e) => {
+                                                        e.preventDefault();
+                                                        if (draggedIndex !== null && draggedIndex !== idx) {
+                                                            onReorderRelationTableColumns?.(draggedIndex, idx);
+                                                        }
+                                                        setDraggedIndex(null);
+                                                    }}
+                                                    onDragEnd={() => setDraggedIndex(null)}
+                                                    style={{
+                                                        opacity: draggedIndex === idx ? 0.5 : 1,
+                                                    }}
+                                                >
                                                     <div className="flex items-center gap-2">
+                                                        <GripVertical size={16} className="text-gray-400 flex-shrink-0" />
                                                         <Input
                                                             value={col.name}
                                                             onChange={(e) =>

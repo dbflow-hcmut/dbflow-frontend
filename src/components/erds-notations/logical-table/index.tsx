@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { NodeResizer, Position, useNodeId, useStore, useReactFlow } from "reactflow";
+import { NodeResizer, Position, useNodeId, useStore, useReactFlow, useUpdateNodeInternals } from "reactflow";
 import classNames from "classnames";
 import {
     DatabaseSchemaNode,
@@ -51,6 +51,7 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
         return ids;
     }, [edges, nodeId]);
     const { setNodes } = useReactFlow();
+    const updateNodeInternals = useUpdateNodeInternals();
     const nameRef = useRef<HTMLDivElement | null>(null);
     const contentRef = useRef<HTMLDivElement | null>(null);
     
@@ -164,6 +165,12 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
         }
     }, [data.name, isEditingName]);
 
+    useEffect(() => {
+        if (!nodeId) return;
+        const rafId = requestAnimationFrame(() => updateNodeInternals(nodeId));
+        return () => cancelAnimationFrame(rafId);
+    }, [data.columns, nodeId, updateNodeInternals]);
+
     const commitName = (rawText: string) => {
         const trimmed = rawText.trim();
         const nextValue = trimmed.length > 0 ? trimmed : data.name;
@@ -205,7 +212,9 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
                     : n
             )
         );
-    }, [measuredHeight, nodeWidth, nodeId, setNodes]);
+        const rafId = requestAnimationFrame(() => updateNodeInternals(nodeId));
+        return () => cancelAnimationFrame(rafId);
+    }, [measuredHeight, nodeWidth, nodeId, setNodes, updateNodeInternals]);
 
     return (
         <div

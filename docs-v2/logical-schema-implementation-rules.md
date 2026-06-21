@@ -637,6 +637,8 @@ PropertiesPanel cho:
 - Toggle candidate key.
 - Reorder column bằng drag/drop.
 
+Khi reorder logical column, ReactFlow edge handles phải được remap theo old index -> new index để edge vẫn trỏ đúng logical column. Vì logical handle id có format `lid_${tableId}_col_${idx}-{side}`, nếu chỉ đổi `data.columns` mà không đổi `sourceHandle/targetHandle` thì edge sẽ bám nhầm row sau reorder.
+
 Các update này mutate ReactFlow node data trước. Khi gọi `mutateModel`, hook rebuild model từ diagram để capture các diagram-only edits.
 
 ### 13.4. Chỉnh FD
@@ -771,7 +773,7 @@ Logical không export DDL trực tiếp. Muốn export DDL phải convert sang p
 6. Source side của edge là FK column side.
 7. Stored logical edge source/target là column id, không phải table id.
 8. Column id được generate theo index: `lid_${tableId}_col_${idx}`.
-9. Reorder/delete column có thể ảnh hưởng FK vì `fkRef.foreignKeyIndex` dựa trên index.
+9. Reorder/delete column có thể ảnh hưởng FK vì `fkRef.foreignKeyIndex` dựa trên index; reorder logical phải remap edge handles theo index mới.
 10. `buildLogicalModel` luôn set `nullable: true`, `unique: false`.
 11. Candidate key có thể mất nếu chỉ còn fallback stored columns, vì fallback không đọc `decorations.ck`.
 12. Khi build FK map từ diagram, target `refColumnId` là đúng column id ở stored edge target.

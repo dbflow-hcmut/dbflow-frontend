@@ -582,6 +582,9 @@ PropertiesPanel cho chỉnh:
 - Unique.
 - Auto increment.
 - Default value.
+- Reorder column bằng drag/drop.
+
+Physical edge handles dùng column name, nên reorder không cần đổi `sourceHandle/targetHandle` như logical. Sau khi reorder vẫn phải refresh node internals để ReactFlow tính lại vị trí handle theo row mới.
 
 Các update này hiện mutate ReactFlow node data trước. Khi cần mutate model, `usePhysicalCollaboration.mutateModel` sẽ rebuild model từ diagram hiện tại để không làm mất diagram-only edits.
 
@@ -736,7 +739,7 @@ Các tính năng trên không đọc trực tiếp ReactFlow nodes khi đã có 
 4. FK source là source side của edge; target là referenced table.
 5. Khi build model từ edge, target column ưu tiên `fkRef.targetColumnName`, fallback PK đầu tiên hoặc column đầu tiên.
 6. Column id trong model build từ UI data được generate theo index: `pid_${tableId}_col_${idx}`.
-7. Reorder/delete column có thể ảnh hưởng FK vì stored edge dùng `foreignKeyIndex`.
+7. Reorder/delete column có thể ảnh hưởng FK vì stored edge dùng `foreignKeyIndex`; physical reorder giữ edge theo column name và stored `foreignKeyIndex` được tính lại khi serialize diagram.
 8. Index và FD lưu bằng tên column, không bằng column id.
 9. `autoIncrement` được lưu trong model nhưng DDL generator hiện chỉ render auto increment chắc chắn khi data type là serial-like, không render trực tiếp từ boolean này.
 10. Physical model `model.dbms` là optional. Physical schema tạo thủ công có thể không có DBMS.

@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { NodeResizer, Position, useNodeId, useStore, useReactFlow } from "reactflow";
+import { NodeResizer, Position, useNodeId, useStore, useReactFlow, useUpdateNodeInternals } from "reactflow";
 import classNames from "classnames";
 import {
     DatabaseSchemaNode,
@@ -69,6 +69,7 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
     const [isEditingName, setIsEditingName] = useState(false);
     const [localName, setLocalName] = useState(data.name);
     const { setNodes } = useReactFlow();
+    const updateNodeInternals = useUpdateNodeInternals();
     const nameRef = useRef<HTMLDivElement | null>(null);
     const contentRef = useRef<HTMLDivElement | null>(null);
     
@@ -196,6 +197,12 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
         }
     }, [data.name, isEditingName]);
 
+    useEffect(() => {
+        if (!nodeId) return;
+        const rafId = requestAnimationFrame(() => updateNodeInternals(nodeId));
+        return () => cancelAnimationFrame(rafId);
+    }, [data.columns, nodeId, updateNodeInternals]);
+
     const commitName = (rawText: string) => {
         const trimmed = rawText.trim();
         const nextValue = trimmed.length > 0 ? trimmed : data.name;
@@ -237,7 +244,9 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
                     : n
             )
         );
-    }, [measuredHeight, nodeWidth, nodeId, setNodes]);
+        const rafId = requestAnimationFrame(() => updateNodeInternals(nodeId));
+        return () => cancelAnimationFrame(rafId);
+    }, [measuredHeight, nodeWidth, nodeId, setNodes, updateNodeInternals]);
 
     return (
         <div
@@ -388,5 +397,4 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
 };
 
 export default memo(RelationTableNode);
-
 

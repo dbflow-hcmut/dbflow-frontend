@@ -678,6 +678,7 @@ const EditProject = (props: IPropsEditProject) => {
         addRelationTableColumn,
         removeRelationTableColumn,
         updateRelationTableColumn,
+        reorderRelationTableColumns,
         addTableIndex,
         removeTableIndex,
         updateTableIndex,
@@ -697,6 +698,53 @@ const EditProject = (props: IPropsEditProject) => {
         () => createUpdateFunctions(setNodes, selectedNode),
         [setNodes, selectedNode]
     );
+
+    const reorderLogicalTableAttributesWithEdgeRemap = useCallback((fromIndex: number, toIndex: number) => {
+        if (!selectedNode || selectedNode.type !== 'logical-table' || fromIndex === toIndex) {
+            reorderLogicalTableAttributes(fromIndex, toIndex);
+            return;
+        }
+
+        const tableData = selectedNode.data as LogicalTableData;
+        const columnCount = tableData.columns?.length ?? 0;
+        if (
+            fromIndex < 0 ||
+            toIndex < 0 ||
+            fromIndex >= columnCount ||
+            toIndex >= columnCount
+        ) {
+            return;
+        }
+
+        const reorderedIndexes = Array.from({ length: columnCount }, (_, index) => index);
+        const [movedIndex] = reorderedIndexes.splice(fromIndex, 1);
+        reorderedIndexes.splice(toIndex, 0, movedIndex);
+        const oldToNewIndex = new Map<number, number>();
+        reorderedIndexes.forEach((oldIndex, newIndex) => oldToNewIndex.set(oldIndex, newIndex));
+
+        const remapLogicalHandle = (handle?: string | null) => {
+            if (!handle) return handle;
+            const pattern = new RegExp(`^lid_${selectedNode.id}_col_(\\d+)(-.+)$`);
+            const match = handle.match(pattern);
+            if (!match) return handle;
+            const oldIndex = Number(match[1]);
+            const newIndex = oldToNewIndex.get(oldIndex);
+            return newIndex === undefined ? handle : `lid_${selectedNode.id}_col_${newIndex}${match[2]}`;
+        };
+
+        reorderLogicalTableAttributes(fromIndex, toIndex);
+        setEdges((existingEdges) =>
+            existingEdges.map((edge) =>
+                edge.type === 'logical-table-edge' && (edge.source === selectedNode.id || edge.target === selectedNode.id)
+                    ? {
+                        ...edge,
+                        sourceHandle: edge.source === selectedNode.id ? remapLogicalHandle(edge.sourceHandle) : edge.sourceHandle,
+                        targetHandle: edge.target === selectedNode.id ? remapLogicalHandle(edge.targetHandle) : edge.targetHandle,
+                    }
+                    : edge
+            )
+        );
+    }, [reorderLogicalTableAttributes, selectedNode, setEdges]);
 
     const isLogicalColumnConnectedToRelationship = useCallback((tableId: string, columnIndex: number) => {
         const columnHandlePrefix = `lid_${tableId}_col_${columnIndex}-`;
@@ -2743,6 +2791,7 @@ const EditProject = (props: IPropsEditProject) => {
                         onAddRelationTableColumn={addRelationTableColumn}
                         onRemoveRelationTableColumn={removeRelationTableColumn}
                         onUpdateRelationTableColumn={updateRelationTableColumnWithWarning}
+                        onReorderRelationTableColumns={reorderRelationTableColumns}
                         onAddTableIndex={addTableIndex}
                         onRemoveTableIndex={removeTableIndex}
                         onUpdateTableIndex={updateTableIndex}
@@ -2758,7 +2807,7 @@ const EditProject = (props: IPropsEditProject) => {
                         onAddLogicalTableAttribute={addLogicalTableAttribute}
                         onRemoveLogicalTableAttribute={removeLogicalTableAttribute}
                         onUpdateLogicalTableAttribute={updateLogicalTableAttributeWithWarning}
-                        onReorderLogicalTableAttributes={reorderLogicalTableAttributes}
+                        onReorderLogicalTableAttributes={reorderLogicalTableAttributesWithEdgeRemap}
                         onAddLogicalFD={addLogicalFD}
                         onRemoveLogicalFD={removeLogicalFD}
                         onUpdateLogicalFD={updateLogicalFD}

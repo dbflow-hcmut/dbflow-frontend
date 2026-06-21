@@ -355,6 +355,29 @@ export const createUpdateFunctions = (
         );
     };
 
+    const reorderRelationTableColumns = (fromIndex: number, toIndex: number) => {
+        if (!selectedNode || selectedNode.type !== 'relation') return;
+        const tableData = selectedNode.data as RelationTableData;
+        const columns = [...(tableData.columns || [])];
+        const [movedColumn] = columns.splice(fromIndex, 1);
+        if (!movedColumn) return;
+        columns.splice(toIndex, 0, movedColumn);
+
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            columns,
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
     const addTableIndex = () => {
         if (!selectedNode || selectedNode.type !== 'relation') return;
         const tableData = selectedNode.data as RelationTableData;
@@ -671,6 +694,7 @@ export const createUpdateFunctions = (
         addRelationTableColumn,
         removeRelationTableColumn,
         updateRelationTableColumn,
+        reorderRelationTableColumns,
         addTableIndex,
         removeTableIndex,
         updateTableIndex,
