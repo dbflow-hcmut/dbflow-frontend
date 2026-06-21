@@ -15,14 +15,12 @@ import {
     mapReactNodesToStoredNodes,
     mapReactEdgesToStoredEdges,
 } from "../utils/logical-diagram.builder";
-import { buildDiagramFromLogicalModel, buildLogicalModel, createEmptyLogicalModel } from "../utils/logical-model.builder";
-import type { LogicalModelPayload, MutateLogicalModelFn } from "../utils/logical-model.builder";
+import { buildDiagramFromLogicalModel, buildLogicalModel } from "../utils/logical-model.builder";
+import type { LogicalModelPayload } from "../utils/logical-model.builder";
 import {
     hasModelChanged,
     mergeLogicalModelFromDiagramProjection,
 } from "../utils/diagram-model-sync";
-
-export type { MutateLogicalModelFn };
 
 type UseLogicalCollaborationParams = {
     enabled: boolean;
@@ -472,8 +470,7 @@ export const useLogicalCollaboration = ({
             }
         }
 
-        // NOTE: Model is NOT written here.
-        // Model is only updated via applyModelPayload() or mutateModel().
+        // Diagram changes update model only through the projection merge above.
     }, [enabled, nodes, edges, schema?.id, schema?.name, diagramName]);
 
     // ── Apply model payload (full replace: Model → Diagram) ──────────
@@ -511,71 +508,9 @@ export const useLogicalCollaboration = ({
         [setNodes, setEdges],
     );
 
-    // ── Incremental model mutation ───────────────────────────────────
-    const mutateModel: MutateLogicalModelFn = useCallback(
-        async (mutator, opts) => {
-            // Rebuild model from current diagram state so diagram-only edits
-            // (column add/delete, table delete, etc.) are captured before
-            // applying the mutation.
-            const existingStoredNodesForModel = mapReactNodesToStoredNodes(nodesRef.current);
-            const existingStoredEdgesForModel = mapReactEdgesToStoredEdges(
-                edgesRef.current,
-                nodesRef.current,
-            );
-            const current =
-                existingStoredNodesForModel.length > 0
-                    ? buildLogicalModel({
-                          storedNodes: existingStoredNodesForModel,
-                          storedEdges: existingStoredEdgesForModel,
-                          schemaId: schema?.id ?? undefined,
-                          schemaName: schema?.name ?? undefined,
-                      })
-                    : (modelDataRef.current ??
-                      createEmptyLogicalModel(schema?.id ?? undefined, schema?.name ?? undefined));
-            const next = mutator(current);
-
-            const { nodes: storedNodes, edges: storedEdges } = await buildDiagramFromLogicalModel({
-                model: next,
-                existingNodes: existingStoredNodesForModel,
-                existingEdges: existingStoredEdgesForModel,
-                preserveUnmodeledNodes: true,
-            });
-
-            const reactNodes = mapStoredNodesToReactNodes(storedNodes);
-            const reactEdges = mapStoredEdgesToReactEdges(storedEdges, reactNodes);
-
-            if (opts?.selectedNodeId && opts?.positionHint) {
-                const target = reactNodes.find((n) => n.id === opts.selectedNodeId);
-                if (target) target.position = opts.positionHint;
-            }
-
-            if (opts?.selectedNodeId) {
-                reactNodes.forEach((n) => {
-                    n.selected = n.id === opts.selectedNodeId;
-                });
-            }
-
-            hasLoadedInitialDataRef.current = true;
-            setNodes(reactNodes);
-            setEdges(reactEdges);
-            modelDataRef.current = next;
-
-            const modelStr = JSON.stringify(next);
-            lastAppliedModelStringRef.current = modelStr;
-            lastSyncedModelStringRef.current = modelStr;
-            if (ydocRef.current) {
-                ydocRef.current.transact(() => {
-                    ydocRef.current!.getMap("model").set("data", modelStr);
-                });
-            }
-        },
-        [setNodes, setEdges, schema?.id, schema?.name],
-    );
-
     return {
         awareness,
         applyModelPayload,
-        mutateModel,
         modelData: modelDataRef.current,
     };
 };

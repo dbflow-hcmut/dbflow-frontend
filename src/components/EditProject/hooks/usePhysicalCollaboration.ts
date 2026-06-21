@@ -15,14 +15,12 @@ import {
     mapReactNodesToStoredNodes,
     mapReactEdgesToStoredEdges,
 } from "../utils/physical-diagram.builder";
-import { buildDiagramFromPhysicalModel, buildPhysicalModel, createEmptyPhysicalModel } from "../utils/physical-model.builder";
-import type { PhysicalModelPayload, MutatePhysicalModelFn } from "../utils/physical-model.builder";
+import { buildDiagramFromPhysicalModel, buildPhysicalModel } from "../utils/physical-model.builder";
+import type { PhysicalModelPayload } from "../utils/physical-model.builder";
 import {
     hasModelChanged,
     mergePhysicalModelFromDiagramProjection,
 } from "../utils/diagram-model-sync";
-
-export type { MutatePhysicalModelFn };
 
 type UsePhysicalCollaborationParams = {
     enabled: boolean;
@@ -466,8 +464,7 @@ export const usePhysicalCollaboration = ({
             }
         }
 
-        // NOTE: Model is NOT written here.
-        // Model is only updated via applyModelPayload() or mutateModel().
+        // Diagram changes update model only through the projection merge above.
     }, [enabled, nodes, edges, schema?.id, schema?.name, diagramName]);
 
     // ── Apply model payload (full replace: Model → Diagram) ──────────
@@ -506,90 +503,9 @@ export const usePhysicalCollaboration = ({
         [setNodes, setEdges],
     );
 
-    // ── Incremental model mutation ───────────────────────────────────
-    const mutateModel: MutatePhysicalModelFn = useCallback(
-        async (mutator, opts) => {
-            // Rebuild model from current diagram state so diagram-only edits
-            // (column add/delete, table delete, index changes, etc.) are captured
-            // before applying the mutation.  Without this the stale
-            // modelDataRef would overwrite those changes when the diagram is
-            // regenerated from the model.
-            const existingStoredNodesForModel = mapReactNodesToStoredNodes(nodesRef.current);
-            const existingStoredEdgesForModel = mapReactEdgesToStoredEdges(
-                edgesRef.current,
-                nodesRef.current,
-            );
-            const builtFromDiagram =
-                existingStoredNodesForModel.length > 0
-                    ? buildPhysicalModel({
-                          storedNodes: existingStoredNodesForModel,
-                          storedEdges: existingStoredEdgesForModel,
-                          schemaId: schema?.id ?? undefined,
-                          schemaName: schema?.name ?? undefined,
-                      })
-                    : (modelDataRef.current ??
-                      createEmptyPhysicalModel(schema?.id ?? undefined, schema?.name ?? undefined));
-
-            // Preserve model-level metadata (dbms, description, notes) that
-            // buildPhysicalModel cannot reconstruct from diagram nodes.
-            const savedMeta = modelDataRef.current?.model;
-            const current: PhysicalModelPayload = savedMeta
-                ? {
-                      ...builtFromDiagram,
-                      model: {
-                          ...builtFromDiagram.model,
-                          dbms: savedMeta.dbms ?? builtFromDiagram.model.dbms,
-                          description: savedMeta.description ?? builtFromDiagram.model.description,
-                          notes: savedMeta.notes ?? builtFromDiagram.model.notes,
-                      },
-                  }
-                : builtFromDiagram;
-
-            const next = mutator(current);
-
-            const { nodes: storedNodes, edges: storedEdges } = await buildDiagramFromPhysicalModel({
-                model: next,
-                existingNodes: existingStoredNodesForModel,
-                existingEdges: existingStoredEdgesForModel,
-                preserveUnmodeledNodes: true,
-            });
-
-            const reactNodes = mapStoredNodesToReactNodes(storedNodes);
-            const reactEdges = mapStoredEdgesToReactEdges(storedEdges, reactNodes);
-
-            if (opts?.selectedNodeId && opts?.positionHint) {
-                const target = reactNodes.find((n) => n.id === opts.selectedNodeId);
-                if (target) target.position = opts.positionHint;
-            }
-
-            if (opts?.selectedNodeId) {
-                reactNodes.forEach((n) => {
-                    n.selected = n.id === opts.selectedNodeId;
-                });
-            }
-
-            hasLoadedInitialDataRef.current = true;
-            setNodes(reactNodes);
-            setEdges(reactEdges);
-            modelDataRef.current = next;
-            setModelDataState(next);
-
-            const modelStr = JSON.stringify(next);
-            lastAppliedModelStringRef.current = modelStr;
-            lastSyncedModelStringRef.current = modelStr;
-            if (ydocRef.current) {
-                ydocRef.current.transact(() => {
-                    ydocRef.current!.getMap("model").set("data", modelStr);
-                });
-            }
-        },
-        [setNodes, setEdges, schema?.id, schema?.name],
-    );
-
     return {
         awareness,
         applyModelPayload,
-        mutateModel,
         modelData: modelDataState,
     };
 };

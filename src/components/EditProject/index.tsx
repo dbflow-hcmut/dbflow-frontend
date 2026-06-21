@@ -1028,7 +1028,6 @@ const EditProject = (props: IPropsEditProject) => {
     const {
         awareness: logicalAwareness,
         applyModelPayload: applyLogicalModelPayload,
-        mutateModel: logicalMutateModel,
         modelData: _logicalModelData,
     } = useLogicalCollaboration({
         enabled: Boolean(isLogicalSchema && hasPermission && isValidSchema === true && !!token),
@@ -1047,7 +1046,6 @@ const EditProject = (props: IPropsEditProject) => {
     const {
         awareness: physicalAwareness,
         applyModelPayload: applyPhysicalModelPayload,
-        mutateModel: physicalMutateModel,
         modelData: _physicalModelData,
     } = usePhysicalCollaboration({
         enabled: Boolean(isPhysicalSchema && hasPermission && isValidSchema === true && !!token),
@@ -1129,27 +1127,8 @@ const EditProject = (props: IPropsEditProject) => {
     const effectiveAddRelationship = addRelationship;
     const effectiveAddDoubleRelationship = addDoubleRelationship;
 
-    // Override logical table creators with model-first versions when
-    // operating on a logical schema (model-as-truth architecture).
-    const logicalModelAwareCreators = useMemo(
-        () =>
-            isLogicalSchema && logicalMutateModel
-                ? createNodeCreators(setNodes, { getViewportCenter, mutateLogicalModel: logicalMutateModel })
-                : null,
-        [isLogicalSchema, logicalMutateModel, setNodes, getViewportCenter],
-    );
-    const effectiveAddLogicalTable = logicalModelAwareCreators?.addLogicalTable ?? addLogicalTable;
-
-    // Override physical table creators with model-first versions when
-    // operating on a physical schema (model-as-truth architecture).
-    const physicalModelAwareCreators = useMemo(
-        () =>
-            isPhysicalSchema && physicalMutateModel
-                ? createNodeCreators(setNodes, { getViewportCenter, mutatePhysicalModel: physicalMutateModel })
-                : null,
-        [isPhysicalSchema, physicalMutateModel, setNodes, getViewportCenter],
-    );
-    const effectiveAddRelationTable = physicalModelAwareCreators?.addRelationTable ?? addRelationTable;
+    const effectiveAddLogicalTable = addLogicalTable;
+    const effectiveAddRelationTable = addRelationTable;
 
     // ── Drag-and-drop from sidebar ───────────────────────────────
     const handleDragOver = useCallback((event: React.DragEvent) => {
@@ -1167,32 +1146,6 @@ const EditProject = (props: IPropsEditProject) => {
                 x: event.clientX,
                 y: event.clientY,
             });
-
-            // Logical: model-first via logicalMutateModel
-            if (isLogicalSchema && logicalMutateModel && nodeType === "logical-table") {
-                const id = generateDiagramId();
-                logicalMutateModel(
-                    (m) => ({
-                        ...m,
-                        tables: [...(m.tables ?? []), { id, name: `table_${(m.tables ?? []).length + 1}`, columns: [{ id: `lid_${id}_col_0`, name: "column_1", nullable: true, unique: false, roles: {} }] }],
-                    }),
-                    { selectedNodeId: id, positionHint: position },
-                );
-                return;
-            }
-
-            // Physical: model-first via physicalMutateModel
-            if (isPhysicalSchema && physicalMutateModel && nodeType === "physical-table") {
-                const id = generateDiagramId();
-                physicalMutateModel(
-                    (m) => ({
-                        ...m,
-                        tables: [...(m.tables ?? []), { id, name: `table_${(m.tables ?? []).length + 1}`, columns: [{ id: `pid_${id}_col_0`, name: "column_1", dataType: "varchar", nullable: true, unique: false, roles: {} }] }],
-                    }),
-                    { selectedNodeId: id, positionHint: position },
-                );
-                return;
-            }
 
             // Fallback: direct node creation (attributes, constraints, or non-model schemas)
             setNodes((existingNodes) => {
@@ -1248,7 +1201,7 @@ const EditProject = (props: IPropsEditProject) => {
                 return [...deselected, newNode];
             });
         },
-        [setNodes, isLogicalSchema, isPhysicalSchema, logicalMutateModel, physicalMutateModel],
+        [setNodes],
     );
 
     // ── Version preview handlers ─────────────────────────────────
@@ -1547,61 +1500,64 @@ const EditProject = (props: IPropsEditProject) => {
                 return [...updatedOtherTables, ...cleanNewTables];
             };
 
-            if (isLogicalSchema && logicalMutateModel) {
-                logicalMutateModel((model) => {
-                    const origIdx = model.tables.findIndex((t) => t.name === tableName);
-                    if (origIdx === -1) return model;
-                    const origTable = model.tables[origIdx];
+            if (isLogicalSchema && _logicalModelData) {
+                const origIdx = _logicalModelData.tables.findIndex((t) => t.name === tableName);
+                if (origIdx === -1) return;
+                const origTable = _logicalModelData.tables[origIdx];
 
-                    const tables = applyDecomposition(
-                        model.tables,
-                        origTable,
-                        "lid",
-                        (colName, idx, tableId) => ({
-                            id: `lid_${tableId}_col_${idx}`,
+                const tables = applyDecomposition(
+                    _logicalModelData.tables,
+                    origTable,
+                    "lid",
+                    (colName, idx, tableId) => ({
+                        id: `lid_${tableId}_col_${idx}`,
+                        name: colName,
+                        nullable: true, // will be overridden by applyDecomposition
+                        unique: false,
+                        roles: {},
+                    }),
+                );
+
+                void applyLogicalModelPayload({ ..._logicalModelData, tables });
+            } else if (isPhysicalSchema && _physicalModelData) {
+                const origIdx = _physicalModelData.tables.findIndex((t) => t.name === tableName);
+                if (origIdx === -1) return;
+                const origTable = _physicalModelData.tables[origIdx];
+                const origColMap = new Map(
+                    origTable.columns.map((c) => [c.name.toLowerCase(), c]),
+                );
+
+                const tables = applyDecomposition(
+                    _physicalModelData.tables,
+                    origTable,
+                    "pid",
+                    (colName, idx, tableId) => {
+                        const origCol = origColMap.get(colName.toLowerCase());
+                        return {
+                            id: `pid_${tableId}_col_${idx}`,
                             name: colName,
+                            dataType: origCol?.dataType,
+                            length: origCol?.length,
                             nullable: true, // will be overridden by applyDecomposition
                             unique: false,
+                            autoIncrement: origCol?.autoIncrement,
+                            defaultValue: origCol?.defaultValue,
                             roles: {},
-                        }),
-                    );
+                        };
+                    },
+                );
 
-                    return { ...model, tables };
-                });
-            } else if (isPhysicalSchema && physicalMutateModel) {
-                physicalMutateModel((model) => {
-                    const origIdx = model.tables.findIndex((t) => t.name === tableName);
-                    if (origIdx === -1) return model;
-                    const origTable = model.tables[origIdx];
-                    const origColMap = new Map(
-                        origTable.columns.map((c) => [c.name.toLowerCase(), c]),
-                    );
-
-                    const tables = applyDecomposition(
-                        model.tables,
-                        origTable,
-                        "pid",
-                        (colName, idx, tableId) => {
-                            const origCol = origColMap.get(colName.toLowerCase());
-                            return {
-                                id: `pid_${tableId}_col_${idx}`,
-                                name: colName,
-                                dataType: origCol?.dataType,
-                                length: origCol?.length,
-                                nullable: true, // will be overridden by applyDecomposition
-                                unique: false,
-                                autoIncrement: origCol?.autoIncrement,
-                                defaultValue: origCol?.defaultValue,
-                                roles: {},
-                            };
-                        },
-                    );
-
-                    return { ...model, tables };
-                });
+                void applyPhysicalModelPayload({ ..._physicalModelData, tables });
             }
         },
-        [isLogicalSchema, isPhysicalSchema, logicalMutateModel, physicalMutateModel],
+        [
+            isLogicalSchema,
+            isPhysicalSchema,
+            _logicalModelData,
+            _physicalModelData,
+            applyLogicalModelPayload,
+            applyPhysicalModelPayload,
+        ],
     );
 
     // ── Schema conversion (logical ↔ physical done directly; others via AI) ──
@@ -2206,9 +2162,7 @@ const EditProject = (props: IPropsEditProject) => {
                     isOpen={isDDLImportOpen}
                     onClose={() => setIsDDLImportOpen(false)}
                     onImport={(model) => {
-                        if (physicalMutateModel) {
-                            physicalMutateModel(() => model);
-                        }
+                        applyPhysicalModelPayload(model);
                     }}
                     diagramName={diagramName}
                 />
