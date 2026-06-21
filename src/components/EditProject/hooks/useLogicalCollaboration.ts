@@ -6,6 +6,7 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import { API_BASE } from "@/api";
 import type { ProjectSchemasResponse } from "@/types/projects.type";
 import type { NodeData } from "../index";
+import type { LogicalTableData } from "@/components/erds-notations/logical-table";
 import type { CollaborationAwareness } from "@/types/projects.type";
 import {
     mapStoredNodesToReactNodes,
@@ -14,6 +15,7 @@ import {
     type StoredLogicalDiagramEdge,
     mapReactNodesToStoredNodes,
     mapReactEdgesToStoredEdges,
+    applyFkDecorationsToStoredNodes,
 } from "../utils/logical-diagram.builder";
 import { buildDiagramFromLogicalModel, buildLogicalModel } from "../utils/logical-model.builder";
 import type { LogicalModelPayload } from "../utils/logical-model.builder";
@@ -71,6 +73,43 @@ export const useLogicalCollaboration = ({
     edgesRef.current = edges;
     const onDiagramReadyRef = useRef(onDiagramReady);
     onDiagramReadyRef.current = onDiagramReady;
+
+    const hydrateNodesFromModel = useCallback((
+        reactNodes: Node<NodeData>[],
+        model: LogicalModelPayload | null,
+    ): Node<NodeData>[] => {
+        if (!model?.tables?.length) return reactNodes;
+
+        const tableMap = new Map(model.tables.map((table) => [table.id, table]));
+
+        return reactNodes.map((node) => {
+            if (node.type !== "logical-table") return node;
+
+            const table = tableMap.get(node.id);
+            if (!table) return node;
+
+            const columnIdByRef = new Map<string, string>();
+            for (const column of table.columns ?? []) {
+                columnIdByRef.set(column.id, column.id);
+                columnIdByRef.set(column.name, column.id);
+            }
+
+            const functionalDependencies = (table.functionalDependencies ?? []).map((fd) => ({
+                id: fd.id,
+                left: fd.left.map((ref) => columnIdByRef.get(ref) ?? ref),
+                right: fd.right.map((ref) => columnIdByRef.get(ref) ?? ref),
+            }));
+
+            return {
+                ...node,
+                data: {
+                    ...(node.data as LogicalTableData),
+                    functionalDependencies,
+                    showFDs: table.showFunctionalDependencies ?? false,
+                } as NodeData,
+            };
+        });
+    }, []);
 
     // ── Reset refs when schema or enabled changes ────────────────────────
     useEffect(() => {
@@ -175,6 +214,8 @@ export const useLogicalCollaboration = ({
                 console.error("[Logical] Error mapping edges:", error);
                 return;
             }
+
+            reactNodes = hydrateNodesFromModel(reactNodes, modelDataRef.current);
 
             isSyncingFromYjsRef.current = true;
             hasLoadedInitialDataRef.current = true;
@@ -397,7 +438,7 @@ export const useLogicalCollaboration = ({
             ydocRef.current = null;
             setAwareness(null);
         };
-    }, [enabled, sessionId, schema?.id, projectId, token, setNodes, setEdges]);
+    }, [enabled, sessionId, schema?.id, projectId, token, setNodes, setEdges, hydrateNodesFromModel]);
 
     // ── Save diagram to Yjs (diagram only — NOT model) ───────────────
     useEffect(() => {
@@ -412,8 +453,11 @@ export const useLogicalCollaboration = ({
             return;
         }
 
-        const storedNodes = mapReactNodesToStoredNodes(nodes);
         const storedEdges = mapReactEdgesToStoredEdges(edges, nodes);
+        const storedNodes = applyFkDecorationsToStoredNodes(
+            mapReactNodesToStoredNodes(nodes),
+            storedEdges,
+        );
 
         const diagramPayload = {
             diagram: { nodes: storedNodes, edges: storedEdges },
@@ -427,26 +471,30 @@ export const useLogicalCollaboration = ({
             return;
         }
 
+        const modelProjection = buildLogicalModel({
+            storedNodes,
+            storedEdges,
+            runtimeNodes: nodes,
+            schemaId: schema?.id ?? undefined,
+            schemaName: schema?.name ?? undefined,
+        });
+        const nextModel = mergeLogicalModelFromDiagramProjection(
+            modelDataRef.current,
+            modelProjection,
+        );
+        const shouldSyncDiagram = lastSyncedDiagramStringRef.current !== nextDiagramString;
+        const shouldSyncModel = hasModelChanged(modelDataRef.current, nextModel);
+        const nextModelString = shouldSyncModel ? JSON.stringify(nextModel) : null;
+
         const commitDiagramUpdate = () => {
             if (!ydocRef.current || !nextDiagramString) return;
             const doc = ydocRef.current;
             const diagramMap = doc.getMap("diagram");
             const modelMap = doc.getMap("model");
 
-            const modelProjection = buildLogicalModel({
-                storedNodes,
-                storedEdges,
-                schemaId: schema?.id ?? undefined,
-                schemaName: schema?.name ?? undefined,
-            });
-            const nextModel = mergeLogicalModelFromDiagramProjection(
-                modelDataRef.current,
-                modelProjection,
-            );
-            const shouldSyncModel = hasModelChanged(modelDataRef.current, nextModel);
-            const nextModelString = shouldSyncModel ? JSON.stringify(nextModel) : null;
-
-            lastAppliedDiagramStringRef.current = nextDiagramString;
+            if (shouldSyncDiagram) {
+                lastAppliedDiagramStringRef.current = nextDiagramString;
+            }
             if (nextModelString) {
                 lastAppliedModelStringRef.current = nextModelString;
                 lastSyncedModelStringRef.current = nextModelString;
@@ -454,15 +502,19 @@ export const useLogicalCollaboration = ({
             }
 
             doc.transact(() => {
-                diagramMap.set("data", nextDiagramString!);
+                if (shouldSyncDiagram) {
+                    diagramMap.set("data", nextDiagramString!);
+                }
                 if (nextModelString) {
                     modelMap.set("data", nextModelString);
                 }
             });
-            lastSyncedDiagramStringRef.current = nextDiagramString;
+            if (shouldSyncDiagram) {
+                lastSyncedDiagramStringRef.current = nextDiagramString;
+            }
         };
 
-        if (nextDiagramString && lastSyncedDiagramStringRef.current !== nextDiagramString) {
+        if (nextDiagramString && (shouldSyncDiagram || shouldSyncModel)) {
             if (!ydocRef.current) {
                 pendingDiagramUpdateRef.current = commitDiagramUpdate;
             } else {
@@ -488,7 +540,10 @@ export const useLogicalCollaboration = ({
                 preserveUnmodeledNodes: true,
             });
 
-            const reactNodes = mapStoredNodesToReactNodes(storedNodes);
+            const reactNodes = hydrateNodesFromModel(
+                mapStoredNodesToReactNodes(storedNodes),
+                modelPayload,
+            );
             const reactEdges = mapStoredEdgesToReactEdges(storedEdges, reactNodes);
 
             hasLoadedInitialDataRef.current = true;
@@ -505,7 +560,7 @@ export const useLogicalCollaboration = ({
                 });
             }
         },
-        [setNodes, setEdges],
+        [setNodes, setEdges, hydrateNodesFromModel],
     );
 
     return {

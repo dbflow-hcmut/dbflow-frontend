@@ -132,9 +132,14 @@ const extractTablesFromModel = (
             .filter((c) => c.roles?.candidateKey)
             .map((c) => c.name);
 
+        const colNameByRef = new Map<string, string>();
+        for (const column of table.columns ?? []) {
+            colNameByRef.set(column.id, column.name);
+            colNameByRef.set(column.name, column.name);
+        }
         const fds = (table.functionalDependencies ?? []).map((fd) => ({
-            left: fd.left,
-            right: fd.right,
+            left: fd.left.map((ref) => colNameByRef.get(ref) ?? ref),
+            right: fd.right.map((ref) => colNameByRef.get(ref) ?? ref),
         }));
 
         return {

@@ -328,13 +328,24 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                             {((selectedNode.data as LogicalTableData).functionalDependencies ?? []).map((fd) => {
                                                 const colOptions = ((selectedNode.data as LogicalTableData).columns ?? []).map(c => ({
                                                     label: c.name,
-                                                    value: c.name,
+                                                    value: c.id ?? c.name,
                                                 }));
+                                                const colLabelByRef = new Map(
+                                                    ((selectedNode.data as LogicalTableData).columns ?? []).flatMap(c => {
+                                                        const refs: Array<[string, string]> = [[c.name, c.name]];
+                                                        if (c.id) refs.push([c.id, c.name]);
+                                                        return refs;
+                                                    }),
+                                                );
+                                                const formatRefs = (refs: string[]) =>
+                                                    refs.length > 0
+                                                        ? refs.map(ref => colLabelByRef.get(ref) ?? ref).join(', ')
+                                                        : '?';
                                                 return (
                                                     <div key={fd.id} className="border border-gray-200 rounded p-2">
                                                         <div className="flex items-center justify-between mb-1.5">
                                                             <span className="text-xs font-medium text-gray-500">
-                                                                {fd.left.length > 0 ? fd.left.join(', ') : '?'}{' → '}{fd.right.length > 0 ? fd.right.join(', ') : '?'}
+                                                                {formatRefs(fd.left)}{' → '}{formatRefs(fd.right)}
                                                             </span>
                                                             {onRemoveLogicalFD && (
                                                                 <Button

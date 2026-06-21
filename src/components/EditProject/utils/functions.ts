@@ -444,7 +444,15 @@ export const createUpdateFunctions = (
     const addLogicalTableAttribute = () => {
         if (!selectedNode || selectedNode.type !== 'logical-table') return;
         const tableData = selectedNode.data as LogicalTableData;
+        const nextColumnIndex = Math.max(
+            -1,
+            ...(tableData.columns ?? []).map((column, index) => {
+                const match = column.id?.match(/_col_(\d+)$/);
+                return match ? Number(match[1]) : index;
+            }),
+        ) + 1;
         const newColumn = {
+            id: `lid_${selectedNode.id}_col_${nextColumnIndex}`,
             name: `column_${(tableData.columns?.length || 0) + 1}`,
             isKey: false,
         };
@@ -507,7 +515,10 @@ export const createUpdateFunctions = (
     const reorderLogicalTableAttributes = (fromIndex: number, toIndex: number) => {
         if (!selectedNode || selectedNode.type !== 'logical-table') return;
         const tableData = selectedNode.data as LogicalTableData;
-        const columns = [...(tableData.columns || [])];
+        const columns = (tableData.columns || []).map((column, index) => ({
+            ...column,
+            id: column.id ?? `lid_${selectedNode.id}_col_${index}`,
+        }));
         const [movedColumn] = columns.splice(fromIndex, 1);
         columns.splice(toIndex, 0, movedColumn);
         

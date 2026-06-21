@@ -716,38 +716,13 @@ const EditProject = (props: IPropsEditProject) => {
             return;
         }
 
-        const reorderedIndexes = Array.from({ length: columnCount }, (_, index) => index);
-        const [movedIndex] = reorderedIndexes.splice(fromIndex, 1);
-        reorderedIndexes.splice(toIndex, 0, movedIndex);
-        const oldToNewIndex = new Map<number, number>();
-        reorderedIndexes.forEach((oldIndex, newIndex) => oldToNewIndex.set(oldIndex, newIndex));
-
-        const remapLogicalHandle = (handle?: string | null) => {
-            if (!handle) return handle;
-            const pattern = new RegExp(`^lid_${selectedNode.id}_col_(\\d+)(-.+)$`);
-            const match = handle.match(pattern);
-            if (!match) return handle;
-            const oldIndex = Number(match[1]);
-            const newIndex = oldToNewIndex.get(oldIndex);
-            return newIndex === undefined ? handle : `lid_${selectedNode.id}_col_${newIndex}${match[2]}`;
-        };
-
         reorderLogicalTableAttributes(fromIndex, toIndex);
-        setEdges((existingEdges) =>
-            existingEdges.map((edge) =>
-                edge.type === 'logical-table-edge' && (edge.source === selectedNode.id || edge.target === selectedNode.id)
-                    ? {
-                        ...edge,
-                        sourceHandle: edge.source === selectedNode.id ? remapLogicalHandle(edge.sourceHandle) : edge.sourceHandle,
-                        targetHandle: edge.target === selectedNode.id ? remapLogicalHandle(edge.targetHandle) : edge.targetHandle,
-                    }
-                    : edge
-            )
-        );
-    }, [reorderLogicalTableAttributes, selectedNode, setEdges]);
+    }, [reorderLogicalTableAttributes, selectedNode]);
 
     const isLogicalColumnConnectedToRelationship = useCallback((tableId: string, columnIndex: number) => {
-        const columnHandlePrefix = `lid_${tableId}_col_${columnIndex}-`;
+        const tableData = nodes.find((node) => node.id === tableId && node.type === 'logical-table')?.data as LogicalTableData | undefined;
+        const columnId = tableData?.columns?.[columnIndex]?.id ?? `lid_${tableId}_col_${columnIndex}`;
+        const columnHandlePrefix = `${columnId}-`;
         return edges.some((edge) =>
             edge.type === 'logical-table-edge' &&
             (
@@ -755,7 +730,7 @@ const EditProject = (props: IPropsEditProject) => {
                 (edge.target === tableId && edge.targetHandle?.startsWith(columnHandlePrefix))
             )
         );
-    }, [edges]);
+    }, [edges, nodes]);
 
     const isPhysicalColumnConnectedToRelationship = useCallback((tableId: string, columnName: string) => {
         return edges.some((edge) =>
@@ -768,7 +743,9 @@ const EditProject = (props: IPropsEditProject) => {
     }, [edges]);
 
     const getLogicalReferencedEdgeIds = useCallback((tableId: string, columnIndex: number) => {
-        const columnHandlePrefix = `lid_${tableId}_col_${columnIndex}-`;
+        const tableData = nodes.find((node) => node.id === tableId && node.type === 'logical-table')?.data as LogicalTableData | undefined;
+        const columnId = tableData?.columns?.[columnIndex]?.id ?? `lid_${tableId}_col_${columnIndex}`;
+        const columnHandlePrefix = `${columnId}-`;
         return edges
             .filter((edge) =>
                 edge.type === 'logical-table-edge' &&
@@ -776,7 +753,7 @@ const EditProject = (props: IPropsEditProject) => {
                 edge.targetHandle?.startsWith(columnHandlePrefix)
             )
             .map((edge) => edge.id);
-    }, [edges]);
+    }, [edges, nodes]);
 
     const getPhysicalReferencedEdgeIds = useCallback((tableId: string, columnName: string) => {
         return edges
@@ -1454,7 +1431,7 @@ const EditProject = (props: IPropsEditProject) => {
             const storedNodes = mapLogicalReactToStored(nodes);
             const storedEdges = mapLogicalReactEdgesToStored(edges, nodes);
             const model = storedNodes.length > 0
-                ? buildLogicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
+                ? buildLogicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
                 : _logicalModelData;
             return model ? runLogicalLinter(model) : empty;
         }
@@ -1480,7 +1457,7 @@ const EditProject = (props: IPropsEditProject) => {
             const storedNodes = mapLogicalReactToStored(nodes);
             const storedEdges = mapLogicalReactEdgesToStored(edges, nodes);
             return storedNodes.length > 0
-                ? buildLogicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
+                ? buildLogicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
                 : _logicalModelData;
         }
         if (isPhysicalSchema) {
@@ -1562,7 +1539,7 @@ const EditProject = (props: IPropsEditProject) => {
                         break;
                     case "logical-table": {
                         const cnt = existingNodes.filter((n) => n.type === "logical-table").length;
-                        const logicalData = { name: `table_${cnt + 1}`, columns: [{ name: "column_1", isKey: false }] };
+                        const logicalData = { name: `table_${cnt + 1}`, columns: [{ id: `lid_${id}_col_0`, name: "column_1", isKey: false }] };
                         newNode = { id, type: "logical-table", position, data: logicalData as NodeData, style: { width: 200 }, selected: true };
                         break;
                     }
@@ -1759,8 +1736,8 @@ const EditProject = (props: IPropsEditProject) => {
                         columns,
                         functionalDependencies: dt.fds.map((fd) => ({
                             id: generateId("fd"),
-                            left: fd.left,
-                            right: fd.right,
+                            left: fd.left.map((colName) => colNameToId.get(colName.toLowerCase()) ?? colName),
+                            right: fd.right.map((colName) => colNameToId.get(colName.toLowerCase()) ?? colName),
                         })),
                         _colNameToId: colNameToId,
                     };
@@ -1944,7 +1921,7 @@ const EditProject = (props: IPropsEditProject) => {
             const storedNodes = mapLogicalReactToStored(nodes);
             const storedEdges = mapLogicalReactEdgesToStored(edges, nodes);
             if (storedNodes.length > 0) {
-                return buildLogicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
+                return buildLogicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
             }
             return _logicalModelData;
         };
@@ -2134,7 +2111,7 @@ const EditProject = (props: IPropsEditProject) => {
         const buildFreshLogical = () => {
             const storedNodes = mapLogicalReactToStored(nodes);
             const storedEdges = mapLogicalReactEdgesToStored(edges, nodes);
-            if (storedNodes.length > 0) return buildLogicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
+            if (storedNodes.length > 0) return buildLogicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
             return _logicalModelData;
         };
         const buildFreshPhysical = () => {

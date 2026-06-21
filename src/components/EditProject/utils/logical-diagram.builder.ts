@@ -6,8 +6,6 @@ import { generateDiagramId } from "./functions";
 type LogicalTableEdgeData = {
     label?: string;
     controlPoints?: Array<{ x: number; y: number }>;
-    sourceCardinality?: '1' | 'N';
-    targetCardinality?: '1' | 'N';
 };
 
 export const getViewportStorageKey = (schemaId?: string | null) =>
@@ -59,9 +57,8 @@ export type StoredLogicalDiagramNode = {
         label?: string;
         decorations?: {
             pk?: boolean;
+            ck?: boolean;
             fk?: boolean;
-            underline?: boolean;
-            italic?: boolean;
         };
     }>;
     text?: string;
@@ -86,15 +83,9 @@ export type StoredLogicalDiagramEdge = {
         text?: string;
         position?: { x: number; y: number };
     };
-    sourceCardinality?: '1' | 'N';
-    targetCardinality?: '1' | 'N';
 };
 
-type LegacyStoredNode = {
-    data?: NodeData;
-};
-
-export type StoredLogicalNode = StoredLogicalDiagramNode & LegacyStoredNode;
+export type StoredLogicalNode = StoredLogicalDiagramNode;
 
 const NODE_SIZE_FALLBACKS: Record<string, { w: number; h: number }> = {
     "logical-table": { w: 200, h: 120 },
@@ -148,23 +139,20 @@ const ensureStyle = (node: StoredLogicalNode) =>
     node.size ? { width: node.size.w, height: node.size.h } : undefined;
 
 const mapLogicalTableNode = (node: StoredLogicalNode): Node<LogicalTableData> => {
-    const dataSource = node.data as LogicalTableData | undefined;
-
-    // Prefer dataSource columns (full LogicalColumn data), otherwise use stored columns
-    const columns = dataSource?.columns ?? (node.columns?.map(col => ({
+    const columns = node.columns?.map(col => ({
+        id: col.columnId,
         name: col.label || col.columnId,
         isKey: col.decorations?.pk || false,
-    })) || []);
+        isCandidateKey: col.decorations?.ck || false,
+    })) || [];
 
     return {
         id: node.tableId ?? node.id,
         type: "logical-table",
         position: ensurePosition(node),
         data: {
-            name: node.name ?? dataSource?.name ?? node.tableId ?? node.id,
+            name: node.name ?? node.tableId ?? node.id,
             columns,
-            functionalDependencies: dataSource?.functionalDependencies,
-            showFDs: dataSource?.showFDs,
         },
         style: ensureStyle(node),
         zIndex: node.zIndex,
@@ -196,7 +184,7 @@ const mapStoredNodeToReactNode = (node: StoredLogicalNode): Node<NodeData> => {
             id: node.id,
             type: node.type,
             position: ensurePosition(node),
-            data: (node.data ?? {}) as NodeData,
+            data: { text: node.text ?? "" } as NodeData,
             style: ensureStyle(node),
             zIndex: node.zIndex,
         };
@@ -220,16 +208,15 @@ export const mapStoredNodesToReactNodes = (storedNodes: StoredLogicalNode[] = []
 };
 
 const mapReactLogicalTableNode = (node: Node<LogicalTableData>): StoredLogicalNode => {
-    const { name, columns = [], functionalDependencies, showFDs } = node.data;
+    const { name, columns = [] } = node.data;
 
     // Map columns to stored format (following docs schema)
     const storedColumns: StoredLogicalDiagramNode["columns"] = columns.map((col, idx) => ({
-        columnId: `lid_${node.id}_col_${idx}`,
+        columnId: col.id ?? `lid_${node.id}_col_${idx}`,
         label: col.name,
         decorations: {
             pk: col.isKey ? true : undefined,
             ck: col.isCandidateKey ? true : undefined,
-            underline: col.isKey ? true : undefined,
         },
     }));
 
@@ -243,13 +230,6 @@ const mapReactLogicalTableNode = (node: Node<LogicalTableData>): StoredLogicalNo
         tableId: node.id,
         columns: storedColumns.length > 0 ? storedColumns : undefined,
         style: sanitizeStyleForStorage(node.style),
-        // Store full column data for model building
-        data: {
-            name,
-            columns,
-            ...(functionalDependencies?.length ? { functionalDependencies } : {}),
-            ...(showFDs != null ? { showFDs } : {}),
-        } as LogicalTableData,
     };
 };
 
@@ -264,7 +244,7 @@ const mapReactNodeToStoredNode = (node: Node<NodeData>): StoredLogicalNode => {
                 position: node.position,
                 size: getStoredNodeSize(node),
                 zIndex: node.zIndex,
-                data: node.data,
+                text: "text" in node.data ? node.data.text : undefined,
                 style: sanitizeStyleForStorage(node.style),
             };
     }
@@ -274,6 +254,38 @@ export const mapReactNodesToStoredNodes = (reactNodes: Node<NodeData>[] = []): S
     return reactNodes
         .filter((node) => node.type === "logical-table" || ANNOTATION_NODE_TYPES.has(node.type!))
         .map(mapReactNodeToStoredNode);
+};
+
+export const applyFkDecorationsToStoredNodes = (
+    storedNodes: StoredLogicalNode[] = [],
+    storedEdges: StoredLogicalDiagramEdge[] = [],
+): StoredLogicalNode[] => {
+    const fkColumnIds = new Set(
+        storedEdges
+            .filter((edge) => edge.type === "fk")
+            .map((edge) => edge.source),
+    );
+
+    if (fkColumnIds.size === 0) return storedNodes;
+
+    return storedNodes.map((node) => {
+        if (!node.columns?.length) return node;
+
+        let changed = false;
+        const columns = node.columns.map((column) => {
+            if (!fkColumnIds.has(column.columnId) || column.decorations?.fk) return column;
+            changed = true;
+            return {
+                ...column,
+                decorations: {
+                    ...column.decorations,
+                    fk: true,
+                },
+            };
+        });
+
+        return changed ? { ...node, columns } : node;
+    });
 };
 
 const mapReactEdgeToStoredEdge = (
@@ -314,14 +326,10 @@ const mapReactEdgeToStoredEdge = (
 
     const sourceHandleInfo = extractHandleInfo(edge.sourceHandle, edge.source);
     const targetHandleInfo = extractHandleInfo(edge.targetHandle, edge.target);
-
-    // Extract column index from columnId for fkRef
-    const extractColumnIndex = (columnId: string): number => {
-        const match = columnId.match(/_col_(\d+)$/);
-        return match ? parseInt(match[1], 10) : 0;
-    };
-
-    const sourceColumnIndex = extractColumnIndex(sourceHandleInfo.columnId);
+    const sourceData = sourceNode.data as LogicalTableData;
+    const sourceColumnIndex = sourceData.columns?.findIndex((column, idx) =>
+        (column.id ?? `lid_${sourceNode.id}_col_${idx}`) === sourceHandleInfo.columnId
+    ) ?? -1;
 
     // Extract control points from edge data
     const points = edge.data?.controlPoints?.map((p: { x: number; y: number }) => ({ x: p.x, y: p.y }));
@@ -337,7 +345,7 @@ const mapReactEdgeToStoredEdge = (
         style: sanitizeStyleForStorage(edge.style),
         fkRef: {
             tableId: sourceNode.id,
-            foreignKeyIndex: sourceColumnIndex,
+            foreignKeyIndex: Math.max(sourceColumnIndex, 0),
         },
         labels: edge.data?.label
             ? {
@@ -345,8 +353,6 @@ const mapReactEdgeToStoredEdge = (
                   position: { x: 0, y: 0 },
               }
             : undefined,
-        sourceCardinality: edge.data?.sourceCardinality,
-        targetCardinality: edge.data?.targetCardinality,
     };
 
     return storedEdge;
@@ -419,8 +425,6 @@ const mapSchemaEdgeToReactEdge = (
     const data: LogicalTableEdgeData = {
         label: edge.labels?.text,
         controlPoints: edge.points?.map((p) => ({ x: p.x, y: p.y })),
-        sourceCardinality: edge.sourceCardinality || 'N',
-        targetCardinality: edge.targetCardinality || '1',
     };
 
     const reactEdge: Edge<LogicalTableEdgeData> = {
@@ -480,4 +484,3 @@ export const mapStoredEdgesToReactEdges = (
         })
         .filter((edge): edge is Edge<LogicalTableEdgeData> => Boolean(edge));
 };
-

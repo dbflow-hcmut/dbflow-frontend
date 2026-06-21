@@ -106,7 +106,8 @@ const mergeLogicalFDs = (
     current: LogicalFD[] | undefined,
     projection: LogicalFD[] | undefined,
 ): LogicalFD[] | undefined => {
-    if (!projection?.length) return undefined;
+    if (projection === undefined) return current;
+    if (!projection.length) return [];
     return projection.map((fd) => ({
         ...findById(current, fd.id),
         ...fd,
@@ -132,6 +133,8 @@ export const mergeLogicalModelFromDiagramProjection = (
                     existing?.functionalDependencies,
                     table.functionalDependencies,
                 ),
+                showFunctionalDependencies:
+                    table.showFunctionalDependencies ?? existing?.showFunctionalDependencies,
             };
             if (!merged.functionalDependencies?.length) delete merged.functionalDependencies;
             return merged;

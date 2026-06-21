@@ -96,9 +96,7 @@
                 "properties": {
                   "pk": { "type": "boolean", "default": false },
                   "ck": { "type": "boolean", "default": false },
-                  "fk": { "type": "boolean", "default": false },
-                  "underline": { "type": "boolean", "default": false },
-                  "italic": { "type": "boolean", "default": false }
+                  "fk": { "type": "boolean", "default": false }
                 }
               }
             }
@@ -107,11 +105,6 @@
 
         "text": {
           "type": "string"
-        },
-
-        "data": {
-          "type": "object",
-          "additionalProperties": true
         }
       },
 
@@ -163,10 +156,7 @@
             "text": { "type": "string" },
             "position": { "$ref": "#/$defs/point" }
           }
-        },
-
-        "sourceCardinality": { "type": "string", "enum": ["1", "N"] },
-        "targetCardinality": { "type": "string", "enum": ["1", "N"] }
+        }
       },
 
       "allOf": [

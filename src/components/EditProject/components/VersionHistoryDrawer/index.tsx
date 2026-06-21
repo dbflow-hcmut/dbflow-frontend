@@ -21,6 +21,7 @@ import {
     mapReactEdgesToStoredEdges as mapLogicalEdgesReactToStored,
     mapStoredNodesToReactNodes as mapLogicalStoredToReact,
     mapStoredEdgesToReactEdges as mapLogicalEdgesStoredToReact,
+    applyFkDecorationsToStoredNodes as applyLogicalFkDecorationsToStoredNodes,
 } from "../../utils/logical-diagram.builder";
 import type { StoredLogicalNode, StoredLogicalDiagramEdge } from "../../utils/logical-diagram.builder";
 import {
@@ -377,8 +378,11 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
         let sNodes: unknown[];
         let sEdges: unknown[];
         if (isLogical) {
-            sNodes = mapLogicalReactToStored(effectiveLiveNodes);
             sEdges = mapLogicalEdgesReactToStored(effectiveLiveEdges, effectiveLiveNodes);
+            sNodes = applyLogicalFkDecorationsToStoredNodes(
+                mapLogicalReactToStored(effectiveLiveNodes),
+                sEdges as StoredLogicalDiagramEdge[],
+            );
         } else if (isPhysical) {
             sNodes = mapPhysicalReactToStored(effectiveLiveNodes);
             sEdges = mapPhysicalEdgesReactToStored(effectiveLiveEdges, effectiveLiveNodes);

@@ -1,4 +1,6 @@
 import type { StoredLogicalDiagramEdge, StoredLogicalDiagramNode, StoredLogicalNode } from "./logical-diagram.builder";
+import type { LogicalTableData } from "@/components/erds-notations/logical-table";
+import type { Node } from "reactflow";
 import type { NodeData } from "../index";
 import { computeELKTableLayout, type LayoutTable } from "./auto-layout";
 
@@ -31,6 +33,7 @@ type ModelTable = {
     name: string;
     columns: ModelColumn[];
     functionalDependencies?: ModelFunctionalDependency[];
+    showFunctionalDependencies?: boolean;
     notes?: string;
 };
 
@@ -55,6 +58,7 @@ export type LogicalModelPayload = {
 type BuildLogicalModelParams = {
     storedNodes: StoredLogicalNode[];
     storedEdges: StoredLogicalDiagramEdge[];
+    runtimeNodes?: Node<NodeData>[];
     schemaId?: string;
     schemaName?: string;
     diagramName?: string;
@@ -74,6 +78,7 @@ export const createEmptyLogicalModel = (modelId?: string, modelName?: string): L
 const buildLogicalModel = ({
     storedNodes,
     storedEdges,
+    runtimeNodes,
     schemaId,
     schemaName,
     diagramName,
@@ -90,9 +95,14 @@ const buildLogicalModel = ({
 
     // Build a map of table nodes by ID
     const tableNodeMap = new Map(tableNodes.map((node) => [node.tableId!, node]));
+    const runtimeTableDataMap = new Map(
+        (runtimeNodes ?? [])
+            .filter((node) => node.type === "logical-table")
+            .map((node) => [node.id, node.data as LogicalTableData]),
+    );
 
-    // Build a map of FK relationships: tableId -> columnIndex -> { refTableId, refColumnId }
-    const fkMap = new Map<string, Map<number, { refTableId: string; refColumnId: string }>>();
+    // Build a map of FK relationships: tableId -> source columnId -> { refTableId, refColumnId }
+    const fkMap = new Map<string, Map<string, { refTableId: string; refColumnId: string }>>();
 
     // Helper to extract nodeId from columnId (lid_{nodeId}_col_N)
     const extractNodeIdFromColumnId = (columnId: string): string | null => {
@@ -106,7 +116,6 @@ const buildLogicalModel = ({
             if (!edge.fkRef) return;
 
             const sourceTableId = edge.fkRef.tableId;
-            const columnIndex = edge.fkRef.foreignKeyIndex;
 
             // edge.target is a columnId (lid_nodeId_col_N) — extract nodeId
             const targetNodeId = extractNodeIdFromColumnId(edge.target);
@@ -118,59 +127,35 @@ const buildLogicalModel = ({
             if (!fkMap.has(sourceTableId)) {
                 fkMap.set(sourceTableId, new Map());
             }
-            fkMap.get(sourceTableId)!.set(columnIndex, {
+            fkMap.get(sourceTableId)!.set(edge.source, {
                 refTableId: targetNodeId,
                 refColumnId: edge.target,
             });
         });
 
-    // Build tables with columns
-    // Get column data from stored node data (LogicalTableData)
-    type NodeFD = { id: string; left: string[]; right: string[] };
-    const tableDataMap = new Map<string, {
-        name: string;
-        columns: Array<{ name: string; isKey?: boolean }>;
-        functionalDependencies?: NodeFD[];
-    }>();
-
-    tableNodes.forEach((tableNode) => {
-        if (tableNode.tableId) {
-            // Get column data from node data (LogicalTableData)
-            const nodeData = tableNode.data as {
-                name?: string;
-                columns?: Array<{ name: string; isKey?: boolean }>;
-                functionalDependencies?: NodeFD[];
-            } | undefined;
-            if (nodeData && nodeData.columns) {
-                tableDataMap.set(tableNode.tableId, {
-                    name: nodeData.name || tableNode.name || tableNode.tableId,
-                    columns: nodeData.columns,
-                    functionalDependencies: nodeData.functionalDependencies,
-                });
-            }
-        }
-    });
-
     const tables: ModelTable[] = tableNodes.map((tableNode) => {
         const tableId = tableNode.tableId!;
         const tableName = tableNode.name ?? tableId;
 
-        // Get column data from tableDataMap or use stored columns
-        const tableData = tableDataMap.get(tableId);
-        const actualColumns = tableData?.columns || [];
         const storedColumns = tableNode.columns || [];
+        const runtimeData = runtimeTableDataMap.get(tableId);
+        const columnIdByRef = new Map<string, string>();
+        storedColumns.forEach((storedCol, idx) => {
+            const columnId = storedCol.columnId || `lid_${tableId}_col_${idx}`;
+            columnIdByRef.set(columnId, columnId);
+            if (storedCol.label) columnIdByRef.set(storedCol.label, columnId);
+        });
+        const normalizeFdRefs = (refs: string[]) =>
+            refs.map((ref) => columnIdByRef.get(ref) ?? ref);
 
-        // Build columns - prefer actual column data, fallback to stored columns
-        const columns: ModelColumn[] = actualColumns.length > 0
-            ? actualColumns.map((actualCol, idx) => {
-                  const columnId = `lid_${tableId}_col_${idx}`;
-                  const columnName = actualCol.name || `column_${idx}`;
+        const columns: ModelColumn[] = storedColumns.map((storedCol, idx) => {
+                  const columnId = storedCol.columnId || `lid_${tableId}_col_${idx}`;
+                  const columnName = storedCol.label || storedCol.columnId || `column_${idx}`;
 
                   // Check if this column is a foreign key
-                  const fkInfo = fkMap.get(tableId)?.get(idx);
-                  const isPrimaryKey = actualCol.isKey ?? false;
-
-                  const isCandidateKey = (actualCol as { isCandidateKey?: boolean }).isCandidateKey ?? false;
+                  const fkInfo = fkMap.get(tableId)?.get(columnId);
+                  const isPrimaryKey = storedCol.decorations?.pk ?? false;
+                  const isCandidateKey = storedCol.decorations?.ck ?? false;
 
                   const column: ModelColumn = {
                       id: columnId,
@@ -192,49 +177,24 @@ const buildLogicalModel = ({
                   };
 
                   return column;
-              })
-            : storedColumns.map((storedCol, idx) => {
-                  const columnId = storedCol.columnId || `lid_${tableId}_col_${idx}`;
-                  const columnName = storedCol.label || storedCol.columnId || `column_${idx}`;
-
-                  // Check if this column is a foreign key
-                  const fkInfo = fkMap.get(tableId)?.get(idx);
-                  const isPrimaryKey = storedCol.decorations?.pk ?? false;
-
-                  const column: ModelColumn = {
-                      id: columnId,
-                      name: columnName,
-                      nullable: true, // Logical schema does not define nullability
-                      unique: false,
-                      roles: {
-                          primaryKey: isPrimaryKey,
-                          ...(fkInfo
-                              ? {
-                                    foreignKey: {
-                                        refTableId: fkInfo.refTableId,
-                                        refColumnId: fkInfo.refColumnId,
-                                    },
-                                }
-                              : {}),
-                      },
-                  };
-
-                  return column;
               });
-
-        // Extract FDs from node data (column names) → model FDs (column names)
-        const nodeFDs = tableData?.functionalDependencies ?? [];
-        const modelFDs: ModelFunctionalDependency[] = nodeFDs.map((fd) => ({
-            id: fd.id,
-            left: fd.left,
-            right: fd.right,
-        }));
 
         return {
             id: tableId,
             name: tableName,
             columns,
-            functionalDependencies: modelFDs.length > 0 ? modelFDs : undefined,
+            ...(runtimeData && "functionalDependencies" in runtimeData
+                ? {
+                    functionalDependencies: (runtimeData.functionalDependencies ?? []).map((fd) => ({
+                        id: fd.id,
+                        left: normalizeFdRefs(fd.left),
+                        right: normalizeFdRefs(fd.right),
+                    })),
+                }
+                : {}),
+            ...(runtimeData?.showFDs != null
+                ? { showFunctionalDependencies: runtimeData.showFDs }
+                : {}),
             notes: undefined,
         };
     });
@@ -398,28 +358,9 @@ export const buildDiagramFromLogicalModel = async ({
                     pk: col.roles?.primaryKey ? true : undefined,
                     ck: col.roles?.candidateKey ? true : undefined,
                     fk: col.roles?.foreignKey ? true : undefined,
-                    underline: col.roles?.primaryKey ? true : undefined,
                 },
             }),
         );
-
-        // Convert model FDs (column IDs) → node FDs (column names)
-        const colIdToName = new Map<string, string>();
-        for (const col of table.columns ?? []) {
-            colIdToName.set(col.id, col.name);
-            // Also map by name for pass-through when left/right already contains names
-            colIdToName.set(col.name, col.name);
-        }
-        const nodeFDs = (table.functionalDependencies ?? []).map((fd) => ({
-            id: fd.id,
-            left: fd.left.map((ref) => colIdToName.get(ref) ?? ref),
-            right: fd.right.map((ref) => colIdToName.get(ref) ?? ref),
-        }));
-
-        // Preserve showFDs from existing node data if available
-        const existingNodeData = existingNodes?.find(
-            (n) => n.tableId === table.id || n.id === table.id,
-        )?.data as { showFDs?: boolean } | undefined;
 
         nodes.push({
             id: table.id,
@@ -429,16 +370,6 @@ export const buildDiagramFromLogicalModel = async ({
             name: table.name,
             tableId: table.id,
             columns: storedColumns.length > 0 ? storedColumns : undefined,
-            data: {
-                name: table.name,
-                columns: (table.columns ?? []).map((col) => ({
-                    name: col.name,
-                    isKey: col.roles?.primaryKey ?? false,
-                    ...(col.roles?.candidateKey ? { isCandidateKey: true } : {}),
-                })),
-                ...(nodeFDs.length > 0 ? { functionalDependencies: nodeFDs } : {}),
-                ...(existingNodeData?.showFDs != null ? { showFDs: existingNodeData.showFDs } : {}),
-            } as NodeData,
         });
     }
 

@@ -13,6 +13,7 @@
 * `name*`: Tên bảng.
 * `columns*`: Danh sách các cột của bảng.
 * `functionalDependencies`: Danh sách FD nội bộ.
+* `showFunctionalDependencies`: Có hiển thị FD trên node/table hay không.
 * `notes`: Ghi chú.
 
 ---
@@ -37,7 +38,7 @@
 
 * `id*`: Định danh FD (prefix `fd_`).
 * `name`: Tên FD (tuỳ chọn).
-* `left*`: Mảng định danh hoặc tên cột determinant.
-* `right*`: Mảng định danh hoặc tên cột dependent.
+* `left*`: Mảng định danh cột determinant (`column.id`).
+* `right*`: Mảng định danh cột dependent (`column.id`).
 * `notes`: Ghi chú.
 

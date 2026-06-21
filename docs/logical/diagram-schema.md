@@ -21,7 +21,6 @@
 * `zIndex`: Lớp hiển thị.
 * `style`: Style cơ bản (`class`, `stroke`, `fill`, `fontSize`).
 * `name`: Tên hiển thị của node (thường là tên bảng).
-* `data`: Dữ liệu bổ sung của node.
 
 ### table node (type = "table")
 
@@ -33,8 +32,6 @@
     * `pk`: Cột PK (gạch chân).
     * `ck`: Cột candidate key.
     * `fk`: Cột FK (đánh dấu).
-    * `underline`: Ép hiển thị gạch chân.
-    * `italic`: Hiển thị in nghiêng.
 
 ### note node (type = "note")
 
@@ -58,5 +55,3 @@
 * `labels`: Text hiển thị trên cạnh.
   * `text`: Nội dung.
   * `position`: Tọa độ đặt label (`x`, `y`).
-* `sourceCardinality`: Cardinality phía nguồn (`"1"` / `"N"`).
-* `targetCardinality`: Cardinality phía đích (`"1"` / `"N"`).
