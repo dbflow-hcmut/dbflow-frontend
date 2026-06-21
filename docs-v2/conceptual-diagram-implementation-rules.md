@@ -139,7 +139,7 @@ Rule:
 `ModelGeneralization` gồm:
 
 - `id`.
-- `parentEntityId`.
+- `parentEntityIds`.
 - `childEntityIds`.
 - `categoryBy?`.
 - `constraints.disjointness`: `"disjoint"` hoặc `"overlap"`.
@@ -829,7 +829,7 @@ For each generalization:
 2. Tạo parent edge:
    - `id = e_isa_p_${gen.id}`.
    - `type = "isaParent"`.
-   - `from = parentEntityId`.
+   - `from = từng id trong parentEntityIds`.
    - `to = gen.id`.
    - Nếu completeness total thì `endStyle.from.doubleLine = true`.
 3. Tạo child edges:
@@ -1131,4 +1131,3 @@ Conceptual không export DDL trực tiếp. Muốn DDL cần convert sang physic
 | `normalizeConceptualModel` | Raw model JSON | Normalized conceptual model | Support legacy AI fields, defaults, relationship flat format |
 | `applyModelPayload` | Full model mới | ReactFlow + Yjs model | Normalize, replace model, regenerate diagram |
 | `mutateModel` | Mutator function | Model mới + diagram mới | Rebuild model từ diagram trước, mutate, regenerate |
-

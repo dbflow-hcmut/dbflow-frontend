@@ -737,7 +737,7 @@ const EditProject = (props: IPropsEditProject) => {
 
         // Determine storedType for conceptual ER edges
         let storedType: string | undefined;
-        let edgeData: Record<string, unknown> = {};
+        const edgeData: Record<string, unknown> = {};
         if (edgeType === "erd-edge") {
             const srcType = sourceNode?.type;
             const tgtType = targetNode?.type;
@@ -754,14 +754,9 @@ const EditProject = (props: IPropsEditProject) => {
                 const constraintNode = srcType === 'constraint' ? sourceNode : targetNode;
                 const symbol = (constraintNode?.data as { symbol?: string })?.symbol?.toLowerCase();
                 if (symbol === 'u') {
-                    // Category/Union: entity→constraint = categoryLink, constraint→entity = categoryMember
-                    storedType = srcType === 'constraint' ? 'categoryMember' : 'categoryLink';
-                    if (storedType === 'categoryLink') {
-                        edgeData = { lineStyle: 'bracket', bracketDirection: 'to' };
-                    }
+                    storedType = 'categoryMember';
                 } else if (hasEntity) {
-                    // ISA: entity→constraint = isaParent, constraint→entity = isaChild
-                    storedType = srcType === 'constraint' ? 'isaChild' : 'isaParent';
+                    storedType = 'isaParent';
                 }
             }
         }
@@ -2461,16 +2456,41 @@ const EditProject = (props: IPropsEditProject) => {
                         }}
                         onUpdateEdgeLineStyle={(style) => {
                             if (!selectedEdge) return;
+                            const sourceType = nodes.find((node) => node.id === selectedEdge.source)?.type;
+                            const targetType = nodes.find((node) => node.id === selectedEdge.target)?.type;
+                            const hasConstraint = sourceType === 'constraint' || targetType === 'constraint';
+                            const isRelationshipEntity =
+                                (sourceType === 'relationship' && targetType === 'entity') ||
+                                (sourceType === 'entity' && targetType === 'relationship');
+                            if (style === 'bracket' && !hasConstraint && !isRelationshipEntity) return;
+                            const constraintBracketDirection =
+                                hasConstraint && style === 'bracket'
+                                    ? sourceType === 'constraint'
+                                        ? 'from'
+                                        : 'to'
+                                    : undefined;
                             setEdges((existingEdges) =>
                                 existingEdges.map((edge) =>
                                     edge.id === selectedEdge.id
-                                        ? { ...edge, data: { ...edge.data, lineStyle: style } }
+                                        ? {
+                                            ...edge,
+                                            data: {
+                                                ...edge.data,
+                                                lineStyle: style,
+                                                ...(constraintBracketDirection
+                                                    ? { bracketDirection: constraintBracketDirection }
+                                                    : {}),
+                                            },
+                                        }
                                         : edge
                                 )
                             );
                         }}
                         onUpdateEdgeBracketDirection={(direction) => {
                             if (!selectedEdge) return;
+                            const sourceType = nodes.find((node) => node.id === selectedEdge.source)?.type;
+                            const targetType = nodes.find((node) => node.id === selectedEdge.target)?.type;
+                            if (sourceType === 'constraint' || targetType === 'constraint') return;
                             setEdges((existingEdges) =>
                                 existingEdges.map((edge) =>
                                     edge.id === selectedEdge.id

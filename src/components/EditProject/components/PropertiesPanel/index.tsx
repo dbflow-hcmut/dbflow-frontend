@@ -97,6 +97,18 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     onUpdatePhysicalFD,
     onTogglePhysicalFDDisplay,
 }) => {
+    const getNodeType = (nodeId?: string) => nodes.find((node) => node.id === nodeId)?.type;
+    const selectedEdgeSourceType = getNodeType(selectedEdge?.source);
+    const selectedEdgeTargetType = getNodeType(selectedEdge?.target);
+    const selectedEdgeHasConstraint =
+        selectedEdgeSourceType === "constraint" || selectedEdgeTargetType === "constraint";
+    const selectedEdgeIsRelationshipEntity =
+        (selectedEdgeSourceType === "relationship" && selectedEdgeTargetType === "entity") ||
+        (selectedEdgeSourceType === "entity" && selectedEdgeTargetType === "relationship");
+    const selectedEdgeCanUseBracket = selectedEdgeHasConstraint || selectedEdgeIsRelationshipEntity;
+    const selectedEdgeCanChooseBracketDirection =
+        selectedEdge?.data?.lineStyle === "bracket" && selectedEdgeIsRelationshipEntity;
+
     const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
     const connectedEnds = useMemo(() => {
         if (!selectedNode || selectedNode.type !== 'relationship') return [];
@@ -979,11 +991,13 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                         options={[
                                             { label: 'Single line', value: 'single' },
                                             { label: 'Double line', value: 'double' },
-                                            { label: 'Identifying', value: 'bracket' },
+                                            ...(selectedEdgeCanUseBracket
+                                                ? [{ label: 'Identifying', value: 'bracket' as const }]
+                                                : []),
                                         ]}
                                     />
                                 </div>
-                                {selectedEdge.data?.lineStyle === 'bracket' && (
+                                {selectedEdgeCanChooseBracketDirection && (
                                     <div>
                                         <label className="block text-sm font-medium mb-2">Identifying Direction</label>
                                         <Select
@@ -1022,4 +1036,3 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 };
 
 export default PropertiesPanel;
-

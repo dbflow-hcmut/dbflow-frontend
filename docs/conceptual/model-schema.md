@@ -58,8 +58,8 @@
 ## generalization (Tổng quát hóa)
 
 * `id*`: ID (prefix `cid_`).
-* `parentEntityId*`: ID của thực thể cha (prefix `cid_`).
-* `childEntityIds*`: Tập các ID của thực thể con (≥ 1).
+* `parentEntityIds*`: Tập các ID của thực thể cha (prefix `cid_`). Edge không có móc/bracket được hiểu là cha.
+* `childEntityIds*`: Tập các ID của thực thể con. Edge có móc/bracket được hiểu là con.
 * `categoryBy`: Tiêu chí phân loại thực thể (nếu có).
 * `constraints*`: Các ràng buộc cha-con.
   * `disjointness*`: `disjoint` hoặc `overlap`.
@@ -70,7 +70,7 @@
 ## category (Thể loại / Union)
 
 * `id*`: ID (prefix `cid_`).
-* `categoryEntityId*`: ID của category entity (prefix `cid_`).
-* `superclassEntityIds*`: Tập các ID của superclass entities (≥ 2).
+* `categoryEntityId`: ID của category entity (prefix `cid_`). Edge có móc/bracket được hiểu là category entity.
+* `superclassEntityIds*`: Tập các ID của superclass entities. Edge không có móc/bracket được hiểu là superclass.
 * `completeness*`: `total` hoặc `partial`.
 * `notes`: Ghi chú.

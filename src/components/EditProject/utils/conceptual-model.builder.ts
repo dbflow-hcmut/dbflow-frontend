@@ -56,7 +56,7 @@ type ModelRelationship = {
 
 type ModelGeneralization = {
     id: string;
-    parentEntityId: string;
+    parentEntityIds: string[];
     childEntityIds: string[];
     categoryBy?: string;
     constraints: {
@@ -67,7 +67,7 @@ type ModelGeneralization = {
 
 type ModelCategory = {
     id: string;
-    categoryEntityId: string;
+    categoryEntityId?: string;
     superclassEntityIds: string[];
     completeness: "total" | "partial";
     notes?: string;
@@ -348,48 +348,48 @@ const buildGeneralizations = (
     const generalizations: ModelGeneralization[] = [];
 
     isaNodes.forEach((circle) => {
-        const parentEdge = storedEdges.find(
-            (edge) => edge.type === "isaParent" && edge.generalizationId === circle.id
+        const generalizationEdges = storedEdges.filter(
+            (edge) =>
+                (edge.type === "isaParent" || edge.type === "isaChild") &&
+                edge.generalizationId === circle.id
         );
-        const childEdges = storedEdges.filter(
-            (edge) => edge.type === "isaChild" && edge.generalizationId === circle.id
-        );
 
-        if (!parentEdge || childEdges.length === 0) return;
+        const parentEntityIds: string[] = [];
+        const childEntityIds: string[] = [];
 
-        // For isaParent: entity -> isaCircle, so parent is the entity (from)
-        // For isaChild: isaCircle -> entity, so child is the entity (to)
-        const fromNode = storedNodeMap.get(parentEdge.from.nodeId);
-        const toNode = storedNodeMap.get(parentEdge.to.nodeId);
-        
-        // Parent should be the entity (not the isaCircle)
-        const parentNode = fromNode?.type === "entity" ? fromNode : toNode?.type === "entity" ? toNode : null;
-        if (!parentNode || parentNode.type !== "entity") return;
+        generalizationEdges.forEach((edge) => {
+            const fromNode = storedNodeMap.get(edge.from.nodeId);
+            const toNode = storedNodeMap.get(edge.to.nodeId);
+            const entityNode = fromNode?.type === "entity" ? fromNode : toNode?.type === "entity" ? toNode : null;
+            if (!entityNode || entityNode.type !== "entity") return;
 
-        const childEntityIds = childEdges
-            .map((edge) => {
-                // For isaChild: isaCircle -> entity, so child is the entity (to)
-                const childFromNode = storedNodeMap.get(edge.from.nodeId);
-                const childToNode = storedNodeMap.get(edge.to.nodeId);
-                const childNode = childToNode?.type === "entity" ? childToNode : childFromNode?.type === "entity" ? childFromNode : null;
-                if (!childNode || childNode.type !== "entity") return null;
-                return getEntityId(childNode);
-            })
-            .filter((id): id is string => Boolean(id));
+            const entityId = getEntityId(entityNode);
+            const hasBracket = Boolean(edge.endStyle?.from?.bracket || edge.endStyle?.to?.bracket);
+            if (edge.type === "isaChild" || hasBracket) {
+                if (!childEntityIds.includes(entityId)) childEntityIds.push(entityId);
+            } else if (!parentEntityIds.includes(entityId)) {
+                parentEntityIds.push(entityId);
+            }
+        });
 
-        if (!childEntityIds.length) return;
+        if (!parentEntityIds.length && !childEntityIds.length) return;
 
+        const totalCompletenessEdge = generalizationEdges.find((edge) => {
+            const hasBracket = Boolean(edge.endStyle?.from?.bracket || edge.endStyle?.to?.bracket);
+            return edge.type === "isaParent" && !hasBracket;
+        });
+
+        const normalizedChildEntityIds = childEntityIds.filter((id) => !parentEntityIds.includes(id));
         const constraintSymbol = circle.isaCircle?.symbol === "o" ? "overlap" : "disjoint";
-        
-        // Double line from parent entity to isaCircle indicates total completeness
-        // (all instances of parent must belong to at least one child)
-        const hasDoubleLine = parentEdge.endStyle?.from?.doubleLine || parentEdge.endStyle?.to?.doubleLine;
+        const hasDoubleLine =
+            totalCompletenessEdge?.endStyle?.from?.doubleLine ||
+            totalCompletenessEdge?.endStyle?.to?.doubleLine;
         const completeness = hasDoubleLine ? "total" : "partial";
 
         generalizations.push({
             id: circle.id,
-            parentEntityId: getEntityId(parentNode),
-            childEntityIds,
+            parentEntityIds,
+            childEntityIds: normalizedChildEntityIds,
             constraints: {
                 disjointness: constraintSymbol,
                 completeness,
@@ -411,49 +411,57 @@ const buildCategories = (
     unionNodes.forEach((unionNode) => {
         const categoryId = unionNode.unionCircle?.categoryId ?? unionNode.id;
 
-        const categoryLinkEdge = storedEdges.find(
-            (edge) => edge.type === "categoryLink" && edge.categoryId === categoryId
+        const categoryEdges = storedEdges.filter(
+            (edge) =>
+                (edge.type === "categoryLink" || edge.type === "categoryMember") &&
+                edge.categoryId === categoryId
         );
 
-        if (!categoryLinkEdge) return;
+        const categoryEntityIds: string[] = [];
+        const superclassEntityIds: string[] = [];
 
-        // For categoryLink: categoryEntity -> unionCircle, so categoryEntity is the entity (from)
-        const linkFromNode = storedNodeMap.get(categoryLinkEdge.from.nodeId);
-        const linkToNode = storedNodeMap.get(categoryLinkEdge.to.nodeId);
-        const categoryEntityNode = linkFromNode?.type === "entity" ? linkFromNode : linkToNode?.type === "entity" ? linkToNode : null;
+        categoryEdges.forEach((edge) => {
+            const fromNode = storedNodeMap.get(edge.from.nodeId);
+            const toNode = storedNodeMap.get(edge.to.nodeId);
+            const entityNode = fromNode?.type === "entity" ? fromNode : toNode?.type === "entity" ? toNode : null;
+            if (!entityNode || entityNode.type !== "entity") return;
 
-        if (!categoryEntityNode || categoryEntityNode.type !== "entity") return;
+            const entityId = getEntityId(entityNode);
+            const hasBracket = Boolean(edge.endStyle?.from?.bracket || edge.endStyle?.to?.bracket);
+            if (edge.type === "categoryLink" || hasBracket) {
+                if (!categoryEntityIds.includes(entityId)) categoryEntityIds.push(entityId);
+            } else if (!superclassEntityIds.includes(entityId)) {
+                superclassEntityIds.push(entityId);
+            }
+        });
 
-        const memberEdges = storedEdges.filter(
-            (edge) => edge.type === "categoryMember" && edge.categoryId === categoryId
-        );
+        if (!categoryEntityIds.length && !superclassEntityIds.length) return;
 
-        // For categoryMember: unionCircle -> superclassEntity, so superclassEntity is the entity (to)
-        const superclassEntityIds = memberEdges
-            .map((edge) => {
-                const memberFromNode = storedNodeMap.get(edge.from.nodeId);
-                const memberToNode = storedNodeMap.get(edge.to.nodeId);
-                const superclassNode = memberToNode?.type === "entity" ? memberToNode : memberFromNode?.type === "entity" ? memberFromNode : null;
-                if (!superclassNode || superclassNode.type !== "entity") return null;
-                return getEntityId(superclassNode);
-            })
-            .filter((id): id is string => Boolean(id));
+        const categoryLinkEdge = categoryEdges.find((edge) => {
+            const hasBracket = Boolean(edge.endStyle?.from?.bracket || edge.endStyle?.to?.bracket);
+            return edge.type === "categoryLink" || hasBracket;
+        });
 
-        if (!superclassEntityIds.length) return;
-
-        // Double line from categoryEntity to unionCircle indicates total completeness
-        const hasDoubleLine = categoryLinkEdge.endStyle?.from?.doubleLine || categoryLinkEdge.endStyle?.to?.doubleLine;
+        const hasDoubleLine =
+            categoryLinkEdge?.endStyle?.from?.doubleLine ||
+            categoryLinkEdge?.endStyle?.to?.doubleLine;
         const completeness = hasDoubleLine ? "total" : "partial";
 
         categories.push({
             id: categoryId,
-            categoryEntityId: getEntityId(categoryEntityNode),
-            superclassEntityIds,
+            ...(categoryEntityIds[0] ? { categoryEntityId: categoryEntityIds[0] } : {}),
+            superclassEntityIds: superclassEntityIds.filter((id) => !categoryEntityIds.includes(id)),
             completeness,
         });
     });
 
     return categories;
+};
+
+const getGeneralizationParentIds = (gen: ModelGeneralization): string[] => {
+    if (gen.parentEntityIds?.length) return gen.parentEntityIds;
+    const legacy = gen as ModelGeneralization & { parentEntityId?: string };
+    return legacy.parentEntityId ? [legacy.parentEntityId] : [];
 };
 
 /**
@@ -511,7 +519,18 @@ export function normalizeConceptualModel(raw: Record<string, unknown>): Conceptu
         model: (raw.model as ConceptualModelPayload["model"]) ?? { id: generateCid(), name: "Imported model", version: 1 },
         entities,
         relationships,
-        ...(Array.isArray(raw.generalizations) ? { generalizations: raw.generalizations as ModelGeneralization[] } : {}),
+        ...(Array.isArray(raw.generalizations)
+            ? {
+                  generalizations: (raw.generalizations as Record<string, unknown>[]).map((gen) => ({
+                      ...(gen as ModelGeneralization),
+                      parentEntityIds: Array.isArray(gen.parentEntityIds)
+                          ? (gen.parentEntityIds as string[])
+                          : (gen.parentEntityId as string | undefined)
+                            ? [gen.parentEntityId as string]
+                            : [],
+                  })),
+              }
+            : {}),
         ...(Array.isArray(raw.categories) ? { categories: raw.categories as ModelCategory[] } : {}),
         ...(raw.notes ? { notes: raw.notes as string } : {}),
         ...(Array.isArray(raw.tags) ? { tags: raw.tags as string[] } : {}),
@@ -872,12 +891,13 @@ export const buildDiagramFromModel = async ({
         });
         if (!fixed) needsLayout.add(gen.id);
 
-        // parent → ISA circle
-        layoutEdges.push({
-            id: `le_isa_p_${gen.id}`,
-            sourceId: gen.parentEntityId,
-            targetId: gen.id,
-        });
+        for (const parentId of getGeneralizationParentIds(gen)) {
+            layoutEdges.push({
+                id: `le_isa_p_${gen.id}_${parentId}`,
+                sourceId: parentId,
+                targetId: gen.id,
+            });
+        }
         // ISA circle → children
         for (const childId of gen.childEntityIds) {
             layoutEdges.push({
@@ -900,12 +920,13 @@ export const buildDiagramFromModel = async ({
         });
         if (!fixed) needsLayout.add(cat.id);
 
-        // category entity → union circle
-        layoutEdges.push({
-            id: `le_catl_${cat.id}`,
-            sourceId: cat.categoryEntityId,
-            targetId: cat.id,
-        });
+        if (cat.categoryEntityId) {
+            layoutEdges.push({
+                id: `le_catl_${cat.id}`,
+                sourceId: cat.categoryEntityId,
+                targetId: cat.id,
+            });
+        }
         // union circle → superclass entities
         for (const sid of cat.superclassEntityIds) {
             layoutEdges.push({
@@ -1093,7 +1114,9 @@ export const buildDiagramFromModel = async ({
     // ── 3d. Generalizations (ISA) ───────────────────────────────────────
 
     for (const gen of model.generalizations ?? []) {
-        const pPos = entityPos.get(gen.parentEntityId);
+        const parentEntityIds = getGeneralizationParentIds(gen);
+        const anchorParentId = parentEntityIds[0];
+        const pPos = anchorParentId ? entityPos.get(anchorParentId) : undefined;
         if (!pPos) continue;
 
         const cPos = getPos(gen.id, {
@@ -1112,13 +1135,15 @@ export const buildDiagramFromModel = async ({
         });
 
         const isTotal = gen.constraints.completeness === "total";
-        edges.push({
-            id: `e_isa_p_${gen.id}`,
-            type: "isaParent",
-            from: { nodeId: gen.parentEntityId },
-            to: { nodeId: gen.id },
-            generalizationId: gen.id,
-            endStyle: isTotal ? { from: { doubleLine: true } } : undefined,
+        parentEntityIds.forEach((parentId) => {
+            edges.push({
+                id: `e_isa_p_${gen.id}_${parentId}`,
+                type: "isaParent",
+                from: { nodeId: parentId },
+                to: { nodeId: gen.id },
+                generalizationId: gen.id,
+                endStyle: isTotal ? { from: { doubleLine: true } } : undefined,
+            });
         });
 
         gen.childEntityIds.forEach((childId) => {
@@ -1128,6 +1153,7 @@ export const buildDiagramFromModel = async ({
                 from: { nodeId: gen.id },
                 to: { nodeId: childId },
                 generalizationId: gen.id,
+                endStyle: { from: { bracket: true } },
             });
         });
     }
@@ -1135,7 +1161,9 @@ export const buildDiagramFromModel = async ({
     // ── 3e. Categories (Union) ──────────────────────────────────────────
 
     for (const cat of model.categories ?? []) {
-        const cePos = entityPos.get(cat.categoryEntityId);
+        const categoryEntityId = cat.categoryEntityId;
+        const anchorEntityId = categoryEntityId ?? cat.superclassEntityIds[0];
+        const cePos = anchorEntityId ? entityPos.get(anchorEntityId) : undefined;
         if (!cePos) continue;
 
         const cPos = getPos(cat.id, {
@@ -1152,20 +1180,22 @@ export const buildDiagramFromModel = async ({
         });
 
         const isTotal = cat.completeness === "total";
-        const categoryLinkEndStyle: Record<string, Record<string, boolean>> = {
-            to: { bracket: true },
-        };
-        if (isTotal) {
-            categoryLinkEndStyle.from = { doubleLine: true };
+        if (categoryEntityId) {
+            const categoryLinkEndStyle: Record<string, Record<string, boolean>> = {
+                to: { bracket: true },
+            };
+            if (isTotal) {
+                categoryLinkEndStyle.from = { doubleLine: true };
+            }
+            edges.push({
+                id: `e_catl_${cat.id}`,
+                type: "categoryLink",
+                from: { nodeId: categoryEntityId },
+                to: { nodeId: cat.id },
+                categoryId: cat.id,
+                endStyle: categoryLinkEndStyle,
+            });
         }
-        edges.push({
-            id: `e_catl_${cat.id}`,
-            type: "categoryLink",
-            from: { nodeId: cat.categoryEntityId },
-            to: { nodeId: cat.id },
-            categoryId: cat.id,
-            endStyle: categoryLinkEndStyle,
-        });
 
         cat.superclassEntityIds.forEach((sid) => {
             edges.push({

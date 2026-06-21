@@ -24,10 +24,10 @@ const ErdEdge: React.FC<EdgeProps<ErdEdgeData>> = (props) => {
         targetY,
     });
 
-    const nearSourceX = sourceX + (targetX - sourceX) * 0.2;
-    const nearSourceY = sourceY + (targetY - sourceY) * 0.2;
-    const nearTargetX = sourceX + (targetX - sourceX) * 0.8;
-    const nearTargetY = sourceY + (targetY - sourceY) * 0.8;
+    const nearSourceX = sourceX + (targetX - sourceX) * 0.36;
+    const nearSourceY = sourceY + (targetY - sourceY) * 0.36;
+    const nearTargetX = sourceX + (targetX - sourceX) * 0.64;
+    const nearTargetY = sourceY + (targetY - sourceY) * 0.64;
 
     const lineStyle = data?.lineStyle || 'single';
 
@@ -90,7 +90,7 @@ const ErdEdge: React.FC<EdgeProps<ErdEdgeData>> = (props) => {
                     const bracketDirection = data?.bracketDirection || 'to';
                     const bracketX = bracketDirection === 'from' ? nearSourceX : nearTargetX;
                     const bracketY = bracketDirection === 'from' ? nearSourceY : nearTargetY;
-                    const bracketAngle = bracketDirection === 'from' ? angle + Math.PI : angle;
+                    const bracketAngle = bracketDirection === 'from' ? angle : angle + Math.PI;
                     
                     return (
                         <g
@@ -98,10 +98,10 @@ const ErdEdge: React.FC<EdgeProps<ErdEdgeData>> = (props) => {
                         >
                             <path
                                 d={`
-                                    M ${-bracketLength / 2 - 8},${-bracketOffset - 2}
-                                    L ${-bracketLength / 2},${-bracketOffset - 2}
-                                    C ${bracketLength / 2},${-bracketOffset - 2} ${bracketLength / 2},${bracketOffset + 2} ${-bracketLength / 2},${bracketOffset + 2}
-                                    L ${-bracketLength / 2 - 8},${bracketOffset + 2}
+                                    M ${-bracketLength / 2 - 4},${-bracketOffset - 1}
+                                    L ${-bracketLength / 2},${-bracketOffset - 1}
+                                    C ${bracketLength / 2},${-bracketOffset - 1} ${bracketLength / 2},${bracketOffset + 1} ${-bracketLength / 2},${bracketOffset + 1}
+                                    L ${-bracketLength / 2 - 4},${bracketOffset + 1}
                                 `}
                                 fill="none"
                                 stroke={selected ? '#42a5f5' : 'var(--color-gray-700)'}

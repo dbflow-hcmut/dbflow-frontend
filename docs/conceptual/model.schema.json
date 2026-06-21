@@ -176,14 +176,17 @@
     "generalization": {
       "description": "Subtype/Supertype (is-a).",
       "type": "object",
-      "required": ["id", "parentEntityId", "childEntityIds", "constraints"],
+      "required": ["id", "parentEntityIds", "childEntityIds", "constraints"],
       "additionalProperties": false,
       "properties": {
         "id": { "type": "string", "pattern": "^cid_" },
-        "parentEntityId": { "type": "string", "pattern": "^cid_" },
-        "childEntityIds": {
+        "parentEntityIds": {
           "type": "array",
           "minItems": 1,
+          "items": { "type": "string", "pattern": "^cid_" }
+        },
+        "childEntityIds": {
+          "type": "array",
           "items": { "type": "string", "pattern": "^cid_" }
         },
         "categoryBy": { "type": "string" },
@@ -206,7 +209,6 @@
       "type": "object",
       "required": [
         "id",
-        "categoryEntityId",
         "superclassEntityIds",
         "completeness"
       ],
@@ -221,7 +223,6 @@
 
         "superclassEntityIds": {
           "type": "array",
-          "minItems": 2,
           "items": { "type": "string", "pattern": "^cid_" }
         },
 

@@ -544,7 +544,7 @@ export const convertLogicalToConceptual = (
     for (const [parentEntityId, childEntityIds] of generalizationMap.entries()) {
         generalizations.push({
             id: generateCid(),
-            parentEntityId,
+            parentEntityIds: [parentEntityId],
             childEntityIds,
             constraints: {
                 disjointness: "disjoint",
@@ -900,8 +900,16 @@ export const convertConceptualToLogical = (
         tableMap.get(tableId)?.columns.find((c) => c.roles?.primaryKey);
 
     for (const gen of generalizations) {
-        const parentPK = getPKCol(gen.parentEntityId);
-        const parentTable = tableMap.get(gen.parentEntityId);
+        const parentEntityIds = gen.parentEntityIds?.length
+            ? gen.parentEntityIds
+            : (gen as typeof gen & { parentEntityId?: string }).parentEntityId
+              ? [(gen as typeof gen & { parentEntityId: string }).parentEntityId]
+              : [];
+        const parentEntityId = parentEntityIds[0];
+        if (!parentEntityId) continue;
+
+        const parentPK = getPKCol(parentEntityId);
+        const parentTable = tableMap.get(parentEntityId);
         if (!parentPK || !parentTable) continue;
 
         for (const childId of gen.childEntityIds) {
@@ -916,7 +924,7 @@ export const convertConceptualToLogical = (
                     ...existingPK.roles,
                     primaryKey: true,
                     foreignKey: {
-                        refTableId: gen.parentEntityId,
+                        refTableId: parentEntityId,
                         refColumnId: parentPK.id,
                     },
                 };
@@ -930,7 +938,7 @@ export const convertConceptualToLogical = (
                     roles: {
                         primaryKey: true,
                         foreignKey: {
-                            refTableId: gen.parentEntityId,
+                            refTableId: parentEntityId,
                             refColumnId: parentPK.id,
                         },
                     },

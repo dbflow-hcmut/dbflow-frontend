@@ -311,11 +311,16 @@ function generateConceptualHTML(model: ConceptualModelPayload, options: HTMLDocs
 
     // Generalizations
     const genSections = generalizations.map((gen) => {
-        const parentName = entityMap.get(gen.parentEntityId) ?? gen.parentEntityId;
+        const parentIds = gen.parentEntityIds?.length
+            ? gen.parentEntityIds
+            : (gen as typeof gen & { parentEntityId?: string }).parentEntityId
+              ? [(gen as typeof gen & { parentEntityId: string }).parentEntityId]
+              : [];
+        const parentNames = parentIds.map((id) => entityMap.get(id) ?? id);
         const childNames = (gen.childEntityIds ?? []).map((id) => entityMap.get(id) ?? id);
         return `
         <div style="margin-bottom:14px;padding:8px 12px;background:#f3f4f6;border-radius:6px;">
-            <strong>Parent:</strong> <a href="#entity-${esc(parentName)}" style="color:#6366f1;">${esc(parentName)}</a><br/>
+            <strong>Parents:</strong> ${parentNames.map((n) => `<a href="#entity-${esc(n)}" style="color:#6366f1;">${esc(n)}</a>`).join(", ")}<br/>
             <strong>Children:</strong> ${childNames.map((n) => `<a href="#entity-${esc(n)}" style="color:#6366f1;">${esc(n)}</a>`).join(", ")}<br/>
             <span style="font-size:12px;color:#666;">${esc(gen.constraints.disjointness)} / ${esc(gen.constraints.completeness)}</span>
         </div>`;

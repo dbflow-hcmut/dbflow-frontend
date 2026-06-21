@@ -61,7 +61,7 @@ type ConceptualRelationship = {
 
 type ConceptualGeneralization = {
     id: string;
-    parentEntityId: string;
+    parentEntityIds?: string[];
     childEntityIds: string[];
     constraints: {
         disjointness: string;
@@ -74,6 +74,13 @@ export type ConceptualLintPayload = {
     relationships?: ConceptualRelationship[];
     generalizations?: ConceptualGeneralization[];
 };
+
+const getGeneralizationParentIds = (gen: ConceptualGeneralization): string[] =>
+    gen.parentEntityIds?.length
+        ? gen.parentEntityIds
+        : (gen as ConceptualGeneralization & { parentEntityId?: string }).parentEntityId
+          ? [(gen as ConceptualGeneralization & { parentEntityId: string }).parentEntityId]
+          : [];
 
 // ─── Logical ──────────────────────────────────────────────────────────────────
 
@@ -290,7 +297,7 @@ function lintConceptual(payload: ConceptualLintPayload): LintIssue[] {
         const inGeneralization =
             generalizations.some(
                 (g) =>
-                    g.parentEntityId === entity.id ||
+                    getGeneralizationParentIds(g).includes(entity.id) ||
                     g.childEntityIds.includes(entity.id),
             );
         if (!isConnected && !inGeneralization) {
@@ -324,15 +331,16 @@ function lintConceptual(payload: ConceptualLintPayload): LintIssue[] {
     // C011 — Generalization with single child
     for (const gen of generalizations) {
         if (!gen.childEntityIds || gen.childEntityIds.length < 2) {
-            const parentName =
-                entities.find((e) => e.id === gen.parentEntityId)?.name ??
-                gen.parentEntityId;
+            const parentIds = getGeneralizationParentIds(gen);
+            const parentName = parentIds
+                .map((id) => entities.find((e) => e.id === id)?.name ?? id)
+                .join(", ");
             issues.push({
                 ruleId: "C011",
                 severity: "info",
                 message: `Generalization from "${parentName}" has fewer than 2 subclasses. A generalization usually involves at least 2 child entities.`,
                 target: parentName,
-                targetId: gen.parentEntityId,
+                targetId: parentIds[0],
             });
         }
     }
