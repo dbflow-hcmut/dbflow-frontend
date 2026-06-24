@@ -3,9 +3,6 @@ import { Node } from "reactflow";
 import type { EntityData, RelationshipData, AttributeData, NodeData } from "../index";
 import type { RelationTableData, RelationColumn, TableIndex, PhysicalFD } from "@/components/erds-notations/relation-table";
 import type { LogicalTableData, LogicalFD } from "@/components/erds-notations/logical-table";
-import type { MutateModelFn } from "../hooks/useConceptualCollaboration";
-import type { MutateLogicalModelFn } from "../hooks/useLogicalCollaboration";
-import type { MutatePhysicalModelFn } from "../hooks/usePhysicalCollaboration";
 
 export type ConstraintData = { symbol: 'd' | 'o' | 'u' };
 export type ErdEdgeData = {
@@ -32,15 +29,6 @@ const deselectAllNodes = <T extends NodeData>(nodes: Node<T>[]): Node<T>[] => {
 
 type NodeCreatorOptions = {
     getViewportCenter?: () => { x: number; y: number } | null;
-    /** When provided, entity/relationship additions go through the model
-     *  first (model-as-truth) instead of directly mutating the nodes array. */
-    mutateModel?: MutateModelFn;
-    /** When provided, logical table additions go through the model
-     *  first (model-as-truth) instead of directly mutating the nodes array. */
-    mutateLogicalModel?: MutateLogicalModelFn;
-    /** When provided, physical table additions go through the model
-     *  first (model-as-truth) instead of directly mutating the nodes array. */
-    mutatePhysicalModel?: MutatePhysicalModelFn;
 };
 
 const getSpawnPosition = (
@@ -75,21 +63,6 @@ export const createNodeCreators = (
         getSpawnPosition(existingNodes, options?.getViewportCenter);
 
     const addRelationship = () => {
-        if (options?.mutateModel) {
-            const id = generateDiagramId();
-            const position = options.getViewportCenter?.() ?? { x: 200, y: 200 };
-            options.mutateModel(
-                (model) => ({
-                    ...model,
-                    relationships: [
-                        ...model.relationships,
-                        { id, name: `rel_${model.relationships.length + 1}`, type: "association" as const, ends: [] },
-                    ],
-                }),
-                { selectedNodeId: id, positionHint: position },
-            );
-            return;
-        }
         setNodes((existingNodes) => {
             const id = generateDiagramId();
             const name = `rel_${existingNodes.length + 1}`;
@@ -106,21 +79,6 @@ export const createNodeCreators = (
     };
 
     const addDoubleRelationship = () => {
-        if (options?.mutateModel) {
-            const id = generateDiagramId();
-            const position = options.getViewportCenter?.() ?? { x: 200, y: 200 };
-            options.mutateModel(
-                (model) => ({
-                    ...model,
-                    relationships: [
-                        ...model.relationships,
-                        { id, name: `rel_${model.relationships.length + 1}`, type: "identifying" as const, ends: [] },
-                    ],
-                }),
-                { selectedNodeId: id, positionHint: position },
-            );
-            return;
-        }
         setNodes((existingNodes) => {
             const id = generateDiagramId();
             const name = `rel_${existingNodes.length + 1}`;
@@ -137,21 +95,6 @@ export const createNodeCreators = (
     };
 
     const addEntity = () => {
-        if (options?.mutateModel) {
-            const id = generateDiagramId();
-            const position = options.getViewportCenter?.() ?? { x: 200, y: 200 };
-            options.mutateModel(
-                (model) => ({
-                    ...model,
-                    entities: [
-                        ...model.entities,
-                        { id, name: `ent_${model.entities.length + 1}`, kind: "strong" as const, attributes: [] },
-                    ],
-                }),
-                { selectedNodeId: id, positionHint: position },
-            );
-            return;
-        }
         setNodes((existingNodes) => {
             const id = generateDiagramId();
             const name = `ent_${existingNodes.length + 1}`;
@@ -168,21 +111,6 @@ export const createNodeCreators = (
     };
 
     const addDoubleEntity = () => {
-        if (options?.mutateModel) {
-            const id = generateDiagramId();
-            const position = options.getViewportCenter?.() ?? { x: 200, y: 200 };
-            options.mutateModel(
-                (model) => ({
-                    ...model,
-                    entities: [
-                        ...model.entities,
-                        { id, name: `ent_${model.entities.length + 1}`, kind: "weak" as const, attributes: [] },
-                    ],
-                }),
-                { selectedNodeId: id, positionHint: position },
-            );
-            return;
-        }
         setNodes((existingNodes) => {
             const id = generateDiagramId();
             const name = `ent_${existingNodes.length + 1}`;
@@ -262,27 +190,6 @@ export const createNodeCreators = (
     };
 
     const addRelationTable = () => {
-        if (options?.mutatePhysicalModel) {
-            const id = generateDiagramId();
-            const position = options.getViewportCenter?.() ?? { x: 200, y: 200 };
-            options.mutatePhysicalModel(
-                (model) => ({
-                    ...model,
-                    tables: [
-                        ...(model.tables ?? []),
-                        {
-                            id,
-                            name: `table_${(model.tables ?? []).length + 1}`,
-                            columns: [
-                                { id: `pid_${id}_col_0`, name: "column_1", dataType: "varchar", nullable: true, unique: false, roles: {} },
-                            ],
-                        },
-                    ],
-                }),
-                { selectedNodeId: id, positionHint: position },
-            );
-            return;
-        }
         setNodes((existingNodes) => {
             const id = generateDiagramId();
             const tableCount = existingNodes.filter(n => n.type === 'relation').length;
@@ -317,27 +224,6 @@ export const createNodeCreators = (
     };
 
     const addLogicalTable = () => {
-        if (options?.mutateLogicalModel) {
-            const id = generateDiagramId();
-            const position = options.getViewportCenter?.() ?? { x: 200, y: 200 };
-            options.mutateLogicalModel(
-                (model) => ({
-                    ...model,
-                    tables: [
-                        ...(model.tables ?? []),
-                        {
-                            id,
-                            name: `table_${(model.tables ?? []).length + 1}`,
-                            columns: [
-                                { id: `lid_${id}_col_0`, name: "column_1", nullable: true, unique: false, roles: {} },
-                            ],
-                        },
-                    ],
-                }),
-                { selectedNodeId: id, positionHint: position },
-            );
-            return;
-        }
         setNodes((existingNodes) => {
             const id = generateDiagramId();
             const tableCount = existingNodes.filter(n => n.type === 'logical-table').length;
@@ -469,6 +355,29 @@ export const createUpdateFunctions = (
         );
     };
 
+    const reorderRelationTableColumns = (fromIndex: number, toIndex: number) => {
+        if (!selectedNode || selectedNode.type !== 'relation') return;
+        const tableData = selectedNode.data as RelationTableData;
+        const columns = [...(tableData.columns || [])];
+        const [movedColumn] = columns.splice(fromIndex, 1);
+        if (!movedColumn) return;
+        columns.splice(toIndex, 0, movedColumn);
+
+        setNodes((existingNodes) =>
+            existingNodes.map((n) =>
+                n.id === selectedNode.id
+                    ? {
+                        ...n,
+                        data: {
+                            ...tableData,
+                            columns,
+                        },
+                    }
+                    : n
+            )
+        );
+    };
+
     const addTableIndex = () => {
         if (!selectedNode || selectedNode.type !== 'relation') return;
         const tableData = selectedNode.data as RelationTableData;
@@ -535,7 +444,15 @@ export const createUpdateFunctions = (
     const addLogicalTableAttribute = () => {
         if (!selectedNode || selectedNode.type !== 'logical-table') return;
         const tableData = selectedNode.data as LogicalTableData;
+        const nextColumnIndex = Math.max(
+            -1,
+            ...(tableData.columns ?? []).map((column, index) => {
+                const match = column.id?.match(/_col_(\d+)$/);
+                return match ? Number(match[1]) : index;
+            }),
+        ) + 1;
         const newColumn = {
+            id: `lid_${selectedNode.id}_col_${nextColumnIndex}`,
             name: `column_${(tableData.columns?.length || 0) + 1}`,
             isKey: false,
         };
@@ -598,7 +515,10 @@ export const createUpdateFunctions = (
     const reorderLogicalTableAttributes = (fromIndex: number, toIndex: number) => {
         if (!selectedNode || selectedNode.type !== 'logical-table') return;
         const tableData = selectedNode.data as LogicalTableData;
-        const columns = [...(tableData.columns || [])];
+        const columns = (tableData.columns || []).map((column, index) => ({
+            ...column,
+            id: column.id ?? `lid_${selectedNode.id}_col_${index}`,
+        }));
         const [movedColumn] = columns.splice(fromIndex, 1);
         columns.splice(toIndex, 0, movedColumn);
         
@@ -785,6 +705,7 @@ export const createUpdateFunctions = (
         addRelationTableColumn,
         removeRelationTableColumn,
         updateRelationTableColumn,
+        reorderRelationTableColumns,
         addTableIndex,
         removeTableIndex,
         updateTableIndex,

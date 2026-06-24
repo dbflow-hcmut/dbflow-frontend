@@ -157,23 +157,23 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
     };
 
     return (
-        <div className="px-10 py-10 max-w-7xl mx-auto">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Projects</h2>
+        <div className="px-4 py-6 sm:px-6 lg:px-10 lg:py-10 max-w-7xl mx-auto">
+            <h2 className="text-2xl font-bold text-gray-900 mb-5 sm:mb-6">Projects</h2>
 
-            <div className="flex items-center justify-between gap-4 mb-6">
-                <div className="flex items-center gap-2">
+            <div className="flex flex-col gap-3 mb-6 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
+                <div className="min-w-0 flex-1">
                     <Input
                         placeholder="Search for a project"
                         prefix={<Search className="w-4 h-4 text-gray-400" />}
                         value={searchValue}
                         onChange={(e) => setSearchValue(e.target.value)}
-                        className="flex-1 max-w-md"
+                        className="w-full lg:max-w-md"
                         allowClear
                     />
                 </div>
 
-                <div className="flex items-center gap-2">
-                    <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden">
+                <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex shrink-0 items-center border border-gray-200 rounded-lg overflow-hidden">
                         <button
                             onClick={() => setViewMode("grid")}
                             className={`p-2 cursor-pointer ${viewMode === "grid"
@@ -237,9 +237,10 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                     >
                         <Button
                             icon={<Database className="w-4 h-4" />}
-                            className="flex items-center gap-1"
+                            className="flex min-w-0 cursor-pointer items-center gap-1"
                         >
-                            Connect to Database
+                            <span className="hidden sm:inline">Connect to Database</span>
+                            <span className="sm:hidden">Connect</span>
                             <ChevronDown className="w-3 h-3" />
                         </Button>
                     </Dropdown>
@@ -248,8 +249,10 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                         type="primary"
                         icon={<Plus className="w-4 h-4" />}
                         onClick={() => router.push("/projects/new")}
+                        className="cursor-pointer"
                     >
-                        New project
+                        <span className="hidden sm:inline">New project</span>
+                        <span className="sm:hidden">New</span>
                     </Button>
                 </div>
             </div>
@@ -494,4 +497,3 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
         </div>
     );
 }
-

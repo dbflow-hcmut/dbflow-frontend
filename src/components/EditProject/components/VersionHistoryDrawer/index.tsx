@@ -21,6 +21,7 @@ import {
     mapReactEdgesToStoredEdges as mapLogicalEdgesReactToStored,
     mapStoredNodesToReactNodes as mapLogicalStoredToReact,
     mapStoredEdgesToReactEdges as mapLogicalEdgesStoredToReact,
+    applyFkDecorationsToStoredNodes as applyLogicalFkDecorationsToStoredNodes,
 } from "../../utils/logical-diagram.builder";
 import type { StoredLogicalNode, StoredLogicalDiagramEdge } from "../../utils/logical-diagram.builder";
 import {
@@ -377,8 +378,11 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
         let sNodes: unknown[];
         let sEdges: unknown[];
         if (isLogical) {
-            sNodes = mapLogicalReactToStored(effectiveLiveNodes);
             sEdges = mapLogicalEdgesReactToStored(effectiveLiveEdges, effectiveLiveNodes);
+            sNodes = applyLogicalFkDecorationsToStoredNodes(
+                mapLogicalReactToStored(effectiveLiveNodes),
+                sEdges as StoredLogicalDiagramEdge[],
+            );
         } else if (isPhysical) {
             sNodes = mapPhysicalReactToStored(effectiveLiveNodes);
             sEdges = mapPhysicalEdgesReactToStored(effectiveLiveEdges, effectiveLiveNodes);
@@ -387,7 +391,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
             sEdges = mapConceptualEdgesReactToStored(effectiveLiveEdges, effectiveLiveNodes);
         }
         const model = isPhysical
-            ? buildPhysicalModel({ storedNodes: sNodes as StoredPhysicalNode[], storedEdges: sEdges as StoredPhysicalDiagramEdge[], schemaId: schemaId ?? undefined, schemaName, diagramName })
+            ? buildPhysicalModel({ storedNodes: sNodes as StoredPhysicalNode[], storedEdges: sEdges as StoredPhysicalDiagramEdge[], runtimeNodes: effectiveLiveNodes, schemaId: schemaId ?? undefined, schemaName, diagramName })
             : null;
         return { currentModel: model, currentStoredNodes: sNodes, currentStoredEdges: sEdges };
     }, [effectiveLiveNodes, effectiveLiveEdges, schemaId, schemaName, diagramName, isPhysical, isLogical]);

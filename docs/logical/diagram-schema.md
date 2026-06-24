@@ -1,7 +1,7 @@
 ## diagram
 
-* `id*`: Định danh sơ đồ (prefix `lid_`).
-* `name*`: Tên sơ đồ.
+* `id`: Định danh sơ đồ.
+* `name`: Tên sơ đồ.
 * `viewport`: Thông tin hiển thị toàn cảnh sơ đồ.
   * `x`, `y`: Tọa độ gốc (offset).
   * `zoom`: Mức phóng to/thu nhỏ (0.1 → 5.0).
@@ -14,7 +14,7 @@
 
 ## node
 
-* `id*`: Định danh node (prefix `lid_`).
+* `id*`: Định danh node (prefix `cid_`).
 * `type*`: `"table"`, `"note"`, `"sticky-note"`, `"text-label"`, `"drawing-path"`.
 * `position*`: Tọa độ trên canvas (`x`, `y`).
 * `size*`: Kích thước (`w`, `h`; minimum 20×20).
@@ -24,15 +24,14 @@
 
 ### table node (type = "table")
 
-* `tableId*`: Tham chiếu `table.id` trong model.json (prefix `lid_`).
+* `tableId*`: Tham chiếu `table.id` trong model.json (prefix `cid_`).
 * `columns`: Thứ tự và trang trí cột hiển thị.
   * `columnId*`: Tham chiếu `column.id` trong model.json (prefix `lid_`).
   * `label`: Tên hiển thị nếu khác tên gốc.
   * `decorations`: Style cột.
     * `pk`: Cột PK (gạch chân).
+    * `ck`: Cột candidate key.
     * `fk`: Cột FK (đánh dấu).
-    * `underline`: Ép hiển thị gạch chân.
-    * `italic`: Hiển thị in nghiêng.
 
 ### note node (type = "note")
 
@@ -42,7 +41,7 @@
 
 ## edge
 
-* `id*`: Định danh cạnh (prefix `lid_`).
+* `id*`: Định danh cạnh (prefix `cid_`).
 * `type*`: `"fk"` hoặc `"noteLink"`.
 * `source*`: ID column nguồn (prefix `lid_`).
 * `target*`: ID column đích (prefix `lid_`).
@@ -51,10 +50,8 @@
 * `points`: Polyline — danh sách điểm (`x`, `y`) vẽ đường uốn lượn.
 * `style`: Style đường (`stroke`, `fill`, `class`).
 * `fkRef`: Tham chiếu FK cụ thể trong model.json (bắt buộc nếu type = `fk`).
-  * `tableId`: ID bảng chứa FK (prefix `lid_`).
+  * `tableId`: ID bảng chứa FK (prefix `cid_`).
   * `foreignKeyIndex`: Chỉ số trong mảng FK (≥ 0).
 * `labels`: Text hiển thị trên cạnh.
   * `text`: Nội dung.
   * `position`: Tọa độ đặt label (`x`, `y`).
-* `sourceCardinality`: Cardinality phía nguồn (`"1"` / `"N"`).
-* `targetCardinality`: Cardinality phía đích (`"1"` / `"N"`).

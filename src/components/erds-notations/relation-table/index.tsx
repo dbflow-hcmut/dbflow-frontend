@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { NodeResizer, Position, useNodeId, useStore, useReactFlow } from "reactflow";
+import { NodeResizer, Position, useNodeId, useStore, useReactFlow, useUpdateNodeInternals } from "reactflow";
+import type { OnResize, OnResizeEnd } from "@reactflow/node-resizer";
 import classNames from "classnames";
 import {
     DatabaseSchemaNode,
@@ -69,6 +70,7 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
     const [isEditingName, setIsEditingName] = useState(false);
     const [localName, setLocalName] = useState(data.name);
     const { setNodes } = useReactFlow();
+    const updateNodeInternals = useUpdateNodeInternals();
     const nameRef = useRef<HTMLDivElement | null>(null);
     const contentRef = useRef<HTMLDivElement | null>(null);
     
@@ -92,6 +94,18 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
     
     const [nodeWidth, setNodeWidth] = useState(() => getInitialWidth());
     const [minWidth, setMinWidth] = useState(200);
+
+    useEffect(() => {
+        if (typeof node?.style?.width !== 'number') return;
+        setNodeWidth(node.style.width);
+    }, [node?.style?.width]);
+
+    const handleResize: OnResize = (_, params) => {
+        setNodeWidth(params.width);
+    };
+    const handleResizeEnd: OnResizeEnd = (_, params) => {
+        setNodeWidth(params.width);
+    };
 
     // Use ResizeObserver to auto-measure actual rendered height and sync to node
     useEffect(() => {
@@ -177,9 +191,7 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
             // Add padding for safety
             const calculatedMinWidth = Math.max(200, maxWidth + 20);
             setMinWidth(calculatedMinWidth);
-            
-            // Always update width to fit content
-            setNodeWidth(calculatedMinWidth);
+            setNodeWidth((currentWidth) => Math.max(currentWidth, calculatedMinWidth));
         };
         
         // Wait for DOM to be ready
@@ -195,6 +207,12 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
             setLocalName(data.name);
         }
     }, [data.name, isEditingName]);
+
+    useEffect(() => {
+        if (!nodeId) return;
+        const rafId = requestAnimationFrame(() => updateNodeInternals(nodeId));
+        return () => cancelAnimationFrame(rafId);
+    }, [data.columns, nodeId, updateNodeInternals]);
 
     const commitName = (rawText: string) => {
         const trimmed = rawText.trim();
@@ -237,7 +255,9 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
                     : n
             )
         );
-    }, [measuredHeight, nodeWidth, nodeId, setNodes]);
+        const rafId = requestAnimationFrame(() => updateNodeInternals(nodeId));
+        return () => cancelAnimationFrame(rafId);
+    }, [measuredHeight, nodeWidth, nodeId, setNodes, updateNodeInternals]);
 
     return (
         <div
@@ -250,6 +270,8 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
                 isVisible={isSelected}
                 minWidth={minWidth}
                 minHeight={minHeight}
+                onResize={handleResize}
+                onResizeEnd={handleResizeEnd}
             />
 
             <DatabaseSchemaNode className="w-full">
@@ -311,7 +333,7 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
                                         title={col.name}
                                         type="target"
                                         position={Position.Left}
-                                        isConnectable={!isSelected}
+                                        isConnectable={true}
                                         labelClassName="p-0 w-full pl-3 text-left"
                                         showOnHover={true}
                                         isHovered={isHovered}
@@ -341,7 +363,7 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
                                         title={typeDisplay}
                                         type="source"
                                         position={Position.Right}
-                                        isConnectable={!isSelected}
+                                        isConnectable={true}
                                         className="p-0"
                                         handleClassName="p-0"
                                         labelClassName="p-0 w-full pr-3 text-right"
@@ -388,5 +410,3 @@ const RelationTableNode: React.FC<{ data: RelationTableData }> = ({ data }) => {
 };
 
 export default memo(RelationTableNode);
-
-

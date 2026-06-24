@@ -6,9 +6,6 @@ export const API_LOGIN = `${API_BASE}/auth/login`;
 
 export const PROXY_BASE = `${FE_BASE}/api/proxy`;
 
-/** Dedicated multipart upload proxy → backend uploads to S3, returns { key, url } */
-export const FE_UPLOAD_ATTACHMENT = `${FE_BASE}/api/upload-attachment`;
-
 export const PROXY_USERS = `${PROXY_BASE}/users`;
 export const PROXY_USERS_ME = `${PROXY_USERS}/me`;
 export const PROXY_USERS_PROFILE = `${PROXY_USERS}/profile`;
@@ -18,9 +15,14 @@ export const PROXY_PROJECTS = `${PROXY_BASE}/projects`;
 export const PROXY_PROJECT_DETAIL = (id: string) => `${PROXY_PROJECTS}/${id}`;
 export const PROXY_DELETE_PROJECT = (id: string) => `${PROXY_PROJECTS}/${id}`;
 export const PROXY_PROJECT_SCHEMAS = (id: string) => `${PROXY_PROJECT_DETAIL(id)}/schemas`;
+export const PROXY_PROJECT_DOCUMENTS = (id: string) => `${PROXY_PROJECT_DETAIL(id)}/documents`;
+export const PROXY_PROJECT_DOCUMENT_PRESIGNED_UPLOAD = (id: string) => `${PROXY_PROJECT_DOCUMENTS(id)}/presigned-upload`;
+export const PROXY_PROJECT_DOCUMENT_DETAIL = (projectId: string, documentId: string) => `${PROXY_PROJECT_DOCUMENTS(projectId)}/${documentId}`;
+export const PROXY_PROJECT_DOCUMENT_DOWNLOAD_URL = (projectId: string, documentId: string) => `${PROXY_PROJECT_DOCUMENT_DETAIL(projectId, documentId)}/download-url`;
 export const PROXY_DELETE_SCHEMA = (projectId: string, schemaId: string) => `${PROXY_PROJECT_DETAIL(projectId)}/schemas/${schemaId}`;
 export const PROXY_UPDATE_SCHEMA = (projectId: string, schemaId: string) => `${PROXY_PROJECT_DETAIL(projectId)}/schemas/${schemaId}`;
 export const PROXY_SCHEMA_DIAGRAM = (schemaId: string) => `${PROXY_BASE}/schemas/${schemaId}/diagram`;
+export const PROXY_S3_AI_ATTACHMENT_PRESIGNED_UPLOAD = `${PROXY_BASE}/s3/presigned-ai-attachment`;
 
 // LangGraph API endpoints
 export const LANGGRAPH_THREADS = `${LANGGRAPH_API_BASE}/threads`;

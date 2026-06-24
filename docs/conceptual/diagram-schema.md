@@ -72,8 +72,8 @@
   * `categoryLink`: categoryEntity → unionCircle.
   * `categoryMember`: unionCircle → superclass entity.
 * `relationshipId`: Tham chiếu model.relationships (bắt buộc nếu type = `participation` hoặc `identifying`).
-* `generalizationId`: Tham chiếu model.generalizations (bắt buộc nếu type = `isaParent` / `isaChild`).
-* `categoryId`: Tham chiếu model.categories (bắt buộc nếu type = `categoryLink` / `categoryMember`).
+* `generalizationId`: Tham chiếu model.generalizations (bắt buộc nếu type = `isaParent` / `isaChild`). Với d/o circle, edge không có bracket là parent, edge có bracket là child.
+* `categoryId`: Tham chiếu model.categories (bắt buộc nếu type = `categoryLink` / `categoryMember`). Với u circle, edge không có bracket là superclass, edge có bracket là category entity.
 * `from*`: Đầu mút nguồn.
   * `nodeId*`: ID node nguồn (prefix `cid_`).
   * `portId`: Cổng kết nối (`top`, `bottom`, `left`, `right`).

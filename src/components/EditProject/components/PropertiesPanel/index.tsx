@@ -31,6 +31,7 @@ type PropertiesPanelProps = {
         columnIndex: number,
         updates: Partial<RelationColumn>
     ) => void;
+    onReorderRelationTableColumns?: (fromIndex: number, toIndex: number) => void;
     onAddTableIndex?: () => void;
     onRemoveTableIndex?: (indexId: string) => void;
     onUpdateTableIndex?: (indexId: string, updates: Partial<TableIndex>) => void;
@@ -43,8 +44,6 @@ type PropertiesPanelProps = {
         updates: Partial<{ name: string; isKey: boolean; isCandidateKey: boolean }>
     ) => void;
     onReorderLogicalTableAttributes?: (fromIndex: number, toIndex: number) => void;
-    onUpdateLogicalEdgeCardinality?: (side: 'source' | 'target', value: '1' | 'N') => void;
-    onUpdatePhysicalEdgeCardinality?: (side: 'source' | 'target', value: '1' | 'N') => void;
     // Functional dependency callbacks (logical)
     onAddLogicalFD?: () => void;
     onRemoveLogicalFD?: (fdId: string) => void;
@@ -77,6 +76,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     onAddRelationTableColumn,
     onRemoveRelationTableColumn,
     onUpdateRelationTableColumn,
+    onReorderRelationTableColumns,
     onAddTableIndex,
     onRemoveTableIndex,
     onUpdateTableIndex,
@@ -86,8 +86,6 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     onRemoveLogicalTableAttribute,
     onUpdateLogicalTableAttribute,
     onReorderLogicalTableAttributes,
-    onUpdateLogicalEdgeCardinality,
-    onUpdatePhysicalEdgeCardinality,
     onAddLogicalFD,
     onRemoveLogicalFD,
     onUpdateLogicalFD,
@@ -97,6 +95,18 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     onUpdatePhysicalFD,
     onTogglePhysicalFDDisplay,
 }) => {
+    const getNodeType = (nodeId?: string) => nodes.find((node) => node.id === nodeId)?.type;
+    const selectedEdgeSourceType = getNodeType(selectedEdge?.source);
+    const selectedEdgeTargetType = getNodeType(selectedEdge?.target);
+    const selectedEdgeHasConstraint =
+        selectedEdgeSourceType === "constraint" || selectedEdgeTargetType === "constraint";
+    const selectedEdgeIsRelationshipEntity =
+        (selectedEdgeSourceType === "relationship" && selectedEdgeTargetType === "entity") ||
+        (selectedEdgeSourceType === "entity" && selectedEdgeTargetType === "relationship");
+    const selectedEdgeCanUseBracket = selectedEdgeHasConstraint || selectedEdgeIsRelationshipEntity;
+    const selectedEdgeCanChooseBracketDirection =
+        selectedEdge?.data?.lineStyle === "bracket" && selectedEdgeIsRelationshipEntity;
+
     const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
     const connectedEnds = useMemo(() => {
         if (!selectedNode || selectedNode.type !== 'relationship') return [];
@@ -318,13 +328,24 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                             {((selectedNode.data as LogicalTableData).functionalDependencies ?? []).map((fd) => {
                                                 const colOptions = ((selectedNode.data as LogicalTableData).columns ?? []).map(c => ({
                                                     label: c.name,
-                                                    value: c.name,
+                                                    value: c.id ?? c.name,
                                                 }));
+                                                const colLabelByRef = new Map(
+                                                    ((selectedNode.data as LogicalTableData).columns ?? []).flatMap(c => {
+                                                        const refs: Array<[string, string]> = [[c.name, c.name]];
+                                                        if (c.id) refs.push([c.id, c.name]);
+                                                        return refs;
+                                                    }),
+                                                );
+                                                const formatRefs = (refs: string[]) =>
+                                                    refs.length > 0
+                                                        ? refs.map(ref => colLabelByRef.get(ref) ?? ref).join(', ')
+                                                        : '?';
                                                 return (
                                                     <div key={fd.id} className="border border-gray-200 rounded p-2">
                                                         <div className="flex items-center justify-between mb-1.5">
                                                             <span className="text-xs font-medium text-gray-500">
-                                                                {fd.left.length > 0 ? fd.left.join(', ') : '?'}{' → '}{fd.right.length > 0 ? fd.right.join(', ') : '?'}
+                                                                {formatRefs(fd.left)}{' → '}{formatRefs(fd.right)}
                                                             </span>
                                                             {onRemoveLogicalFD && (
                                                                 <Button
@@ -408,8 +429,32 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                                 const typeOptions = dataTypeOptions ?? GENERIC_DATA_TYPES;
                                                 const selectedTypeConfig = typeOptions.find(t => t.value === col.type);
                                                 return (
-                                                <div key={idx} className="border border-gray-200 rounded p-2 space-y-2">
+                                                <div
+                                                    key={idx}
+                                                    className="border border-gray-200 rounded p-2 space-y-2 cursor-move hover:border-blue-300 transition-colors"
+                                                    draggable
+                                                    onDragStart={(e) => {
+                                                        setDraggedIndex(idx);
+                                                        e.dataTransfer.effectAllowed = 'move';
+                                                    }}
+                                                    onDragOver={(e) => {
+                                                        e.preventDefault();
+                                                        e.dataTransfer.dropEffect = 'move';
+                                                    }}
+                                                    onDrop={(e) => {
+                                                        e.preventDefault();
+                                                        if (draggedIndex !== null && draggedIndex !== idx) {
+                                                            onReorderRelationTableColumns?.(draggedIndex, idx);
+                                                        }
+                                                        setDraggedIndex(null);
+                                                    }}
+                                                    onDragEnd={() => setDraggedIndex(null)}
+                                                    style={{
+                                                        opacity: draggedIndex === idx ? 0.5 : 1,
+                                                    }}
+                                                >
                                                     <div className="flex items-center gap-2">
+                                                        <GripVertical size={16} className="text-gray-400 flex-shrink-0" />
                                                         <Input
                                                             value={col.name}
                                                             onChange={(e) =>
@@ -783,35 +828,12 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                 const srcCol = srcData?.columns?.[srcColIdx];
                                 const tgtCol = tgtData?.columns?.[tgtColIdx];
 
-                                const srcCard: string = (selectedEdge.data as Record<string, unknown>)?.sourceCardinality as string || 'N';
-                                const tgtCard: string = (selectedEdge.data as Record<string, unknown>)?.targetCardinality as string || '1';
-
                                 return (
                                     <div className="flex flex-col gap-4">
-                                        {/* Cardinality selector */}
-                                        <div>
-                                            <label className="block text-sm font-medium mb-2">Cardinality</label>
-                                            <Select
-                                                value={`${srcCard}:${tgtCard}`}
-                                                onChange={(val: string) => {
-                                                    const [s, t] = val.split(':') as ['1' | 'N', '1' | 'N'];
-                                                    onUpdateLogicalEdgeCardinality?.('source', s);
-                                                    setTimeout(() => onUpdateLogicalEdgeCardinality?.('target', t), 0);
-                                                }}
-                                                className="w-full"
-                                                options={[
-                                                    { label: 'N : 1 (Many-to-One)', value: 'N:1' },
-                                                    { label: '1 : 1 (One-to-One)', value: '1:1' },
-                                                    { label: '1 : N (One-to-Many)', value: '1:N' },
-                                                    { label: 'N : N (Many-to-Many)', value: 'N:N' },
-                                                ]}
-                                            />
-                                        </div>
-
                                         {/* Source side */}
                                         <div className="border border-gray-200 rounded-lg p-3">
                                             <div className="text-xs font-semibold mb-2 text-gray-500">
-                                                {srcCard} — Source
+                                                FK Column
                                             </div>
                                             <div className="space-y-1">
                                                 <div className="flex items-center justify-between">
@@ -835,7 +857,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                         {/* Target side */}
                                         <div className="border border-gray-200 rounded-lg p-3">
                                             <div className="text-xs font-semibold mb-2 text-gray-500">
-                                                {tgtCard} — Target
+                                                Referenced Column
                                             </div>
                                             <div className="space-y-1">
                                                 <div className="flex items-center justify-between">
@@ -866,8 +888,6 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                 const srcColName = selectedEdge.sourceHandle || '';
                                 const tgtColName = selectedEdge.targetHandle || '';
 
-                                const srcCard: string = (selectedEdge.data as Record<string, unknown>)?.sourceCardinality as string || 'N';
-                                const tgtCard: string = (selectedEdge.data as Record<string, unknown>)?.targetCardinality as string || '1';
                                 const edgeOnDelete: FKAction = (selectedEdge.data as Record<string, unknown>)?.onDelete as FKAction || 'NO ACTION';
                                 const edgeOnUpdate: FKAction = (selectedEdge.data as Record<string, unknown>)?.onUpdate as FKAction || 'NO ACTION';
 
@@ -881,26 +901,6 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
                                 return (
                                     <div className="flex flex-col gap-4">
-                                        {/* Cardinality selector */}
-                                        <div>
-                                            <label className="block text-sm font-medium mb-2">Cardinality</label>
-                                            <Select
-                                                value={`${srcCard}:${tgtCard}`}
-                                                onChange={(val: string) => {
-                                                    const [s, t] = val.split(':') as ['1' | 'N', '1' | 'N'];
-                                                    onUpdatePhysicalEdgeCardinality?.('source', s);
-                                                    setTimeout(() => onUpdatePhysicalEdgeCardinality?.('target', t), 0);
-                                                }}
-                                                className="w-full"
-                                                options={[
-                                                    { label: 'N : 1 (Many-to-One)', value: 'N:1' },
-                                                    { label: '1 : 1 (One-to-One)', value: '1:1' },
-                                                    { label: '1 : N (One-to-Many)', value: '1:N' },
-                                                    { label: 'N : N (Many-to-Many)', value: 'N:N' },
-                                                ]}
-                                            />
-                                        </div>
-
                                         {/* Source side */}
                                         {/* <div className="border border-gray-200 rounded-lg p-3">
                                             <div className="text-xs font-semibold mb-2 text-gray-500">
@@ -979,11 +979,13 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                         options={[
                                             { label: 'Single line', value: 'single' },
                                             { label: 'Double line', value: 'double' },
-                                            { label: 'Identifying', value: 'bracket' },
+                                            ...(selectedEdgeCanUseBracket
+                                                ? [{ label: 'Identifying', value: 'bracket' as const }]
+                                                : []),
                                         ]}
                                     />
                                 </div>
-                                {selectedEdge.data?.lineStyle === 'bracket' && (
+                                {selectedEdgeCanChooseBracketDirection && (
                                     <div>
                                         <label className="block text-sm font-medium mb-2">Identifying Direction</label>
                                         <Select
@@ -1022,4 +1024,3 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 };
 
 export default PropertiesPanel;
-

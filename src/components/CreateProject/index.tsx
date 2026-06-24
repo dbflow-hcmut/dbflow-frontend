@@ -1,17 +1,21 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { Form, Input, Button } from "antd";
+import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Menu } from "lucide-react";
+import Sidebar from "@/components/Sidebar";
 import { revalidateProjects } from "@/app/projects/actions";
 import { notificationProvider } from "@/providers/notification";
 import { CreateProjectFormValues } from "@/types/projects.type";
-import Header from "@/components/Header";
 import { useCreateProject } from "./api/client";
 
 export default function CreateProject() {
     const router = useRouter();
     const [form] = Form.useForm();
+    const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
     const { create, isLoading } = useCreateProject();
     
     const projectName = Form.useWatch("name", form);
@@ -46,8 +50,27 @@ export default function CreateProject() {
     };
 
     return (
-        <div className="flex flex-col h-screen">
-            <Header />        
+        <div className="flex min-h-screen flex-col bg-[#FCFCFC]">
+            <header className="flex h-14 items-center gap-3 bg-white px-4">
+                <button
+                    type="button"
+                    aria-label="Open sidebar"
+                    className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-gray-700 hover:bg-gray-100 lg:hidden"
+                    onClick={() => setIsMobileSidebarOpen(true)}
+                >
+                    <Menu className="h-5 w-5" />
+                </button>
+                <Link href="/ai-chat" prefetch className="flex cursor-pointer items-center gap-2">
+                    <Image src="/favicon.ico" alt="DB Flow" width={24} height={24} priority />
+                    <span className="text-lg font-bold text-gray-900">DB Flow</span>
+                </Link>
+            </header>
+            <Sidebar
+                mobile
+                mobileOpen={isMobileSidebarOpen}
+                onMobileClose={() => setIsMobileSidebarOpen(false)}
+            />
+
             <div className="flex-1 pt-2 sm:pt-6 md:pt-10 justify-center items-center overflow-auto mx-auto w-full px-3 sm:px-6">
                 <div className="max-w-2xl mx-auto border border-gray-200 rounded-lg shadow-md w-full">
                     <div className="p-3 sm:p-6 pb-3 sm:pb-4">
@@ -136,4 +159,3 @@ export default function CreateProject() {
         </div>
     );
 }
-

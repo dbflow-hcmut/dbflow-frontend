@@ -21,6 +21,7 @@ import ReactFlow, {
     getViewportForBounds,
 } from "reactflow";
 import { toPng, toSvg } from 'html-to-image';
+import { Modal } from "antd";
 import { notificationProvider } from "@/providers/notification";
 import { apiGet } from "@/lib/clientFetch";
 import { PROXY_PROJECT_DETAIL } from "@/api";
@@ -29,7 +30,7 @@ import RelationshipNode from "@/components/erds-notations/relationship";
 import AttributeNode from "@/components/erds-notations/attribute";
 import EntityNode from "@/components/erds-notations/entity";
 import ConstraintNode from "@/components/erds-notations/constraint";
-import RelationTableNode, { type RelationTableData } from "@/components/erds-notations/relation-table";
+import RelationTableNode, { type RelationColumn, type RelationTableData } from "@/components/erds-notations/relation-table";
 import LogicalTableNode, { type LogicalTableData } from "@/components/erds-notations/logical-table";
 import StickyNoteNode, { type StickyNoteData } from "@/components/erds-notations/sticky-note";
 import TextLabelNode, { type TextLabelData } from "@/components/erds-notations/text-label";
@@ -367,8 +368,10 @@ const EditProject = (props: IPropsEditProject) => {
     useEffect(() => {
         const openChat = searchParams.get("openChat");
         const chatThread = searchParams.get("chatThread");
-        if (openChat === "true") {
-            setIsChatBoxOpen(true);
+        if (openChat === "true" && userPermission !== null) {
+            if (canEdit) {
+                setIsChatBoxOpen(true);
+            }
             if (chatThread) {
                 setChatThreadId(chatThread);
             }
@@ -380,7 +383,7 @@ const EditProject = (props: IPropsEditProject) => {
                 router.replace(`/projects/${projectData.id}?${params.toString()}`, { scroll: false });
             }
         }
-    }, [searchParams, projectData?.id, router]);
+    }, [searchParams, projectData?.id, router, userPermission, canEdit]);
 
     const updateUrlWithSchemaId = useCallback((schemaId: string) => {
         if (!projectData?.id) return;
@@ -675,6 +678,7 @@ const EditProject = (props: IPropsEditProject) => {
         addRelationTableColumn,
         removeRelationTableColumn,
         updateRelationTableColumn,
+        reorderRelationTableColumns,
         addTableIndex,
         removeTableIndex,
         updateTableIndex,
@@ -694,6 +698,253 @@ const EditProject = (props: IPropsEditProject) => {
         () => createUpdateFunctions(setNodes, selectedNode),
         [setNodes, selectedNode]
     );
+
+    const reorderLogicalTableAttributesWithEdgeRemap = useCallback((fromIndex: number, toIndex: number) => {
+        if (!selectedNode || selectedNode.type !== 'logical-table' || fromIndex === toIndex) {
+            reorderLogicalTableAttributes(fromIndex, toIndex);
+            return;
+        }
+
+        const tableData = selectedNode.data as LogicalTableData;
+        const columnCount = tableData.columns?.length ?? 0;
+        if (
+            fromIndex < 0 ||
+            toIndex < 0 ||
+            fromIndex >= columnCount ||
+            toIndex >= columnCount
+        ) {
+            return;
+        }
+
+        reorderLogicalTableAttributes(fromIndex, toIndex);
+    }, [reorderLogicalTableAttributes, selectedNode]);
+
+    const isLogicalColumnConnectedToRelationship = useCallback((tableId: string, columnIndex: number) => {
+        const tableData = nodes.find((node) => node.id === tableId && node.type === 'logical-table')?.data as LogicalTableData | undefined;
+        const columnId = tableData?.columns?.[columnIndex]?.id ?? `lid_${tableId}_col_${columnIndex}`;
+        const columnHandlePrefix = `${columnId}-`;
+        return edges.some((edge) =>
+            edge.type === 'logical-table-edge' &&
+            (
+                (edge.source === tableId && edge.sourceHandle?.startsWith(columnHandlePrefix)) ||
+                (edge.target === tableId && edge.targetHandle?.startsWith(columnHandlePrefix))
+            )
+        );
+    }, [edges, nodes]);
+
+    const isPhysicalColumnConnectedToRelationship = useCallback((tableId: string, columnName: string) => {
+        return edges.some((edge) =>
+            edge.type === 'relation-table-edge' &&
+            (
+                (edge.source === tableId && edge.sourceHandle === columnName) ||
+                (edge.target === tableId && edge.targetHandle === columnName)
+            )
+        );
+    }, [edges]);
+
+    const getLogicalReferencedEdgeIds = useCallback((tableId: string, columnIndex: number) => {
+        const tableData = nodes.find((node) => node.id === tableId && node.type === 'logical-table')?.data as LogicalTableData | undefined;
+        const columnId = tableData?.columns?.[columnIndex]?.id ?? `lid_${tableId}_col_${columnIndex}`;
+        const columnHandlePrefix = `${columnId}-`;
+        return edges
+            .filter((edge) =>
+                edge.type === 'logical-table-edge' &&
+                edge.target === tableId &&
+                edge.targetHandle?.startsWith(columnHandlePrefix)
+            )
+            .map((edge) => edge.id);
+    }, [edges, nodes]);
+
+    const getPhysicalReferencedEdgeIds = useCallback((tableId: string, columnName: string) => {
+        return edges
+            .filter((edge) =>
+                edge.type === 'relation-table-edge' &&
+                edge.target === tableId &&
+                edge.targetHandle === columnName
+            )
+            .map((edge) => edge.id);
+    }, [edges]);
+
+    const refreshLogicalEdgeCardinalities = useCallback((
+        tableId: string,
+        columnIndex: number,
+        updates: Partial<{ name: string; isKey: boolean; isCandidateKey: boolean }>,
+        removeEdgeIds: string[] = [],
+    ) => {
+        const removeEdgeIdSet = new Set(removeEdgeIds);
+
+        setEdges((existingEdges) =>
+            existingEdges
+                .filter((edge) => !removeEdgeIdSet.has(edge.id))
+                .map((edge) => {
+                    if (edge.type !== 'logical-table-edge') return edge;
+
+                    const parseColumnIndex = (handle?: string | null) => {
+                        const match = handle?.match(/_col_(\d+)/);
+                        return match ? parseInt(match[1], 10) : -1;
+                    };
+
+                    const getColumnIsKey = (edgeTableId: string, edgeColumnIndex: number, edgeHandle?: string | null) => {
+                        if (edgeTableId === tableId && edgeColumnIndex === columnIndex) {
+                            const tableData = selectedNode?.type === 'logical-table'
+                                ? selectedNode.data as LogicalTableData
+                                : undefined;
+                            const column = tableData?.columns?.[columnIndex];
+                            const nextColumn = { ...column, ...updates };
+                            return Boolean(nextColumn.isKey || nextColumn.isCandidateKey);
+                        }
+
+                        const tableData = nodes.find((node) =>
+                            node.id === edgeTableId && node.type === 'logical-table'
+                        )?.data as LogicalTableData | undefined;
+                        const fallbackIndex = parseColumnIndex(edgeHandle);
+                        const column = tableData?.columns?.[edgeColumnIndex >= 0 ? edgeColumnIndex : fallbackIndex];
+                        return Boolean(column?.isKey || column?.isCandidateKey);
+                    };
+
+                    const sourceColumnIndex = parseColumnIndex(edge.sourceHandle);
+                    const targetColumnIndex = parseColumnIndex(edge.targetHandle);
+                    const sourceIsKey = getColumnIsKey(edge.source, sourceColumnIndex, edge.sourceHandle);
+                    const targetIsKey = getColumnIsKey(edge.target, targetColumnIndex, edge.targetHandle);
+
+                    return {
+                        ...edge,
+                        data: {
+                            ...edge.data,
+                            sourceCardinality: sourceIsKey && targetIsKey ? '1' : 'N',
+                            targetCardinality: '1',
+                        },
+                    };
+                })
+        );
+    }, [nodes, selectedNode, setEdges]);
+
+    const refreshPhysicalEdgeCardinalities = useCallback((
+        tableId: string,
+        columnName: string,
+        updates: Partial<RelationColumn>,
+        removeEdgeIds: string[] = [],
+    ) => {
+        const removeEdgeIdSet = new Set(removeEdgeIds);
+
+        setEdges((existingEdges) =>
+            existingEdges
+                .filter((edge) => !removeEdgeIdSet.has(edge.id))
+                .map((edge) => {
+                    if (edge.type !== 'relation-table-edge') return edge;
+
+                    const getColumnIsKey = (edgeTableId: string, edgeColumnName?: string | null) => {
+                        if (!edgeColumnName) return false;
+
+                        if (edgeTableId === tableId && edgeColumnName === columnName) {
+                            const tableData = selectedNode?.type === 'relation'
+                                ? selectedNode.data as RelationTableData
+                                : undefined;
+                            const column = tableData?.columns?.find((col) => col.name === columnName);
+                            const nextColumn = { ...column, ...updates };
+                            return Boolean(nextColumn.isPrimary || nextColumn.isCandidateKey || nextColumn.isUnique);
+                        }
+
+                        const tableData = nodes.find((node) =>
+                            node.id === edgeTableId && node.type === 'relation'
+                        )?.data as RelationTableData | undefined;
+                        const column = tableData?.columns?.find((col) => col.name === edgeColumnName);
+                        return Boolean(column?.isPrimary || column?.isCandidateKey || column?.isUnique);
+                    };
+
+                    const sourceIsKey = getColumnIsKey(edge.source, edge.sourceHandle);
+                    const targetIsKey = getColumnIsKey(edge.target, edge.targetHandle);
+
+                    return {
+                        ...edge,
+                        data: {
+                            ...edge.data,
+                            sourceCardinality: sourceIsKey && targetIsKey ? '1' : 'N',
+                            targetCardinality: '1',
+                        },
+                    };
+                })
+        );
+    }, [nodes, selectedNode, setEdges]);
+
+    const updateLogicalTableAttributeWithWarning = useCallback((
+        columnIndex: number,
+        updates: Partial<{ name: string; isKey: boolean; isCandidateKey: boolean }>
+    ) => {
+        if (!selectedNode || selectedNode.type !== 'logical-table') {
+            updateLogicalTableAttribute(columnIndex, updates);
+            return;
+        }
+
+        const tableData = selectedNode.data as LogicalTableData;
+        const column = tableData.columns?.[columnIndex];
+        const nextColumn = { ...column, ...updates };
+        const changesKeyState =
+            (updates.isKey !== undefined && updates.isKey !== Boolean(column?.isKey)) ||
+            (updates.isCandidateKey !== undefined && updates.isCandidateKey !== Boolean(column?.isCandidateKey));
+
+        if (!changesKeyState || !isLogicalColumnConnectedToRelationship(selectedNode.id, columnIndex)) {
+            updateLogicalTableAttribute(columnIndex, updates);
+            return;
+        }
+
+        const invalidReferencedEdgeIds = Boolean(nextColumn.isKey || nextColumn.isCandidateKey)
+            ? []
+            : getLogicalReferencedEdgeIds(selectedNode.id, columnIndex);
+
+        Modal.confirm({
+            title: "Column is used by a relationship",
+            content: invalidReferencedEdgeIds.length > 0
+                ? "This column is referenced by an FK relationship. Applying this change will remove invalid relationship edges."
+                : "Changing PK/CK on this column can affect an existing FK relationship. Apply this change?",
+            okText: invalidReferencedEdgeIds.length > 0 ? "Apply and remove edges" : "Apply change",
+            cancelText: "Cancel",
+            onOk: () => {
+                updateLogicalTableAttribute(columnIndex, updates);
+                refreshLogicalEdgeCardinalities(selectedNode.id, columnIndex, updates, invalidReferencedEdgeIds);
+            },
+        });
+    }, [getLogicalReferencedEdgeIds, isLogicalColumnConnectedToRelationship, refreshLogicalEdgeCardinalities, selectedNode, updateLogicalTableAttribute]);
+
+    const updateRelationTableColumnWithWarning = useCallback((
+        columnIndex: number,
+        updates: Partial<RelationColumn>
+    ) => {
+        if (!selectedNode || selectedNode.type !== 'relation') {
+            updateRelationTableColumn(columnIndex, updates);
+            return;
+        }
+
+        const tableData = selectedNode.data as RelationTableData;
+        const column = tableData.columns?.[columnIndex];
+        const nextColumn = { ...column, ...updates };
+        const changesKeyState =
+            (updates.isPrimary !== undefined && updates.isPrimary !== Boolean(column?.isPrimary)) ||
+            (updates.isCandidateKey !== undefined && updates.isCandidateKey !== Boolean(column?.isCandidateKey)) ||
+            (updates.isUnique !== undefined && updates.isUnique !== Boolean(column?.isUnique));
+
+        if (!changesKeyState || !column || !isPhysicalColumnConnectedToRelationship(selectedNode.id, column.name)) {
+            updateRelationTableColumn(columnIndex, updates);
+            return;
+        }
+
+        const invalidReferencedEdgeIds = Boolean(nextColumn.isPrimary || nextColumn.isCandidateKey || nextColumn.isUnique)
+            ? []
+            : getPhysicalReferencedEdgeIds(selectedNode.id, column.name);
+
+        Modal.confirm({
+            title: "Column is used by a relationship",
+            content: invalidReferencedEdgeIds.length > 0
+                ? "This column is referenced by an FK relationship. Applying this change will remove invalid relationship edges."
+                : "Changing PK/CK/Unique on this column can affect an existing FK relationship. Apply this change?",
+            okText: invalidReferencedEdgeIds.length > 0 ? "Apply and remove edges" : "Apply change",
+            cancelText: "Cancel",
+            onOk: () => {
+                updateRelationTableColumn(columnIndex, updates);
+                refreshPhysicalEdgeCardinalities(selectedNode.id, column.name, updates, invalidReferencedEdgeIds);
+            },
+        });
+    }, [getPhysicalReferencedEdgeIds, isPhysicalColumnConnectedToRelationship, refreshPhysicalEdgeCardinalities, selectedNode, updateRelationTableColumn]);
 
     const nodeTypes = useMemo(
         () => ({
@@ -720,11 +971,209 @@ const EditProject = (props: IPropsEditProject) => {
     );
 
     const onConnect = useCallback<OnConnect>((connection: Connection) => {
+        if (!connection.source || !connection.target) return;
+
         // Check if connection involves relation table nodes or logical table nodes
         const sourceNode = nodes.find(n => n.id === connection.source);
         const targetNode = nodes.find(n => n.id === connection.target);
         const isRelationTableEdge = sourceNode?.type === 'relation' || targetNode?.type === 'relation';
         const isLogicalTableEdge = sourceNode?.type === 'logical-table' || targetNode?.type === 'logical-table';
+
+        const parseLogicalColumnIndex = (handle?: string | null) => {
+            const match = handle?.match(/_col_(\d+)/);
+            return match ? parseInt(match[1], 10) : -1;
+        };
+
+        const resolveLogicalColumn = (node: Node<NodeData> | undefined, handle?: string | null) => {
+            if (node?.type !== 'logical-table') return null;
+            const columnIndex = parseLogicalColumnIndex(handle);
+            const tableData = node.data as LogicalTableData;
+            const column = tableData.columns?.[columnIndex];
+            if (!column) return null;
+            return {
+                node,
+                tableData,
+                column,
+                columnIndex,
+                isReferencedKey: Boolean(column.isKey || column.isCandidateKey),
+                label: `${tableData.name}.${column.name}`,
+            };
+        };
+
+        const resolvePhysicalColumn = (node: Node<NodeData> | undefined, handle?: string | null) => {
+            if (node?.type !== 'relation') return null;
+            const tableData = node.data as RelationTableData;
+            const columnName = handle?.replace("-source", "")?.replace("-target", "") ?? "";
+            const columnIndex = tableData.columns?.findIndex((column) => column.name === columnName) ?? -1;
+            const column = tableData.columns?.[columnIndex];
+            if (!column) return null;
+            return {
+                node,
+                tableData,
+                column,
+                columnIndex,
+                isReferencedKey: Boolean(column.isPrimary || column.isCandidateKey || column.isUnique),
+                label: `${tableData.name}.${column.name}`,
+            };
+        };
+
+        const makeDirectedConnection = (
+            fkSide: 'source' | 'target',
+            data?: Record<string, unknown>,
+        ) => ({
+            id: generateDiagramId(),
+            type: isLogicalTableEdge ? "logical-table-edge" : "relation-table-edge",
+            animated: false,
+            source: fkSide === 'source' ? connection.source! : connection.target!,
+            target: fkSide === 'source' ? connection.target! : connection.source!,
+            sourceHandle: fkSide === 'source' ? connection.sourceHandle : connection.targetHandle,
+            targetHandle: fkSide === 'source' ? connection.targetHandle : connection.sourceHandle,
+            data: {
+                sourceCardinality: data?.sourceCardinality ?? 'N',
+                targetCardinality: data?.targetCardinality ?? '1',
+                ...data,
+            },
+        });
+
+        const addLogicalFkEdge = (fkSide: 'source' | 'target', options?: { oneToOne?: boolean; markReferencedCandidate?: boolean }) => {
+            const referenced = fkSide === 'source'
+                ? resolveLogicalColumn(targetNode, connection.targetHandle)
+                : resolveLogicalColumn(sourceNode, connection.sourceHandle);
+
+            if (options?.markReferencedCandidate && referenced) {
+                setNodes((currentNodes) =>
+                    currentNodes.map((node) => {
+                        if (node.id !== referenced.node.id || node.type !== 'logical-table') return node;
+                        const tableData = node.data as LogicalTableData;
+                        return {
+                            ...node,
+                            data: {
+                                ...tableData,
+                                columns: tableData.columns.map((column, index) =>
+                                    index === referenced.columnIndex
+                                        ? { ...column, isCandidateKey: true }
+                                        : column
+                                ),
+                            },
+                        };
+                    })
+                );
+            }
+
+            setEdges((eds) =>
+                addEdge(
+                    makeDirectedConnection(fkSide, {
+                        sourceCardinality: options?.oneToOne ? '1' : 'N',
+                        targetCardinality: '1',
+                    }),
+                    eds
+                )
+            );
+        };
+
+        const addPhysicalFkEdge = (fkSide: 'source' | 'target', options?: { oneToOne?: boolean; markReferencedUnique?: boolean }) => {
+            const referenced = fkSide === 'source'
+                ? resolvePhysicalColumn(targetNode, connection.targetHandle)
+                : resolvePhysicalColumn(sourceNode, connection.sourceHandle);
+
+            if (options?.markReferencedUnique && referenced) {
+                setNodes((currentNodes) =>
+                    currentNodes.map((node) => {
+                        if (node.id !== referenced.node.id || node.type !== 'relation') return node;
+                        const tableData = node.data as RelationTableData;
+                        return {
+                            ...node,
+                            data: {
+                                ...tableData,
+                                columns: tableData.columns.map((column, index) =>
+                                    index === referenced.columnIndex
+                                        ? { ...column, isUnique: true }
+                                        : column
+                                ),
+                            },
+                        };
+                    })
+                );
+            }
+
+            setEdges((eds) =>
+                addEdge(
+                    makeDirectedConnection(fkSide, {
+                        sourceCardinality: options?.oneToOne ? '1' : 'N',
+                        targetCardinality: '1',
+                    }),
+                    eds
+                )
+            );
+        };
+
+        if (isLogicalTableEdge && sourceNode?.type === 'logical-table' && targetNode?.type === 'logical-table') {
+            const sourceColumn = resolveLogicalColumn(sourceNode, connection.sourceHandle);
+            const targetColumn = resolveLogicalColumn(targetNode, connection.targetHandle);
+            if (!sourceColumn || !targetColumn) return;
+
+            if (sourceColumn.isReferencedKey && !targetColumn.isReferencedKey) {
+                addLogicalFkEdge('target');
+                return;
+            }
+            if (!sourceColumn.isReferencedKey && targetColumn.isReferencedKey) {
+                addLogicalFkEdge('source');
+                return;
+            }
+            if (sourceColumn.isReferencedKey && targetColumn.isReferencedKey) {
+                addLogicalFkEdge('target', { oneToOne: true });
+                return;
+            }
+
+            Modal.confirm({
+                title: "Choose foreign key direction",
+                content: `Both columns are normal. Pick the column that becomes FK. The referenced column will be marked as CK.`,
+                okText: `${sourceColumn.label} is FK`,
+                cancelText: `${targetColumn.label} is FK`,
+                closable: false,
+                maskClosable: false,
+                keyboard: false,
+                onOk: () => addLogicalFkEdge('source', { markReferencedCandidate: true }),
+                onCancel: () => addLogicalFkEdge('target', { markReferencedCandidate: true }),
+            });
+            return;
+        }
+
+        if (isRelationTableEdge && sourceNode?.type === 'relation' && targetNode?.type === 'relation') {
+            const sourceColumn = resolvePhysicalColumn(sourceNode, connection.sourceHandle);
+            const targetColumn = resolvePhysicalColumn(targetNode, connection.targetHandle);
+            if (!sourceColumn || !targetColumn) return;
+
+            if (sourceColumn.isReferencedKey && !targetColumn.isReferencedKey) {
+                addPhysicalFkEdge('target');
+                return;
+            }
+            if (!sourceColumn.isReferencedKey && targetColumn.isReferencedKey) {
+                addPhysicalFkEdge('source');
+                return;
+            }
+            if (sourceColumn.isReferencedKey && targetColumn.isReferencedKey) {
+                addPhysicalFkEdge('target', { oneToOne: true });
+                return;
+            }
+
+            Modal.confirm({
+                title: "Choose foreign key direction",
+                content: `Both columns are normal. Pick the column that becomes FK. The referenced column will be marked as Unique.`,
+                okText: `${sourceColumn.label} is FK`,
+                cancelText: `${targetColumn.label} is FK`,
+                closable: false,
+                maskClosable: false,
+                keyboard: false,
+                onOk: () => addPhysicalFkEdge('source', { markReferencedUnique: true }),
+                onCancel: () => addPhysicalFkEdge('target', { markReferencedUnique: true }),
+            });
+            return;
+        }
+
+        if (isLogicalTableEdge || isRelationTableEdge) {
+            return;
+        }
 
         let edgeType = "erd-edge";
         if (isLogicalTableEdge) {
@@ -735,7 +1184,7 @@ const EditProject = (props: IPropsEditProject) => {
 
         // Determine storedType for conceptual ER edges
         let storedType: string | undefined;
-        let edgeData: Record<string, unknown> = {};
+        const edgeData: Record<string, unknown> = {};
         if (edgeType === "erd-edge") {
             const srcType = sourceNode?.type;
             const tgtType = targetNode?.type;
@@ -752,14 +1201,9 @@ const EditProject = (props: IPropsEditProject) => {
                 const constraintNode = srcType === 'constraint' ? sourceNode : targetNode;
                 const symbol = (constraintNode?.data as { symbol?: string })?.symbol?.toLowerCase();
                 if (symbol === 'u') {
-                    // Category/Union: entity→constraint = categoryLink, constraint→entity = categoryMember
-                    storedType = srcType === 'constraint' ? 'categoryMember' : 'categoryLink';
-                    if (storedType === 'categoryLink') {
-                        edgeData = { lineStyle: 'bracket', bracketDirection: 'to' };
-                    }
+                    storedType = 'categoryMember';
                 } else if (hasEntity) {
-                    // ISA: entity→constraint = isaParent, constraint→entity = isaChild
-                    storedType = srcType === 'constraint' ? 'isaChild' : 'isaParent';
+                    storedType = 'isaParent';
                 }
             }
         }
@@ -793,7 +1237,7 @@ const EditProject = (props: IPropsEditProject) => {
 
         };
         setEdges((eds) => addEdge(edgeWithId, eds));
-    }, [setEdges, nodes]);
+    }, [setEdges, setNodes, nodes]);
 
     const edgeReconnectSuccessful = useRef(true);
     const reconnectingEdgeRef = useRef<Edge | null>(null);
@@ -1013,7 +1457,6 @@ const EditProject = (props: IPropsEditProject) => {
     const {
         awareness: conceptualAwareness,
         applyModelPayload,
-        mutateModel: conceptualMutateModel,
         modelData: _conceptualModelData,
     } = useConceptualCollaboration({
         enabled: Boolean(isConceptualSchema && hasPermission && isValidSchema === true && !!token),
@@ -1032,7 +1475,6 @@ const EditProject = (props: IPropsEditProject) => {
     const {
         awareness: logicalAwareness,
         applyModelPayload: applyLogicalModelPayload,
-        mutateModel: logicalMutateModel,
         modelData: _logicalModelData,
     } = useLogicalCollaboration({
         enabled: Boolean(isLogicalSchema && hasPermission && isValidSchema === true && !!token),
@@ -1051,7 +1493,6 @@ const EditProject = (props: IPropsEditProject) => {
     const {
         awareness: physicalAwareness,
         applyModelPayload: applyPhysicalModelPayload,
-        mutateModel: physicalMutateModel,
         modelData: _physicalModelData,
     } = usePhysicalCollaboration({
         enabled: Boolean(isPhysicalSchema && hasPermission && isValidSchema === true && !!token),
@@ -1084,7 +1525,7 @@ const EditProject = (props: IPropsEditProject) => {
             const storedNodes = mapLogicalReactToStored(nodes);
             const storedEdges = mapLogicalReactEdgesToStored(edges, nodes);
             const model = storedNodes.length > 0
-                ? buildLogicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
+                ? buildLogicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
                 : _logicalModelData;
             return model ? runLogicalLinter(model) : empty;
         }
@@ -1092,7 +1533,7 @@ const EditProject = (props: IPropsEditProject) => {
             const storedNodes = mapPhysicalReactToStored(nodes);
             const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
             const model = storedNodes.length > 0
-                ? buildPhysicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
+                ? buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
                 : _physicalModelData;
             return model ? runPhysicalLinter(model) : empty;
         }
@@ -1110,14 +1551,14 @@ const EditProject = (props: IPropsEditProject) => {
             const storedNodes = mapLogicalReactToStored(nodes);
             const storedEdges = mapLogicalReactEdgesToStored(edges, nodes);
             return storedNodes.length > 0
-                ? buildLogicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
+                ? buildLogicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
                 : _logicalModelData;
         }
         if (isPhysicalSchema) {
             const storedNodes = mapPhysicalReactToStored(nodes);
             const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
             return storedNodes.length > 0
-                ? buildPhysicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
+                ? buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
                 : _physicalModelData;
         }
         return null;
@@ -1128,41 +1569,13 @@ const EditProject = (props: IPropsEditProject) => {
         selectedSchema?.id, selectedSchema?.name,
     ]);
 
-    // Override entity/relationship creators with model-first versions when
-    // operating on a conceptual schema (model-as-truth architecture).
-    const modelAwareCreators = useMemo(
-        () =>
-            isConceptualSchema && conceptualMutateModel
-                ? createNodeCreators(setNodes, { getViewportCenter, mutateModel: conceptualMutateModel })
-                : null,
-        [isConceptualSchema, conceptualMutateModel, setNodes, getViewportCenter],
-    );
-    const effectiveAddEntity = modelAwareCreators?.addEntity ?? addEntity;
-    const effectiveAddDoubleEntity = modelAwareCreators?.addDoubleEntity ?? addDoubleEntity;
-    const effectiveAddRelationship = modelAwareCreators?.addRelationship ?? addRelationship;
-    const effectiveAddDoubleRelationship = modelAwareCreators?.addDoubleRelationship ?? addDoubleRelationship;
+    const effectiveAddEntity = addEntity;
+    const effectiveAddDoubleEntity = addDoubleEntity;
+    const effectiveAddRelationship = addRelationship;
+    const effectiveAddDoubleRelationship = addDoubleRelationship;
 
-    // Override logical table creators with model-first versions when
-    // operating on a logical schema (model-as-truth architecture).
-    const logicalModelAwareCreators = useMemo(
-        () =>
-            isLogicalSchema && logicalMutateModel
-                ? createNodeCreators(setNodes, { getViewportCenter, mutateLogicalModel: logicalMutateModel })
-                : null,
-        [isLogicalSchema, logicalMutateModel, setNodes, getViewportCenter],
-    );
-    const effectiveAddLogicalTable = logicalModelAwareCreators?.addLogicalTable ?? addLogicalTable;
-
-    // Override physical table creators with model-first versions when
-    // operating on a physical schema (model-as-truth architecture).
-    const physicalModelAwareCreators = useMemo(
-        () =>
-            isPhysicalSchema && physicalMutateModel
-                ? createNodeCreators(setNodes, { getViewportCenter, mutatePhysicalModel: physicalMutateModel })
-                : null,
-        [isPhysicalSchema, physicalMutateModel, setNodes, getViewportCenter],
-    );
-    const effectiveAddRelationTable = physicalModelAwareCreators?.addRelationTable ?? addRelationTable;
+    const effectiveAddLogicalTable = addLogicalTable;
+    const effectiveAddRelationTable = addRelationTable;
 
     // ── Drag-and-drop from sidebar ───────────────────────────────
     const handleDragOver = useCallback((event: React.DragEvent) => {
@@ -1180,63 +1593,6 @@ const EditProject = (props: IPropsEditProject) => {
                 x: event.clientX,
                 y: event.clientY,
             });
-
-            // Conceptual: model-first via mutateModel
-            if (isConceptualSchema && conceptualMutateModel) {
-                const id = generateDiagramId();
-                switch (nodeType) {
-                    case "entity":
-                        conceptualMutateModel(
-                            (m) => ({ ...m, entities: [...m.entities, { id, name: `ent_${m.entities.length + 1}`, kind: "strong" as const, attributes: [] }] }),
-                            { selectedNodeId: id, positionHint: position },
-                        );
-                        return;
-                    case "double-entity":
-                        conceptualMutateModel(
-                            (m) => ({ ...m, entities: [...m.entities, { id, name: `ent_${m.entities.length + 1}`, kind: "weak" as const, attributes: [] }] }),
-                            { selectedNodeId: id, positionHint: position },
-                        );
-                        return;
-                    case "relationship":
-                        conceptualMutateModel(
-                            (m) => ({ ...m, relationships: [...m.relationships, { id, name: `rel_${m.relationships.length + 1}`, type: "association" as const, ends: [] }] }),
-                            { selectedNodeId: id, positionHint: position },
-                        );
-                        return;
-                    case "double-relationship":
-                        conceptualMutateModel(
-                            (m) => ({ ...m, relationships: [...m.relationships, { id, name: `rel_${m.relationships.length + 1}`, type: "identifying" as const, ends: [] }] }),
-                            { selectedNodeId: id, positionHint: position },
-                        );
-                        return;
-                }
-            }
-
-            // Logical: model-first via logicalMutateModel
-            if (isLogicalSchema && logicalMutateModel && nodeType === "logical-table") {
-                const id = generateDiagramId();
-                logicalMutateModel(
-                    (m) => ({
-                        ...m,
-                        tables: [...(m.tables ?? []), { id, name: `table_${(m.tables ?? []).length + 1}`, columns: [{ id: `lid_${id}_col_0`, name: "column_1", nullable: true, unique: false, roles: {} }] }],
-                    }),
-                    { selectedNodeId: id, positionHint: position },
-                );
-                return;
-            }
-
-            // Physical: model-first via physicalMutateModel
-            if (isPhysicalSchema && physicalMutateModel && nodeType === "physical-table") {
-                const id = generateDiagramId();
-                physicalMutateModel(
-                    (m) => ({
-                        ...m,
-                        tables: [...(m.tables ?? []), { id, name: `table_${(m.tables ?? []).length + 1}`, columns: [{ id: `pid_${id}_col_0`, name: "column_1", dataType: "varchar", nullable: true, unique: false, roles: {} }] }],
-                    }),
-                    { selectedNodeId: id, positionHint: position },
-                );
-                return;
-            }
 
             // Fallback: direct node creation (attributes, constraints, or non-model schemas)
             setNodes((existingNodes) => {
@@ -1277,7 +1633,7 @@ const EditProject = (props: IPropsEditProject) => {
                         break;
                     case "logical-table": {
                         const cnt = existingNodes.filter((n) => n.type === "logical-table").length;
-                        const logicalData = { name: `table_${cnt + 1}`, columns: [{ name: "column_1", isKey: false }] };
+                        const logicalData = { name: `table_${cnt + 1}`, columns: [{ id: `lid_${id}_col_0`, name: "column_1", isKey: false }] };
                         newNode = { id, type: "logical-table", position, data: logicalData as NodeData, style: { width: 200 }, selected: true };
                         break;
                     }
@@ -1292,7 +1648,7 @@ const EditProject = (props: IPropsEditProject) => {
                 return [...deselected, newNode];
             });
         },
-        [setNodes, isConceptualSchema, isLogicalSchema, isPhysicalSchema, conceptualMutateModel, logicalMutateModel, physicalMutateModel],
+        [setNodes],
     );
 
     // ── Version preview handlers ─────────────────────────────────
@@ -1366,6 +1722,11 @@ const EditProject = (props: IPropsEditProject) => {
                 notificationProvider.open({ type: "success", message: `Created new ${detectedLevel} schema — switching now` });
                 // Navigate to the new schema (page will re-render with updated schema list)
                 router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
+                return {
+                    projectId: projectData.id,
+                    schemaId: newSchema.id,
+                    label: `Open ${detectedLevel} schema`,
+                };
             } catch (error) {
                 console.error("Failed to create cross-schema from chat:", error);
                 notificationProvider.open({ type: "error", message: "Failed to create new schema. Please try again." });
@@ -1393,7 +1754,15 @@ const EditProject = (props: IPropsEditProject) => {
                 console.error("Failed to apply physical model from chat:", error);
             }
         }
-    }, [isConceptualSchema, isLogicalSchema, isPhysicalSchema, applyModelPayload, applyLogicalModelPayload, applyPhysicalModelPayload, projectData?.id, router]);
+
+        if (projectData?.id && selectedSchema?.id) {
+            return {
+                projectId: projectData.id,
+                schemaId: selectedSchema.id,
+                label: "Open updated schema",
+            };
+        }
+    }, [isConceptualSchema, isLogicalSchema, isPhysicalSchema, applyModelPayload, applyLogicalModelPayload, applyPhysicalModelPayload, projectData?.id, router, selectedSchema?.id]);
 
     // ── Normalization decomposition ──────────────────────────────────────────
     const handleApplyDecomposition = useCallback(
@@ -1461,8 +1830,8 @@ const EditProject = (props: IPropsEditProject) => {
                         columns,
                         functionalDependencies: dt.fds.map((fd) => ({
                             id: generateId("fd"),
-                            left: fd.left,
-                            right: fd.right,
+                            left: fd.left.map((colName) => colNameToId.get(colName.toLowerCase()) ?? colName),
+                            right: fd.right.map((colName) => colNameToId.get(colName.toLowerCase()) ?? colName),
                         })),
                         _colNameToId: colNameToId,
                     };
@@ -1578,61 +1947,64 @@ const EditProject = (props: IPropsEditProject) => {
                 return [...updatedOtherTables, ...cleanNewTables];
             };
 
-            if (isLogicalSchema && logicalMutateModel) {
-                logicalMutateModel((model) => {
-                    const origIdx = model.tables.findIndex((t) => t.name === tableName);
-                    if (origIdx === -1) return model;
-                    const origTable = model.tables[origIdx];
+            if (isLogicalSchema && _logicalModelData) {
+                const origIdx = _logicalModelData.tables.findIndex((t) => t.name === tableName);
+                if (origIdx === -1) return;
+                const origTable = _logicalModelData.tables[origIdx];
 
-                    const tables = applyDecomposition(
-                        model.tables,
-                        origTable,
-                        "lid",
-                        (colName, idx, tableId) => ({
-                            id: `lid_${tableId}_col_${idx}`,
+                const tables = applyDecomposition(
+                    _logicalModelData.tables,
+                    origTable,
+                    "lid",
+                    (colName, idx, tableId) => ({
+                        id: `lid_${tableId}_col_${idx}`,
+                        name: colName,
+                        nullable: true, // will be overridden by applyDecomposition
+                        unique: false,
+                        roles: {},
+                    }),
+                );
+
+                void applyLogicalModelPayload({ ..._logicalModelData, tables });
+            } else if (isPhysicalSchema && _physicalModelData) {
+                const origIdx = _physicalModelData.tables.findIndex((t) => t.name === tableName);
+                if (origIdx === -1) return;
+                const origTable = _physicalModelData.tables[origIdx];
+                const origColMap = new Map(
+                    origTable.columns.map((c) => [c.name.toLowerCase(), c]),
+                );
+
+                const tables = applyDecomposition(
+                    _physicalModelData.tables,
+                    origTable,
+                    "pid",
+                    (colName, idx, tableId) => {
+                        const origCol = origColMap.get(colName.toLowerCase());
+                        return {
+                            id: `pid_${tableId}_col_${idx}`,
                             name: colName,
+                            dataType: origCol?.dataType,
+                            length: origCol?.length,
                             nullable: true, // will be overridden by applyDecomposition
                             unique: false,
+                            autoIncrement: origCol?.autoIncrement,
+                            defaultValue: origCol?.defaultValue,
                             roles: {},
-                        }),
-                    );
+                        };
+                    },
+                );
 
-                    return { ...model, tables };
-                });
-            } else if (isPhysicalSchema && physicalMutateModel) {
-                physicalMutateModel((model) => {
-                    const origIdx = model.tables.findIndex((t) => t.name === tableName);
-                    if (origIdx === -1) return model;
-                    const origTable = model.tables[origIdx];
-                    const origColMap = new Map(
-                        origTable.columns.map((c) => [c.name.toLowerCase(), c]),
-                    );
-
-                    const tables = applyDecomposition(
-                        model.tables,
-                        origTable,
-                        "pid",
-                        (colName, idx, tableId) => {
-                            const origCol = origColMap.get(colName.toLowerCase());
-                            return {
-                                id: `pid_${tableId}_col_${idx}`,
-                                name: colName,
-                                dataType: origCol?.dataType,
-                                length: origCol?.length,
-                                nullable: true, // will be overridden by applyDecomposition
-                                unique: false,
-                                autoIncrement: origCol?.autoIncrement,
-                                defaultValue: origCol?.defaultValue,
-                                roles: {},
-                            };
-                        },
-                    );
-
-                    return { ...model, tables };
-                });
+                void applyPhysicalModelPayload({ ..._physicalModelData, tables });
             }
         },
-        [isLogicalSchema, isPhysicalSchema, logicalMutateModel, physicalMutateModel],
+        [
+            isLogicalSchema,
+            isPhysicalSchema,
+            _logicalModelData,
+            _physicalModelData,
+            applyLogicalModelPayload,
+            applyPhysicalModelPayload,
+        ],
     );
 
     // ── Schema conversion (logical ↔ physical done directly; others via AI) ──
@@ -1643,7 +2015,7 @@ const EditProject = (props: IPropsEditProject) => {
             const storedNodes = mapLogicalReactToStored(nodes);
             const storedEdges = mapLogicalReactEdgesToStored(edges, nodes);
             if (storedNodes.length > 0) {
-                return buildLogicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
+                return buildLogicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
             }
             return _logicalModelData;
         };
@@ -1652,7 +2024,7 @@ const EditProject = (props: IPropsEditProject) => {
             const storedNodes = mapPhysicalReactToStored(nodes);
             const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
             if (storedNodes.length > 0) {
-                return buildPhysicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
+                return buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
             }
             return _physicalModelData;
         };
@@ -1833,13 +2205,13 @@ const EditProject = (props: IPropsEditProject) => {
         const buildFreshLogical = () => {
             const storedNodes = mapLogicalReactToStored(nodes);
             const storedEdges = mapLogicalReactEdgesToStored(edges, nodes);
-            if (storedNodes.length > 0) return buildLogicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
+            if (storedNodes.length > 0) return buildLogicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
             return _logicalModelData;
         };
         const buildFreshPhysical = () => {
             const storedNodes = mapPhysicalReactToStored(nodes);
             const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
-            if (storedNodes.length > 0) return buildPhysicalModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
+            if (storedNodes.length > 0) return buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
             return _physicalModelData;
         };
         const buildFreshConceptual = () => {
@@ -2190,7 +2562,6 @@ const EditProject = (props: IPropsEditProject) => {
                     canEdit={canEdit}
                     onSetDiagramName={setDiagramName}
                     onSetIsEditingDiagramName={setIsEditingDiagramName}
-                    onOpenSearchModal={() => setIsSearchModalOpen(true)}
                     collaborators={remoteUsers}
                     onFollowUser={handleFollowUserViewport}
                     onDownload={handleDownload}
@@ -2211,6 +2582,7 @@ const EditProject = (props: IPropsEditProject) => {
                     onToggleLinterPanel={() => setIsLinterOpen((v) => !v)}
                     linterCounts={lintResult.counts}
                     projectId={projectData?.id}
+                    projectVisibility={projectData?.visibility}
                     normalizationOpen={isNormalizationOpen}
                     onToggleNormalizationPanel={(isLogicalSchema || isPhysicalSchema) ? () => setIsNormalizationOpen((v) => !v) : undefined}
                 />
@@ -2237,9 +2609,7 @@ const EditProject = (props: IPropsEditProject) => {
                     isOpen={isDDLImportOpen}
                     onClose={() => setIsDDLImportOpen(false)}
                     onImport={(model) => {
-                        if (physicalMutateModel) {
-                            physicalMutateModel(() => model);
-                        }
+                        applyPhysicalModelPayload(model);
                     }}
                     diagramName={diagramName}
                 />
@@ -2446,16 +2816,41 @@ const EditProject = (props: IPropsEditProject) => {
                         }}
                         onUpdateEdgeLineStyle={(style) => {
                             if (!selectedEdge) return;
+                            const sourceType = nodes.find((node) => node.id === selectedEdge.source)?.type;
+                            const targetType = nodes.find((node) => node.id === selectedEdge.target)?.type;
+                            const hasConstraint = sourceType === 'constraint' || targetType === 'constraint';
+                            const isRelationshipEntity =
+                                (sourceType === 'relationship' && targetType === 'entity') ||
+                                (sourceType === 'entity' && targetType === 'relationship');
+                            if (style === 'bracket' && !hasConstraint && !isRelationshipEntity) return;
+                            const constraintBracketDirection =
+                                hasConstraint && style === 'bracket'
+                                    ? sourceType === 'constraint'
+                                        ? 'from'
+                                        : 'to'
+                                    : undefined;
                             setEdges((existingEdges) =>
                                 existingEdges.map((edge) =>
                                     edge.id === selectedEdge.id
-                                        ? { ...edge, data: { ...edge.data, lineStyle: style } }
+                                        ? {
+                                            ...edge,
+                                            data: {
+                                                ...edge.data,
+                                                lineStyle: style,
+                                                ...(constraintBracketDirection
+                                                    ? { bracketDirection: constraintBracketDirection }
+                                                    : {}),
+                                            },
+                                        }
                                         : edge
                                 )
                             );
                         }}
                         onUpdateEdgeBracketDirection={(direction) => {
                             if (!selectedEdge) return;
+                            const sourceType = nodes.find((node) => node.id === selectedEdge.source)?.type;
+                            const targetType = nodes.find((node) => node.id === selectedEdge.target)?.type;
+                            if (sourceType === 'constraint' || targetType === 'constraint') return;
                             setEdges((existingEdges) =>
                                 existingEdges.map((edge) =>
                                     edge.id === selectedEdge.id
@@ -2466,7 +2861,8 @@ const EditProject = (props: IPropsEditProject) => {
                         }}
                         onAddRelationTableColumn={addRelationTableColumn}
                         onRemoveRelationTableColumn={removeRelationTableColumn}
-                        onUpdateRelationTableColumn={updateRelationTableColumn}
+                        onUpdateRelationTableColumn={updateRelationTableColumnWithWarning}
+                        onReorderRelationTableColumns={reorderRelationTableColumns}
                         onAddTableIndex={addTableIndex}
                         onRemoveTableIndex={removeTableIndex}
                         onUpdateTableIndex={updateTableIndex}
@@ -2481,8 +2877,8 @@ const EditProject = (props: IPropsEditProject) => {
                         }}
                         onAddLogicalTableAttribute={addLogicalTableAttribute}
                         onRemoveLogicalTableAttribute={removeLogicalTableAttribute}
-                        onUpdateLogicalTableAttribute={updateLogicalTableAttribute}
-                        onReorderLogicalTableAttributes={reorderLogicalTableAttributes}
+                        onUpdateLogicalTableAttribute={updateLogicalTableAttributeWithWarning}
+                        onReorderLogicalTableAttributes={reorderLogicalTableAttributesWithEdgeRemap}
                         onAddLogicalFD={addLogicalFD}
                         onRemoveLogicalFD={removeLogicalFD}
                         onUpdateLogicalFD={updateLogicalFD}
@@ -2491,38 +2887,6 @@ const EditProject = (props: IPropsEditProject) => {
                         onRemovePhysicalFD={removePhysicalFD}
                         onUpdatePhysicalFD={updatePhysicalFD}
                         onTogglePhysicalFDDisplay={togglePhysicalFDDisplay}
-                        onUpdateLogicalEdgeCardinality={(side, value) => {
-                            if (!selectedEdge) return;
-                            setEdges((existingEdges) =>
-                                existingEdges.map((edge) =>
-                                    edge.id === selectedEdge.id
-                                        ? {
-                                            ...edge,
-                                            data: {
-                                                ...edge.data,
-                                                [side === 'source' ? 'sourceCardinality' : 'targetCardinality']: value,
-                                            },
-                                        }
-                                        : edge
-                                )
-                            );
-                        }}
-                        onUpdatePhysicalEdgeCardinality={(side, value) => {
-                            if (!selectedEdge) return;
-                            setEdges((existingEdges) =>
-                                existingEdges.map((edge) =>
-                                    edge.id === selectedEdge.id
-                                        ? {
-                                            ...edge,
-                                            data: {
-                                                ...edge.data,
-                                                [side === 'source' ? 'sourceCardinality' : 'targetCardinality']: value,
-                                            },
-                                        }
-                                        : edge
-                                )
-                            );
-                        }}
                     />
                     {commentMode && (
                         <CommentPanel

@@ -611,21 +611,18 @@ const classifyEdge = (
         const constraintNode = isConstraint(sourceNode) ? sourceNode : targetNode;
         const otherNode = constraintNode === sourceNode ? targetNode : sourceNode;
         const symbol = getConstraintSymbol(constraintNode);
+        const marksChild = edge.data?.lineStyle === "bracket";
 
         if (symbol === "u") {
-            const type: SchemaEdgeType =
-                constraintNode === sourceNode ? "categoryMember" : "categoryLink";
             return {
-                type,
+                type: marksChild ? "categoryLink" : "categoryMember",
                 categoryId: constraintNode.id,
             };
         }
 
         if (isEntity(otherNode)) {
-            const type: SchemaEdgeType =
-                constraintNode === sourceNode ? "isaChild" : "isaParent";
             return {
-                type,
+                type: marksChild ? "isaChild" : "isaParent",
                 generalizationId: constraintNode.id,
             };
         }
@@ -717,11 +714,28 @@ const mapReactEdgeToStoredEdge = (
         storedEdge.endStyle = endStyle;
     }
 
-    // Category link edges always have a bracket on the 'to' side (near U circle)
+    // Constraint child/category edges always show the bracket at the circle end.
     if (classification.type === "categoryLink") {
+        const bracketSide = sourceNode.type === "constraint" ? "from" : "to";
+        const otherSide = bracketSide === "from" ? "to" : "from";
         storedEdge.endStyle = {
             ...storedEdge.endStyle,
-            to: { ...storedEdge.endStyle?.to, bracket: true },
+            [otherSide]: storedEdge.endStyle?.[otherSide]
+                ? { ...storedEdge.endStyle[otherSide], bracket: undefined }
+                : undefined,
+            [bracketSide]: { ...storedEdge.endStyle?.[bracketSide], bracket: true },
+        };
+    }
+
+    if (classification.type === "isaChild") {
+        const bracketSide = sourceNode.type === "constraint" ? "from" : "to";
+        const otherSide = bracketSide === "from" ? "to" : "from";
+        storedEdge.endStyle = {
+            ...storedEdge.endStyle,
+            [otherSide]: storedEdge.endStyle?.[otherSide]
+                ? { ...storedEdge.endStyle[otherSide], bracket: undefined }
+                : undefined,
+            [bracketSide]: { ...storedEdge.endStyle?.[bracketSide], bracket: true },
         };
     }
 

@@ -17,6 +17,7 @@ export interface ProjectResponse {
     };
     createdAt: string;
     updatedAt: string;
+    visibility?: string;
     status: "active" | "archived";
 }
 
@@ -109,4 +110,3 @@ export interface ISharedPermissionResponse {
     project_mode: string;
     list_users: IUserSharedProject[];
 }
-

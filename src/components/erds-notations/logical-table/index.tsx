@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { NodeResizer, Position, useNodeId, useStore, useReactFlow } from "reactflow";
+import { NodeResizer, Position, useNodeId, useStore, useReactFlow, useUpdateNodeInternals } from "reactflow";
+import type { OnResize, OnResizeEnd } from "@reactflow/node-resizer";
 import classNames from "classnames";
 import {
     DatabaseSchemaNode,
@@ -12,6 +13,7 @@ import { LabeledHandle } from "@/components/labeled-handle";
 import { KeyRound, Link2 } from "lucide-react";
 
 type LogicalColumn = {
+    id?: string;
     name: string;
     isKey?: boolean;
     isCandidateKey?: boolean;
@@ -19,8 +21,8 @@ type LogicalColumn = {
 
 export type LogicalFD = {
     id: string;
-    left: string[];   // column names
-    right: string[];  // column names
+    left: string[];   // column ids
+    right: string[];  // column ids
 };
 
 export type LogicalTableData = {
@@ -51,8 +53,19 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
         return ids;
     }, [edges, nodeId]);
     const { setNodes } = useReactFlow();
+    const updateNodeInternals = useUpdateNodeInternals();
     const nameRef = useRef<HTMLDivElement | null>(null);
     const contentRef = useRef<HTMLDivElement | null>(null);
+    const columnLabelByRef = useMemo(() => {
+        const labels = new Map<string, string>();
+        data.columns?.forEach((col) => {
+            labels.set(col.name, col.name);
+            if (col.id) labels.set(col.id, col.name);
+        });
+        return labels;
+    }, [data.columns]);
+    const formatColumnRefs = (refs: string[]) =>
+        refs.length > 0 ? refs.map((ref) => columnLabelByRef.get(ref) ?? ref).join(', ') : '?';
     
     const minHeight = 68;
     
@@ -73,6 +86,18 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
     const [nodeWidth, setNodeWidth] = useState(() => getInitialWidth());
     const [minWidth, setMinWidth] = useState(180);
     const [measuredHeight, setMeasuredHeight] = useState(minHeight);
+
+    useEffect(() => {
+        if (typeof node?.style?.width !== 'number') return;
+        setNodeWidth(node.style.width);
+    }, [node?.style?.width]);
+
+    const handleResize: OnResize = (_, params) => {
+        setNodeWidth(params.width);
+    };
+    const handleResizeEnd: OnResizeEnd = (_, params) => {
+        setNodeWidth(params.width);
+    };
     
     useEffect(() => {
         if (!contentRef.current) return;
@@ -129,9 +154,7 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
             // Add padding for safety
             const calculatedMinWidth = Math.max(180, maxWidth + 20);
             setMinWidth(calculatedMinWidth);
-            
-            // Always update width to fit content
-            setNodeWidth(calculatedMinWidth);
+            setNodeWidth((currentWidth) => Math.max(currentWidth, calculatedMinWidth));
         };
         
         // Wait for DOM to be ready
@@ -163,6 +186,12 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
             setLocalName(data.name);
         }
     }, [data.name, isEditingName]);
+
+    useEffect(() => {
+        if (!nodeId) return;
+        const rafId = requestAnimationFrame(() => updateNodeInternals(nodeId));
+        return () => cancelAnimationFrame(rafId);
+    }, [data.columns, nodeId, updateNodeInternals]);
 
     const commitName = (rawText: string) => {
         const trimmed = rawText.trim();
@@ -205,7 +234,9 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
                     : n
             )
         );
-    }, [measuredHeight, nodeWidth, nodeId, setNodes]);
+        const rafId = requestAnimationFrame(() => updateNodeInternals(nodeId));
+        return () => cancelAnimationFrame(rafId);
+    }, [measuredHeight, nodeWidth, nodeId, setNodes, updateNodeInternals]);
 
     return (
         <div
@@ -218,6 +249,8 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
                 isVisible={isSelected}
                 minWidth={minWidth}
                 minHeight={minHeight}
+                onResize={handleResize}
+                onResizeEnd={handleResizeEnd}
             />
 
             <DatabaseSchemaNode className="w-full">
@@ -269,18 +302,17 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
                 <DatabaseSchemaNodeBody>
                     {data.columns?.length ? (
                         data.columns.map((col, idx) => {
-                            // Generate columnId following the same format as in builder
-                            const columnId = `lid_${nodeId}_col_${idx}`;
+                            const columnId = col.id ?? `lid_${nodeId}_col_${idx}`;
                             const isFK = fkColumnIds.has(columnId);
                             return (
-                                <DatabaseSchemaTableRow key={idx} style={{ whiteSpace: 'nowrap' }}>
+                                <DatabaseSchemaTableRow key={columnId} style={{ whiteSpace: 'nowrap' }}>
                                     <DatabaseSchemaTableCell className="font-light flex-1 flex items-center gap-1 justify-start" style={{ paddingLeft: 0, paddingRight: '12px' }}>
                                         <LabeledHandle
                                             id={`${columnId}-left`}
                                             title={col.name}
                                             type="source"
                                             position={Position.Left}
-                                            isConnectable={!isSelected}
+                                            isConnectable={true}
                                             labelClassName="p-0 w-full pl-3 text-left"
                                             showOnHover={true}
                                             isHovered={isHovered}
@@ -301,7 +333,7 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
                                             title=""
                                             type="source"
                                             position={Position.Right}
-                                            isConnectable={!isSelected}
+                                            isConnectable={true}
                                             className="p-0"
                                             handleClassName="p-0"
                                             labelClassName="p-0 w-full pr-3 text-right"
@@ -330,11 +362,11 @@ const LogicalTableNode: React.FC<{ data: LogicalTableData }> = ({ data }) => {
                         {data.functionalDependencies.map((fd) => (
                             <div key={fd.id} className="flex items-center gap-0.5 truncate">
                                 <span className="font-medium" style={{ color: '#1677ff' }}>
-                                    {fd.left.length > 0 ? fd.left.join(', ') : '?'}
+                                    {formatColumnRefs(fd.left)}
                                 </span>
                                 <span style={{ color: '#999' }}>{' → '}</span>
                                 <span className="font-medium" style={{ color: '#52c41a' }}>
-                                    {fd.right.length > 0 ? fd.right.join(', ') : '?'}
+                                    {formatColumnRefs(fd.right)}
                                 </span>
                             </div>
                         ))}

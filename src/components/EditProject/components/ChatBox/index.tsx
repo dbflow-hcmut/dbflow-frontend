@@ -35,7 +35,54 @@ interface ChatBoxProps {
     /** If provided, load this thread's history and continue from it */
     initialThreadId?: string;
     /** Callback when AI generates a model JSON (for applying to diagram) */
-    onModelGenerated?: (modelJson: Record<string, unknown>, detectedLevel?: string) => void;
+    onModelGenerated?: (
+        modelJson: Record<string, unknown>,
+        detectedLevel?: string,
+    ) => Promise<{ projectId: string; schemaId: string; label?: string } | void> | { projectId: string; schemaId: string; label?: string } | void;
+}
+
+const ATT_MARKER = "<!-- __att__:";
+const ATT_END = " -->";
+
+function encodeAttachmentMetadata(content: string, attachments: Attachment[]): string {
+    if (attachments.length === 0) return content;
+    const meta = attachments.map(({ id, name, fileType, size, url, s3Key, mimeType }) => ({
+        id,
+        name,
+        fileType,
+        size,
+        ...(mimeType ? { mimeType } : {}),
+        ...(url ? { url } : {}),
+        ...(s3Key ? { s3Key } : {}),
+    }));
+    return `${content}\n${ATT_MARKER}${JSON.stringify(meta)}${ATT_END}`;
+}
+
+function decodeAttachmentMetadata(raw: string): { content: string; attachments: Attachment[] } {
+    const markerIdx = raw.lastIndexOf(ATT_MARKER);
+    if (markerIdx === -1) return { content: raw, attachments: [] };
+    const endIdx = raw.lastIndexOf(ATT_END);
+    if (endIdx <= markerIdx) return { content: raw, attachments: [] };
+
+    const jsonStr = raw.slice(markerIdx + ATT_MARKER.length, endIdx);
+    const cleanContent = raw.slice(0, markerIdx).trimEnd();
+    try {
+        const parsed = JSON.parse(jsonStr) as Array<{
+            id: string;
+            name: string;
+            fileType: Attachment["fileType"];
+            size: number;
+            mimeType?: string;
+            url?: string;
+            s3Key?: string;
+        }>;
+        return {
+            content: cleanContent,
+            attachments: parsed.map((attachment) => ({ ...attachment, content: "" })),
+        };
+    } catch {
+        return { content: raw, attachments: [] };
+    }
 }
 
 const ChatBox: React.FC<ChatBoxProps> = ({
@@ -73,6 +120,11 @@ const ChatBox: React.FC<ChatBoxProps> = ({
     const abortControllerRef = useRef<AbortController | null>(null);
     const runIdRef = useRef<string | null>(null);
 
+    const buildOpenSchemaLink = useCallback((link: { projectId: string; schemaId: string; label?: string }) => {
+        const href = `/projects/${link.projectId}?schemaId=${link.schemaId}&openChat=true&chatThread=${threadId}`;
+        return `[${link.label ?? "Open schema"}](${href})`;
+    }, [threadId]);
+
     // Load chat history when opened
     useEffect(() => {
         if (!isOpen || historyLoaded) return;
@@ -85,12 +137,16 @@ const ChatBox: React.FC<ChatBoxProps> = ({
         const toUiMessages = (msgs: { id: string; content: string; role: string; createdAt: string }[]): Message[] =>
             msgs.map((msg, index) => {
                 let displayText = msg.content;
+                let attachments: Attachment[] | undefined;
+                if (msg.role === "user") {
+                    const decoded = decodeAttachmentMetadata(msg.content);
+                    displayText = decoded.content;
+                    attachments = decoded.attachments.length > 0 ? decoded.attachments : undefined;
+                }
                 if (msg.role === "assistant") {
                     const extracted = extractModelJsonFromContent(msg.content);
                     if (extracted.hasDiagram && extracted.textDescription) {
-                        displayText = extracted.modelJson
-                            ? `${extracted.textDescription}\n\nDiagram updated successfully!`
-                            : extracted.textDescription;
+                        displayText = extracted.textDescription;
                     }
                 }
                 return {
@@ -98,6 +154,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                     text: displayText,
                     sender: msg.role === "user" ? "user" as const : "ai" as const,
                     timestamp: new Date(msg.createdAt),
+                    attachments,
                 };
             });
 
@@ -278,6 +335,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
         const chatMessages: ChatMessage[] = [enrichedMessage];
 
         let finalContent = "";
+        let assistantContentToSave = "";
         let modelAlreadyApplied = false;
 
         const effectiveModel = modelOverride ?? currentModel ?? undefined;
@@ -352,27 +410,11 @@ const ChatBox: React.FC<ChatBoxProps> = ({
 
                 if (isDiagramIntentFinal) {
                     const extracted = extractModelJsonFromContent(finalContent);
-                    const isEngineering =
-                        currentIntentRef.current === "forward_engineer" ||
-                        currentIntentRef.current === "reverse_engineer";
-                    const displayText = extracted.textDescription ||
-                        (isEngineering ? "Schema generated!" : "Diagram updated!");
+                    const displayText = extracted.textDescription || "Schema ready.";
 
-                    setMessages((prev) =>
-                        prev.map((msg) =>
-                            msg.id === aiMessageId
-                                ? {
-                                    ...msg,
-                                    text: extracted.modelJson
-                                        ? (isEngineering
-                                            ? `${displayText}\n\nCreating new schema...`
-                                            : `${displayText}\n\nDiagram updated successfully!`)
-                                        : displayText,
-                                    isStreaming: false,
-                                  }
-                                : msg
-                        )
-                    );
+                    let finalDisplayText = extracted.modelJson
+                        ? displayText
+                        : displayText;
 
                     // Apply final model JSON — only here in onComplete, after validator has run.
                     // During streaming, we intentionally don't apply to avoid creating
@@ -384,10 +426,32 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                                 : currentIntentRef.current === "reverse_engineer"
                                     ? (schemaLevel === "physical" ? "logical" : schemaLevel === "logical" ? "conceptual" : undefined)
                                     : undefined);
-                        onModelGenerated(extracted.modelJson, effectiveTargetLevel);
+                        const openLink = await onModelGenerated(extracted.modelJson, effectiveTargetLevel);
+                        if (openLink) {
+                            const linkMarkdown = buildOpenSchemaLink(openLink);
+                            finalDisplayText = `${finalDisplayText}\n\n${linkMarkdown}`;
+                            assistantContentToSave = `${finalContent}\n\n${linkMarkdown}`;
+                        }
                         modelAlreadyApplied = true;
                     }
+
+                    if (!assistantContentToSave) {
+                        assistantContentToSave = finalContent;
+                    }
+
+                    setMessages((prev) =>
+                        prev.map((msg) =>
+                            msg.id === aiMessageId
+                                ? {
+                                    ...msg,
+                                    text: finalDisplayText,
+                                    isStreaming: false,
+                                  }
+                                : msg
+                        )
+                    );
                 } else {
+                    assistantContentToSave = finalContent;
                     // Final state for normal messages
                     setMessages((prev) =>
                         prev.map((msg) =>
@@ -402,8 +466,8 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                 if (finalContent) {
                     try {
                         await saveMessages(threadId, [
-                            { role: "user", content: trimmed },
-                            { role: "assistant", content: finalContent },
+                            { role: "user", content: encodeAttachmentMetadata(trimmed, atts) },
+                            { role: "assistant", content: assistantContentToSave || finalContent },
                         ]);
                     } catch (error) {
                         console.error("Failed to save messages:", error);
@@ -447,7 +511,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
         );
         if (returnedRunId) runIdRef.current = returnedRunId;
         abortControllerRef.current = null;
-    }, [isLoading, threadId, conversationCreated, projectId, schemaId, schemaLevel, currentModel, onModelGenerated]);
+    }, [isLoading, threadId, conversationCreated, projectId, schemaId, schemaLevel, currentModel, onModelGenerated, buildOpenSchemaLink]);
 
     const handleRetry = useCallback(() => {
         if (!lastUserMessageRef.current) return;
@@ -542,14 +606,14 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                     onMessagesChange={setMessages}
                     isLoading={isLoading}
                     reasoningText={reasoningText}
-                    onRetry={handleRetry}
-                    isStreamingJson={isStreamingJson}
-                    onStop={handleStop}
-                />
+                onRetry={handleRetry}
+                isStreamingJson={isStreamingJson}
+                onStop={handleStop}
+                projectId={projectId}
+            />
             )}
         </div>
     );
 };
 
 export default ChatBox;
-

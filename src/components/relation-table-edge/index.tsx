@@ -146,39 +146,22 @@ const RelationTableEdge: React.FC<EdgeProps<RelationTableEdgeData>> = (props) =>
                     ));
                 })()}
 
-                {/* Source marker — FK side (many) */}
-                <CrowsFoot x={sourceX} y={sourceY} position={sourcePosition} stroke={color} sw={sw} />
+                {/* Source marker — FK side (many by default) */}
+                {srcCard === 'N' ? (
+                    <CrowsFoot x={sourceX} y={sourceY} position={sourcePosition} stroke={color} sw={sw} />
+                ) : (
+                    <OneBar x={sourceX} y={sourceY} position={sourcePosition} stroke={color} sw={sw} />
+                )}
 
-                {/* Target marker — PK side (one) */}
-                <OneBar x={targetX} y={targetY} position={targetPosition} stroke={color} sw={sw} />
+                {/* Target marker — PK side (one by default) */}
+                {tgtCard === 'N' ? (
+                    <CrowsFoot x={targetX} y={targetY} position={targetPosition} stroke={color} sw={sw} />
+                ) : (
+                    <OneBar x={targetX} y={targetY} position={targetPosition} stroke={color} sw={sw} />
+                )}
             </g>
 
             <EdgeLabelRenderer>
-                {/* Source cardinality label */}
-                <div
-                    style={{
-                        position: "absolute",
-                        transform: `translate(-50%, -100%) translate(${sourceX + positionToDir(sourcePosition).dx * 18}px, ${sourceY + positionToDir(sourcePosition).dy * 18 - 6}px)`,
-                        fontSize: 10, fontWeight: 700, color,
-                        pointerEvents: "none", userSelect: "none",
-                    }}
-                    className="nodrag nopan"
-                >
-                    {srcCard}
-                </div>
-                {/* Target cardinality label */}
-                <div
-                    style={{
-                        position: "absolute",
-                        transform: `translate(-50%, -100%) translate(${targetX + positionToDir(targetPosition).dx * 18}px, ${targetY + positionToDir(targetPosition).dy * 18 - 6}px)`,
-                        fontSize: 10, fontWeight: 700, color,
-                        pointerEvents: "none", userSelect: "none",
-                    }}
-                    className="nodrag nopan"
-                >
-                    {tgtCard}
-                </div>
-
                 {data?.label && (
                     <div
                         style={{
@@ -202,4 +185,3 @@ const RelationTableEdge: React.FC<EdgeProps<RelationTableEdgeData>> = (props) =>
 };
 
 export default RelationTableEdge;
-

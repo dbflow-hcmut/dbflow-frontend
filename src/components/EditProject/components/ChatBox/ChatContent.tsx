@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Input, Button } from "antd";
-import { Send, Loader2, RefreshCw, Square, Paperclip } from "lucide-react";
+import { Input, Tooltip } from "antd";
+import { ArrowUp, Loader2, RefreshCw, Square, Plus } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -14,6 +14,10 @@ import {
     ATTACHMENT_MAX_TOTAL_BYTES,
 } from "@/api/ai/client";
 import { AttachmentPreviews } from "@/components/AttachmentPreviews";
+import {
+    createProjectDocument,
+    uploadProjectDocumentFile,
+} from "@/api/project-documents/client";
 
 export interface Message {
     id: string;
@@ -34,6 +38,7 @@ interface ChatContentProps {
     onRetry?: () => void;
     isStreamingJson?: boolean;
     onStop?: () => void;
+    projectId?: string;
 }
 
 export const ChatContent: React.FC<ChatContentProps> = ({ 
@@ -44,6 +49,7 @@ export const ChatContent: React.FC<ChatContentProps> = ({
     onRetry,
     isStreamingJson = false,
     onStop,
+    projectId,
 }) => {
     const [internalMessages] = useState<Message[]>([]);
     const [inputValue, setInputValue] = useState("");
@@ -67,27 +73,56 @@ export const ChatContent: React.FC<ChatContentProps> = ({
         }
         if (pairs.length === 0) return;
 
-        // Mark files that need S3 upload as uploading immediately
+        // Mark files that need S3 upload as uploading immediately.
+        // In project chat, every file is uploaded so it can be saved to the Document Hub.
         const needsUpload = (fileType: Attachment["fileType"]) =>
-            fileType === "image" || fileType === "pdf" || fileType === "docx";
-        const newAtts = pairs.map(({ att }) =>
-            needsUpload(att.fileType) ? { ...att, uploading: true } : att,
+            projectId || fileType === "image" || fileType === "pdf" || fileType === "docx";
+        const newAtts = pairs.map(({ att, file }) =>
+            needsUpload(att.fileType) ? { ...att, originalFile: file, uploading: true } : { ...att, originalFile: file },
         );
         setAttachments((prev) => [...prev, ...newAtts]);
 
-        // Upload image/pdf/docx to S3 in background so AI receives a URL instead of base64
+        // Upload project chat files to Document Hub; otherwise upload only heavy files for AI URLs.
         for (const { att, file } of pairs) {
             if (needsUpload(att.fileType)) {
-                uploadAttachmentForAI(file, att.id).then((url) => {
-                    setAttachments((prev) =>
-                        prev.map((a) =>
-                            a.id === att.id ? { ...a, uploading: false, ...(url ? { url } : {}) } : a,
-                        ),
-                    );
-                });
+                const uploadPromise = projectId
+                    ? uploadProjectDocumentFile(projectId, file).then(async (uploaded) => {
+                        await createProjectDocument(projectId, {
+                            title: file.name.replace(/\.[^/.]+$/, ""),
+                            fileName: file.name,
+                            s3Key: uploaded.key,
+                            mimeType: file.type || "application/octet-stream",
+                            size: file.size,
+                            source: "ai_chat_upload",
+                        });
+                        return uploaded;
+                    })
+                    : uploadAttachmentForAI(file, att.id).then((url) => ({ key: undefined, url: url ?? undefined }));
+
+                uploadPromise
+                    .then((uploaded) => {
+                        setAttachments((prev) =>
+                            prev.map((a) =>
+                                a.id === att.id
+                                    ? {
+                                        ...a,
+                                        uploading: false,
+                                        ...(uploaded.url ? { url: uploaded.url } : {}),
+                                        ...(uploaded.key ? { s3Key: uploaded.key } : {}),
+                                    }
+                                    : a,
+                            ),
+                        );
+                    })
+                    .catch((error) => {
+                        console.error("Failed to upload attachment", error);
+                        setAttachments((prev) =>
+                            prev.map((a) => (a.id === att.id ? { ...a, uploading: false } : a)),
+                        );
+                    });
             }
         }
-    }, [attachments]);
+    }, [attachments, projectId]);
 
     const removeAttachment = (id: string) => setAttachments((prev) => prev.filter((a) => a.id !== id));
 
@@ -230,54 +265,55 @@ export const ChatContent: React.FC<ChatContentProps> = ({
                     className="hidden"
                     onChange={handleFileChange}
                 />
-                <div className="flex items-end gap-2">
-                    <button
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={isLoading || attachments.length >= ATTACHMENT_MAX_COUNT}
-                        className="flex-none p-1.5 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer pb-3"
-                        title="Attach file (.sql, .csv, .json, image)"
-                    >
-                        <Paperclip size={16} />
-                    </button>
-                    <div className="flex-1 border border-gray-300 rounded-lg focus-within:border-primary-500 focus-within:ring-1 focus-within:ring-primary-100 bg-white overflow-hidden">
-                        {attachments.length > 0 && (
-                            <div className="px-2 pt-2 pb-1">
-                                <AttachmentPreviews attachments={attachments} onRemove={removeAttachment} compact />
-                            </div>
-                        )}
-                        <Input.TextArea
-                            value={inputValue}
-                            onChange={(e) => setInputValue(e.target.value)}
-                            onKeyDown={handleKeyPress}
-                            placeholder="Type your message..."
-                            autoSize={{ minRows: 1, maxRows: 4 }}
-                            className="!border-0 !shadow-none !outline-none focus:!border-0 focus:!ring-0 focus:!shadow-none min-h-10!"
-                            disabled={isLoading}
-                        />
-                    </div>
-                    {isLoading ? (
-                        <Button
-                            type="default"
-                            icon={<Square size={16} className="text-blue-500" fill="currentColor" />}
-                            onClick={onStop}
-                            className="!h-10"
-                        >
-                            Stop
-                        </Button>
-                    ) : (
-                        <Button
-                            type="primary"
-                            icon={<Send size={16} />}
-                            onClick={handleSend}
-                            disabled={(!inputValue.trim() && attachments.length === 0) || isUploading}
-                            className="!h-10"
-                        >
-                            Send
-                        </Button>
+                <div className="rounded-[22px] border border-gray-200 bg-white p-1.5 transition-colors focus-within:border-gray-300">
+                    {attachments.length > 0 && (
+                        <div className="px-2 pt-2 pb-2">
+                            <AttachmentPreviews attachments={attachments} onRemove={removeAttachment} compact />
+                        </div>
                     )}
+                    <div className="flex items-end gap-1.5">
+                        <Tooltip title="Attach file">
+                            <button
+                                type="button"
+                                onClick={() => fileInputRef.current?.click()}
+                                disabled={isLoading || attachments.length >= ATTACHMENT_MAX_COUNT}
+                                className="flex h-9 w-9 flex-shrink-0 cursor-pointer items-center justify-center rounded-full text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-30"
+                            >
+                                <Plus size={18} />
+                            </button>
+                        </Tooltip>
+                        <div className="min-w-0 flex-1">
+                            <Input.TextArea
+                                value={inputValue}
+                                onChange={(e) => setInputValue(e.target.value)}
+                                onKeyDown={handleKeyPress}
+                                placeholder="Type your message..."
+                                autoSize={{ minRows: 1, maxRows: 4 }}
+                                className="!resize-none !rounded-2xl !border-0 !px-2 !py-2 !text-sm !shadow-none !outline-none focus:!border-0 focus:!ring-0 focus:!shadow-none"
+                                disabled={isLoading}
+                            />
+                        </div>
+                        {isLoading ? (
+                            <button
+                                type="button"
+                                onClick={onStop}
+                                className="flex h-9 w-9 flex-shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary-500 text-white transition-colors hover:bg-primary-500"
+                            >
+                                <Square className="h-4 w-4" fill="white" color="white" />
+                            </button>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={handleSend}
+                                disabled={(!inputValue.trim() && attachments.length === 0) || isUploading}
+                                className="flex h-9 w-9 flex-shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary-500 text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:bg-gray-300"
+                            >
+                                <ArrowUp className="h-4 w-4 text-white" />
+                            </button>
+                        )}
+                    </div>
                 </div>
             </div>
         </>
     );
 };
-

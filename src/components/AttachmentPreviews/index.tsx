@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { Image as AntImage } from "antd";
 import { X as XIcon, Loader2 } from "lucide-react";
 import type { Attachment } from "@/api/ai/client";
 
@@ -111,15 +112,23 @@ export function AttachmentPreviews({
           return (
             <div
               key={a.id}
-              className={`relative ${thumbSize} rounded-lg overflow-hidden border border-gray-200 bg-gray-100 flex-none ${readonly && imgSrc ? "cursor-pointer hover:opacity-90 transition-opacity" : ""}`}
-              onClick={readonly && imgSrc ? () => window.open(imgSrc, "_blank", "noopener,noreferrer") : undefined}
-              title={readonly ? a.name : undefined}
+              className={`relative ${thumbSize} rounded-lg overflow-hidden border border-gray-200 bg-gray-100 flex-none ${imgSrc && !a.uploading ? "cursor-pointer hover:opacity-90 transition-opacity" : ""}`}
+              title={a.name}
             >
-              <img
+              <AntImage
                 src={imgSrc}
                 alt={a.name}
-                className="w-full h-full object-cover"
-                draggable={false}
+                width="100%"
+                height="100%"
+                className="block"
+                style={{ objectFit: "cover" }}
+                preview={
+                  imgSrc && !a.uploading
+                    ? {
+                        mask: null,
+                      }
+                    : false
+                }
               />
               {a.uploading && (
                 <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
@@ -128,7 +137,10 @@ export function AttachmentPreviews({
               )}
               {!readonly && !a.uploading && (
                 <button
-                  onClick={() => onRemove(a.id)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRemove(a.id);
+                  }}
                   className="absolute top-0.5 right-0.5 z-20 w-4 h-4 flex items-center justify-center bg-black/50 hover:bg-black/70 rounded-full text-white transition-colors cursor-pointer"
                   title="Remove"
                 >
@@ -170,7 +182,10 @@ export function AttachmentPreviews({
             </div>
             {!readonly && !a.uploading && (
               <button
-                onClick={() => onRemove(a.id)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onRemove(a.id);
+                }}
                 className="absolute top-1 right-1 z-20 w-4 h-4 flex items-center justify-center bg-gray-200 hover:bg-gray-300 rounded-full text-gray-600 transition-colors cursor-pointer"
                 title="Remove"
               >

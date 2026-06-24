@@ -1,13 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { ArrowUp, Loader2, RefreshCw, Square, Paperclip } from "lucide-react";
-import { Input } from "antd";
+import { ArrowUp, Loader2, RefreshCw, Square, Plus } from "lucide-react";
+import { Input, Tooltip } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import LogoHeader from "@/components/LogoHeader";
 import {
   streamChatToLangGraph,
   generateThreadId,
@@ -18,11 +17,11 @@ import {
   cancelRun,
   type Attachment,
   readFileAsAttachment,
-  uploadAttachmentForAI,
   buildChatInputFromAttachments,
   ATTACHMENT_ACCEPT,
   ATTACHMENT_MAX_COUNT,
   ATTACHMENT_MAX_TOTAL_BYTES,
+  uploadAttachmentForAIRecord,
 } from "@/api/ai/client";
 import {
   createConversation,
@@ -34,8 +33,20 @@ import { createProject } from "@/components/CreateProject/api/client";
 import { createSchema, saveSchemaModel } from "@/components/EditProject/api/client";
 import { AttachmentPreviews } from "@/components/AttachmentPreviews";
 import { SchemaType } from "@/utils/constants";
+import type { UserResponse } from "@/types/user.type";
+import {
+  createProjectDocument,
+} from "@/api/project-documents/client";
 
 const { TextArea } = Input;
+
+const GREETING_TEMPLATES = [
+  "Good to see you, {name}.",
+  "Ready when you are, {name}.",
+  "What are we designing today, {name}?",
+  "Let's build something clean, {name}.",
+  "Where should we start, {name}?",
+];
 
 interface Message {
   id: string;
@@ -55,14 +66,29 @@ interface AIChatViewProps {
 const ATT_MARKER = "<!-- __att__:";
 const ATT_END = " -->";
 
+function attachmentMimeType(attachment: Attachment): string {
+  if (attachment.mimeType) return attachment.mimeType;
+  if (attachment.fileType === "pdf") return "application/pdf";
+  if (attachment.fileType === "docx") {
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  }
+  if (attachment.fileType === "json") return "application/json";
+  if (attachment.fileType === "csv") return "text/csv";
+  if (attachment.fileType === "sql") return "text/plain";
+  if (attachment.fileType === "image") return "application/octet-stream";
+  return "application/octet-stream";
+}
+
 function encodeAttachmentMetadata(content: string, attachments: Attachment[]): string {
   if (attachments.length === 0) return content;
-  const meta = attachments.map(({ id, name, fileType, size, url }) => ({
+  const meta = attachments.map(({ id, name, fileType, size, url, s3Key, mimeType }) => ({
     id,
     name,
     fileType,
     size,
+    ...(mimeType ? { mimeType } : {}),
     ...(url ? { url } : {}),
+    ...(s3Key ? { s3Key } : {}),
   }));
   return `${content}\n${ATT_MARKER}${JSON.stringify(meta)}${ATT_END}`;
 }
@@ -80,7 +106,9 @@ function decodeAttachmentMetadata(raw: string): { content: string; attachments: 
       name: string;
       fileType: Attachment["fileType"];
       size: number;
+      mimeType?: string;
       url?: string;
+      s3Key?: string;
     }>;
     return {
       content: cleanContent,
@@ -90,10 +118,37 @@ function decodeAttachmentMetadata(raw: string): { content: string; attachments: 
     return { content: raw, attachments: [] };
   }
 }
+
+function mergePendingAttachments(current: Attachment[], additions: Attachment[]): Attachment[] {
+  const seen = new Set(current.map((attachment) => attachment.id));
+  return [
+    ...current,
+    ...additions.filter((attachment) => attachment.s3Key && !seen.has(attachment.id)),
+  ];
+}
+
+function getStoredUserName(): string {
+  try {
+    const cachedUser = localStorage.getItem("user_data");
+    if (!cachedUser) return "there";
+    const user = JSON.parse(cachedUser) as Partial<UserResponse>;
+    const name = user.firstName || user.fullName || user.email?.split("@")[0];
+    return name?.trim() || "there";
+  } catch {
+    return "there";
+  }
+}
+
+function buildRandomGreeting(): string {
+  const template = GREETING_TEMPLATES[Math.floor(Math.random() * GREETING_TEMPLATES.length)];
+  return template.replace("{name}", getStoredUserName());
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function AIChatView({ threadId: initialThreadId }: AIChatViewProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -109,6 +164,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
   /** Track the project created in this conversation to reuse it */
   const [createdProjectId, setCreatedProjectId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [greeting, setGreeting] = useState("Good to see you.");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textAreaRef = useRef<TextAreaRef>(null);
@@ -123,6 +179,83 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
   const abortControllerRef = useRef<AbortController | null>(null);
   /** Track run_id for cancelling via LangGraph API */
   const runIdRef = useRef<string | null>(null);
+  const pendingProjectDocumentAttachmentsRef = useRef<Attachment[]>([]);
+
+  const resetToNewChat = useCallback(() => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    runIdRef.current = null;
+    redirectTriggeredRef.current = false;
+    currentIntentRef.current = null;
+    detectedLevelRef.current = null;
+    lastUserMessageRef.current = "";
+    pendingProjectDocumentAttachmentsRef.current = [];
+
+    setMessages([]);
+    setInputValue("");
+    setIsLoading(false);
+    setReasoningInfo(null);
+    setIsRedirecting(false);
+    setIsStreamingJson(false);
+    setCreatedProjectId(null);
+    setAttachments([]);
+    setGreeting(buildRandomGreeting());
+    setThreadId(generateThreadId());
+    setConversationCreated(false);
+    setIsLoadingHistory(false);
+  }, []);
+
+  useEffect(() => {
+    if (pathname?.startsWith("/ai-chat/c/") && !initialThreadId) {
+      return;
+    }
+
+    if (pathname === "/ai-chat") {
+      resetToNewChat();
+      return;
+    }
+
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    runIdRef.current = null;
+    redirectTriggeredRef.current = false;
+    currentIntentRef.current = null;
+    detectedLevelRef.current = null;
+    lastUserMessageRef.current = "";
+    pendingProjectDocumentAttachmentsRef.current = [];
+
+    setMessages([]);
+    setInputValue("");
+    setIsLoading(false);
+    setReasoningInfo(null);
+    setIsRedirecting(false);
+    setIsStreamingJson(false);
+    setCreatedProjectId(null);
+    setAttachments([]);
+    setGreeting(buildRandomGreeting());
+
+    if (initialThreadId) {
+      setThreadId(initialThreadId);
+      setConversationCreated(true);
+      setIsLoadingHistory(true);
+      return;
+    }
+
+    setThreadId(generateThreadId());
+    setConversationCreated(false);
+    setIsLoadingHistory(false);
+  }, [initialThreadId, pathname, resetToNewChat]);
+
+  useEffect(() => {
+    const handleNewChat = () => {
+      if (window.location.pathname.startsWith("/ai-chat")) {
+        resetToNewChat();
+      }
+    };
+
+    window.addEventListener("dbflow:new-ai-chat", handleNewChat);
+    return () => window.removeEventListener("dbflow:new-ai-chat", handleNewChat);
+  }, [resetToNewChat]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -141,15 +274,28 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
         const conversation = await getConversation(initialThreadId);
         const msgs = conversation?.messages ?? [];
         if (msgs.length > 0) {
+          const restoredPendingAttachments: Attachment[] = [];
           const loadedMessages: Message[] = msgs.map((msg, index) => {
             if (msg.role === "user") {
               const { content, attachments } = decodeAttachmentMetadata(msg.content);
+              restoredPendingAttachments.push(...attachments.filter((attachment) => attachment.s3Key));
               return {
                 id: `loaded-${index}-${msg.id}`,
                 role: msg.role as "user",
                 content,
                 timestamp: new Date(msg.createdAt),
                 attachments: attachments.length > 0 ? attachments : undefined,
+              };
+            }
+            if (msg.role === "assistant") {
+              const extracted = extractModelJsonFromContent(msg.content);
+              return {
+                id: `loaded-${index}-${msg.id}`,
+                role: msg.role,
+                content: extracted.hasDiagram && extracted.textDescription
+                  ? extracted.textDescription
+                  : msg.content,
+                timestamp: new Date(msg.createdAt),
               };
             }
             return {
@@ -160,6 +306,10 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
             };
           });
           setMessages(loadedMessages);
+          pendingProjectDocumentAttachmentsRef.current = mergePendingAttachments(
+            pendingProjectDocumentAttachmentsRef.current,
+            restoredPendingAttachments,
+          );
         }
       } catch (error) {
         console.error("Failed to load conversation:", error);
@@ -187,25 +337,28 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
     }
     if (pairs.length === 0) return;
 
-    // Mark files that need S3 upload as uploading immediately
-    const needsUpload = (fileType: Attachment["fileType"]) =>
-      fileType === "image" || fileType === "pdf" || fileType === "docx";
-    const newAttachments = pairs.map(({ att }) =>
-      needsUpload(att.fileType) ? { ...att, uploading: true } : att,
+    const newAttachments = pairs.map(({ att, file }) =>
+      ({ ...att, originalFile: file, uploading: true }),
     );
     setAttachments((prev) => [...prev, ...newAttachments]);
 
-    // Upload image/pdf/docx to S3 in background so AI receives a URL instead of base64
+    // Upload once to AI attachment storage. If a project is created later,
+    // the document hub record points to this same S3 key instead of re-uploading.
     for (const { att, file } of pairs) {
-      if (needsUpload(att.fileType)) {
-        uploadAttachmentForAI(file, att.id).then((url) => {
-          setAttachments((prev) =>
-            prev.map((a) =>
-              a.id === att.id ? { ...a, uploading: false, ...(url ? { url } : {}) } : a,
-            ),
-          );
-        });
-      }
+      uploadAttachmentForAIRecord(file, att.id).then((uploaded) => {
+        setAttachments((prev) =>
+          prev.map((a) =>
+            a.id === att.id
+              ? {
+                  ...a,
+                  uploading: false,
+                  ...(uploaded?.url ? { url: uploaded.url } : {}),
+                  ...(uploaded?.key ? { s3Key: uploaded.key } : {}),
+                }
+              : a,
+          ),
+        );
+      });
     }
   }, [attachments]);
 
@@ -215,11 +368,17 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
 
   const isUploading = attachments.some((a) => a.uploading);  const handleSend = useCallback(async (retryMessage?: string) => {
     const messageToSend = retryMessage || inputValue.trim();
-    if ((!messageToSend && attachments.length === 0) || isLoading) return;
+    if ((!messageToSend && attachments.length === 0) || isLoading || isUploading) return;
 
     const userMessageContent = messageToSend || "(attached files)";
     if (!retryMessage) setInputValue("");
     const currentAttachments = retryMessage ? [] : attachments;
+    if (!createdProjectId && currentAttachments.length > 0) {
+      pendingProjectDocumentAttachmentsRef.current = mergePendingAttachments(
+        pendingProjectDocumentAttachmentsRef.current,
+        currentAttachments,
+      );
+    }
     if (!retryMessage) setAttachments([]);
     redirectTriggeredRef.current = false;
     lastUserMessageRef.current = userMessageContent;
@@ -337,6 +496,29 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
           setCreatedProjectId(project.id);
         }
 
+        const attachmentsToPersist = [
+          ...pendingProjectDocumentAttachmentsRef.current,
+          ...currentAttachments,
+        ].filter((attachment, index, all) => (
+          attachment.s3Key &&
+          all.findIndex((candidate) => candidate.id === attachment.id) === index
+        ));
+
+        await Promise.allSettled(
+          attachmentsToPersist
+            .map(async (attachment) => {
+              await createProjectDocument(projectIdToUse!, {
+                title: attachment.name.replace(/\.[^/.]+$/, ""),
+                fileName: attachment.name,
+                s3Key: attachment.s3Key!,
+                mimeType: attachmentMimeType(attachment),
+                size: attachment.size,
+                source: "ai_chat_upload",
+              });
+            }),
+        );
+        pendingProjectDocumentAttachmentsRef.current = [];
+
         const level = detectedLevelRef.current
           // For engineering intents without explicit level, infer from model structure.
           // All levels have a "model" metadata key — check entity/table arrays instead.
@@ -372,18 +554,28 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
         // Save model JSON to S3 so HocusPocus loads it on connect
         await saveSchemaModel(projectIdToUse, schema.id, extracted.modelJson);
 
+        const editorUrl = `/projects/${projectIdToUse}?schemaId=${schema.id}&openChat=true&chatThread=${threadId}`;
+        const assistantContentWithLink = `${fullContent}\n\n[Open created schema](${editorUrl})`;
+        const visibleAssistantContent = `${extracted.textDescription || "Project created successfully."}\n\n[Open created schema](${editorUrl})`;
+
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === assistantMessageId
+              ? { ...msg, content: visibleAssistantContent }
+              : msg
+          )
+        );
+
         // Save messages and link conversation to this project
         await ensureConversationReady();
         await saveMessages(threadId, [
           { role: "user", content: encodeAttachmentMetadata(userMsg, currentAttachments) },
-          { role: "assistant", content: fullContent },
+          { role: "assistant", content: assistantContentWithLink },
         ]);
         await linkConversationToProject(threadId, projectIdToUse, schema.id);
 
         // Navigate to editor with ChatBox auto-opened showing this conversation
-        router.push(
-          `/projects/${projectIdToUse}?schemaId=${schema.id}&openChat=true&chatThread=${threadId}`
-        );
+        router.push(editorUrl);
       } catch (err) {
         console.error("Failed to create project:", err);
         redirectTriggeredRef.current = false;
@@ -501,7 +693,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
     );
     if (returnedRunId) runIdRef.current = returnedRunId;
     abortControllerRef.current = null;
-  }, [inputValue, attachments, isLoading, threadId, conversationCreated, router, createdProjectId]);
+  }, [inputValue, attachments, isLoading, isUploading, threadId, conversationCreated, router, createdProjectId]);
 
   const handleRetry = useCallback(() => {
     if (lastUserMessageRef.current) {
@@ -556,42 +748,51 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
       {messages.length === 0 && !isLoadingHistory && !initialThreadId ? (
         <div className="flex-1 flex items-center justify-center px-4 pb-12">
           <div className="w-full max-w-3xl">
-            <div className="flex justify-center mb-6">
-              <LogoHeader size="extra-large" />
+            <div className="mb-6 text-center">
+              <h1 className="text-2xl font-semibold text-gray-950 sm:text-3xl">
+                {greeting}
+              </h1>
             </div>
 
             <div>
-              <div className="relative border border-gray-300 rounded-xl focus-within:border-primary-500 focus-within:ring-2 focus-within:ring-primary-100 bg-white">
+              <div className="rounded-[26px] border border-gray-200 bg-white p-2 transition-colors focus-within:border-gray-300">
                 {attachments.length > 0 && (
-                  <div className="px-3 pt-3 pb-1">
+                  <div className="px-2 pt-2 pb-2">
                     <AttachmentPreviews attachments={attachments} onRemove={removeAttachment} />
                   </div>
                 )}
-                <TextArea
-                  ref={textAreaRef}
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Ask me anything about databases..."
-                  className="!resize-none !pl-10 !pr-12 !py-4 !rounded-xl !border-0 !shadow-none !outline-none focus:!border-0 focus:!ring-0 focus:!shadow-none !text-sm"
-                  autoSize={{ minRows: 1, maxRows: 10 }}
-                  autoFocus
-                />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isLoading || attachments.length >= ATTACHMENT_MAX_COUNT}
-                  className="absolute cursor-pointer left-3 bottom-[10px] p-1.5 text-gray-500! hover:text-gray-600! disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                  title="Attach file (.sql, .csv, .json, image)"
-                >
-                  <Paperclip size={18} />
-                </button>
-                <button
-                  onClick={() => handleSend()}
-                  disabled={(!inputValue.trim() && attachments.length === 0) || isLoading || isUploading}
-                  className="absolute cursor-pointer right-3 bottom-[8px] p-2 bg-primary-500 text-white rounded-full hover:bg-primary-500 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                >
-                  <ArrowUp className="w-5 h-5 font-bold text-white" />
-                </button>
+                <div className="flex items-end gap-1">
+                  <Tooltip title="Attach file">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isLoading || attachments.length >= ATTACHMENT_MAX_COUNT}
+                      className="flex h-10 w-10 flex-shrink-0 cursor-pointer items-center justify-center rounded-full text-gray-500! transition-colors hover:bg-gray-100 hover:text-gray-700! disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <Plus size={19} />
+                    </button>
+                  </Tooltip>
+                  <div className="min-w-0 flex-1">
+                    <TextArea
+                      ref={textAreaRef}
+                      value={inputValue}
+                      onChange={(e) => setInputValue(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      placeholder="Ask me anything about databases..."
+                      className="!resize-none !rounded-2xl !border-0 !px-2 !py-2.5 !text-sm !shadow-none !outline-none focus:!border-0 focus:!ring-0 focus:!shadow-none"
+                      autoSize={{ minRows: 1, maxRows: 10 }}
+                      autoFocus
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleSend()}
+                    disabled={(!inputValue.trim() && attachments.length === 0) || isLoading || isUploading}
+                    className="flex h-10 w-10 flex-shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary-500 text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:bg-gray-300"
+                  >
+                    <ArrowUp className="w-5 h-5 font-bold text-white" />
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -776,45 +977,53 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
           <div>
             <div className="max-w-3xl mx-auto px-4 py-4">
               <div>
-                <div className="relative border border-gray-300 rounded-xl focus-within:border-primary-500 focus-within:ring-2 focus-within:ring-primary-100 bg-white">
+                <div className="rounded-[26px] border border-gray-200 bg-white p-2 transition-colors focus-within:border-gray-300">
                   {attachments.length > 0 && (
-                    <div className="px-3 pt-3 pb-1">
+                    <div className="px-2 pt-2 pb-2">
                       <AttachmentPreviews attachments={attachments} onRemove={removeAttachment} />
                     </div>
                   )}
-                  <TextArea
-                    ref={textAreaRef}
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder="Ask me anything about databases..."
-                    className="!resize-none !pl-10 !pr-12 !py-4 !text-sm !rounded-xl !border-0 !shadow-none !outline-none focus:!border-0 focus:!ring-0 focus:!shadow-none"
-                    autoSize={{ minRows: 1, maxRows: 6 }}
-                  />
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isLoading || attachments.length >= ATTACHMENT_MAX_COUNT}
-                    className="absolute cursor-pointer left-3 bottom-[10px] p-1.5 text-gray-500! hover:text-gray-600! disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                    title="Attach file (.sql, .csv, .json, image)"
-                  >
-                    <Paperclip size={18} />
-                  </button>
-                  {isLoading ? (
+                  <div className="flex items-end gap-1">
+                    <Tooltip title="Attach file">
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isLoading || attachments.length >= ATTACHMENT_MAX_COUNT}
+                        className="flex h-10 w-10 flex-shrink-0 cursor-pointer items-center justify-center rounded-full text-gray-500! transition-colors hover:bg-gray-100 hover:text-gray-700! disabled:cursor-not-allowed disabled:opacity-30"
+                      >
+                        <Plus size={19} />
+                      </button>
+                    </Tooltip>
+                    <div className="min-w-0 flex-1">
+                      <TextArea
+                        ref={textAreaRef}
+                        value={inputValue}
+                        onChange={(e) => setInputValue(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        placeholder="Ask me anything about databases..."
+                        className="!resize-none !rounded-2xl !border-0 !px-2 !py-2.5 !text-sm !shadow-none !outline-none focus:!border-0 focus:!ring-0 focus:!shadow-none"
+                        autoSize={{ minRows: 1, maxRows: 6 }}
+                      />
+                    </div>
+                    {isLoading ? (
+                      <button
+                        type="button"
+                        onClick={handleStop}
+                        className="flex h-10 w-10 flex-shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary-500 text-white transition-colors hover:bg-primary-500"
+                      >
+                        <Square className="w-5 h-5" fill="white" color="white" />
+                      </button>
+                    ) : (
                     <button
-                      onClick={handleStop}
-                      className="absolute cursor-pointer right-3 bottom-[10px] p-2 bg-primary-500 text-white rounded-full hover:bg-primary-500 transition-colors"
-                    >
-                      <Square className="w-5 h-5" fill="white" color="white" />
-                    </button>
-                  ) : (
-                    <button
+                      type="button"
                       onClick={() => handleSend()}
                       disabled={(!inputValue.trim() && attachments.length === 0) || isUploading}
-                      className="absolute cursor-pointer right-3 bottom-[8px] p-2 bg-primary-500 text-white rounded-full hover:bg-primary-500 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                      className="flex h-10 w-10 flex-shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary-500 text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:bg-gray-300"
                     >
                       <ArrowUp className="w-5 h-5 font-bold text-white" />
                     </button>
-                  )}
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

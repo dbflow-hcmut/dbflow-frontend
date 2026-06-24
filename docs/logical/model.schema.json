@@ -12,7 +12,7 @@
       "additionalProperties": false,
       "required": ["id", "name", "version"],
       "properties": {
-        "id": { "type": "string", "pattern": "^lid_" },
+        "id": { "type": "string", "minLength": 1 },
         "name": { "type": "string", "minLength": 1 },
         "version": { "type": "integer", "minimum": 1 },
         "notes": { "type": "string" }
@@ -21,7 +21,6 @@
 
     "tables": {
       "type": "array",
-      "minItems": 1,
       "items": { "$ref": "#/$defs/table" }
     }
   },
@@ -32,18 +31,22 @@
       "additionalProperties": false,
       "required": ["id", "name", "columns"],
       "properties": {
-        "id": { "type": "string", "pattern": "^lid_" },
+        "id": { "type": "string", "minLength": 1 },
         "name": { "type": "string" },
 
         "columns": {
           "type": "array",
-          "minItems": 1,
           "items": { "$ref": "#/$defs/column" }
         },
 
         "functionalDependencies": {
           "type": "array",
           "items": { "$ref": "#/$defs/functionalDependency" }
+        },
+
+        "showFunctionalDependencies": {
+          "type": "boolean",
+          "default": false
         },
 
         "notes": { "type": "string" }
@@ -55,7 +58,7 @@
       "additionalProperties": false,
       "required": ["id", "name", "nullable", "unique"],
       "properties": {
-        "id": { "type": "string", "pattern": "^lid_" },
+        "id": { "type": "string", "minLength": 1 },
         "name": { "type": "string" },
 
         "nullable": { "type": "boolean", "default": true },
@@ -75,8 +78,8 @@
               "additionalProperties": false,
               "required": ["refTableId", "refColumnId"],
               "properties": {
-                "refTableId": { "type": "string", "pattern": "^lid_" },
-                "refColumnId": { "type": "string", "pattern": "^lid_" }
+                "refTableId": { "type": "string", "minLength": 1 },
+                "refColumnId": { "type": "string", "minLength": 1 }
               }
             },
 
@@ -96,19 +99,17 @@
       "additionalProperties": false,
       "required": ["id", "left", "right"],
       "properties": {
-        "id": { "type": "string", "pattern": "^lid_" },
+        "id": { "type": "string", "minLength": 1 },
         "name": { "type": "string" },
 
         "left": {
           "type": "array",
-          "minItems": 1,
-          "items": { "type": "string", "pattern": "^lid_" }
+          "items": { "type": "string", "minLength": 1 }
         },
 
         "right": {
           "type": "array",
-          "minItems": 1,
-          "items": { "type": "string", "pattern": "^lid_" }
+          "items": { "type": "string", "minLength": 1 }
         },
 
         "notes": { "type": "string" }
