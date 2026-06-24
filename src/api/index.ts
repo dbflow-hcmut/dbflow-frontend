@@ -19,6 +19,7 @@ export const PROXY_PROJECT_DOCUMENTS = (id: string) => `${PROXY_PROJECT_DETAIL(i
 export const PROXY_PROJECT_DOCUMENT_PRESIGNED_UPLOAD = (id: string) => `${PROXY_PROJECT_DOCUMENTS(id)}/presigned-upload`;
 export const PROXY_PROJECT_DOCUMENT_DETAIL = (projectId: string, documentId: string) => `${PROXY_PROJECT_DOCUMENTS(projectId)}/${documentId}`;
 export const PROXY_PROJECT_DOCUMENT_DOWNLOAD_URL = (projectId: string, documentId: string) => `${PROXY_PROJECT_DOCUMENT_DETAIL(projectId, documentId)}/download-url`;
+export const PROXY_PROJECT_DOCUMENT_RETRY_INGEST = (projectId: string, documentId: string) => `${PROXY_PROJECT_DOCUMENT_DETAIL(projectId, documentId)}/retry-ingest`;
 export const PROXY_DELETE_SCHEMA = (projectId: string, schemaId: string) => `${PROXY_PROJECT_DETAIL(projectId)}/schemas/${schemaId}`;
 export const PROXY_UPDATE_SCHEMA = (projectId: string, schemaId: string) => `${PROXY_PROJECT_DETAIL(projectId)}/schemas/${schemaId}`;
 export const PROXY_SCHEMA_DIAGRAM = (schemaId: string) => `${PROXY_BASE}/schemas/${schemaId}/diagram`;

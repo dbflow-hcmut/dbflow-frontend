@@ -606,9 +606,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
 
         const isDiagramIntent =
           currentIntentRef.current === "create" ||
-          currentIntentRef.current === "edit" ||
-          currentIntentRef.current === "forward_engineer" ||
-          currentIntentRef.current === "reverse_engineer";
+          currentIntentRef.current === "edit";
 
         if (isDiagramIntent) {
           // Show only text description while streaming, hide JSON block
@@ -635,9 +633,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
 
         const isDiagramIntent =
           currentIntentRef.current === "create" ||
-          currentIntentRef.current === "edit" ||
-          currentIntentRef.current === "forward_engineer" ||
-          currentIntentRef.current === "reverse_engineer";
+          currentIntentRef.current === "edit";
 
         if (isDiagramIntent && finalAssistantContent) {
           // Keep loading state while creating project + saving to S3

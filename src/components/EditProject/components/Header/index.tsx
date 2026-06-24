@@ -459,6 +459,7 @@ const Header: React.FC<HeaderProps> = ({
                 footer={null}
                 width="min(1100px, calc(100vw - 48px))"
                 destroyOnHidden
+                centered
             >
                 <ProjectDocumentsHub
                     projectId={projectId}
