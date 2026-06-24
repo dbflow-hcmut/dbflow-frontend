@@ -839,6 +839,18 @@ export const convertConceptualToLogical = (
         notes?: string;
     };
     const tableMap = new Map<string, MutTable>();
+    type ConceptualAttribute = ConceptualModelPayload["entities"][number]["attributes"][number];
+    const collectStoredAttributeLeaves = (attr: ConceptualAttribute): ConceptualAttribute[] => {
+        if (
+            (attr.kind === "composite" || attr.kind === "complex") &&
+            attr.components &&
+            attr.components.length > 0
+        ) {
+            return attr.components.flatMap(collectStoredAttributeLeaves);
+        }
+
+        return [attr];
+    };
 
     // ── Step 1: Entities -> Tables with attribute columns ────────────────
     for (const entity of entities) {
@@ -851,12 +863,9 @@ export const convertConceptualToLogical = (
             // Multi-valued attributes become separate tables (handled in Step 4)
             if (attr.kind === "multi_valued") continue;
 
-            if (
-                attr.kind === "composite" &&
-                attr.components &&
-                attr.components.length > 0
-            ) {
-                for (const comp of attr.components) {
+            if ((attr.kind === "composite" || attr.kind === "complex") && attr.components?.length) {
+                for (const comp of collectStoredAttributeLeaves(attr)) {
+                    if (comp.kind === "derived" || comp.kind === "multi_valued") continue;
                     columns.push({
                         id: generateLid(),
                         name: comp.name,

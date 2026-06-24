@@ -11,19 +11,13 @@ const generateCid = () => {
 
 type AttributeKind = "simple" | "composite" | "multi_valued" | "complex" | "derived";
 
-type ModelAttributeComponent = {
-    id: string;
-    name: string;
-    kind: "simple";
-};
-
 type ModelAttribute = {
     id: string;
     name: string;
     kind: AttributeKind;
     isKey: boolean;
     semantics?: string[];
-    components?: ModelAttributeComponent[];
+    components?: ModelAttribute[];
     derivation?: string;
     notes?: string;
 };
@@ -114,10 +108,11 @@ const FALLBACK_MODEL_NAME = "Untitled model";
 const buildAttributeKind = (
     node: StoredDiagramNode,
     hasChildren: boolean,
-    childHasChildren: boolean
+    childHasChildren: boolean,
+    childCount: number
 ): AttributeKind => {
     if (hasChildren) {
-        return childHasChildren ? "complex" : "composite";
+        return childHasChildren || childCount > 1 ? "complex" : "composite";
     }
     if (node.attributeRender?.doubleEllipse) {
         return "multi_valued";
@@ -152,19 +147,78 @@ const getAttributeId = (node: StoredDiagramNode) => node.attributeId ?? node.id;
 const getEntityId = (node: StoredDiagramNode) => node.entityId ?? node.id;
 const getRelationshipId = (node: StoredDiagramNode) => node.relationshipId ?? node.id;
 
-const collectAttributeHierarchy = (edges: StoredDiagramEdge[]) => {
+const collectAttributeHierarchy = (
+    edges: StoredDiagramEdge[],
+    storedNodes: Map<string, StoredDiagramNode>
+) => {
     const parentMap = new Map<string, string>();
     const childrenMap = new Map<string, string[]>();
+    const attributeRoots = new Set<string>();
+    const componentEdges: Array<[string, string]> = [];
+    const componentAdjacency = new Map<string, string[]>();
 
-    edges.forEach((edge) => {
-        if (edge.type !== "componentOf") return;
-        const parentId = edge.from.nodeId;
-        const childId = edge.to.nodeId;
+    const isAttributeNode = (nodeId: string) => storedNodes.get(nodeId)?.type === "attribute";
+    const isAttributeOwnerNode = (nodeId: string) => {
+        const node = storedNodes.get(nodeId);
+        return node?.type === "entity" || node?.type === "relationship";
+    };
+
+    const addAdjacent = (a: string, b: string) => {
+        if (!componentAdjacency.has(a)) componentAdjacency.set(a, []);
+        if (!componentAdjacency.get(a)!.includes(b)) componentAdjacency.get(a)!.push(b);
+    };
+
+    const addChild = (parentId: string, childId: string) => {
+        if (parentId === childId || parentMap.has(childId)) return;
+
         parentMap.set(childId, parentId);
         if (!childrenMap.has(parentId)) {
             childrenMap.set(parentId, []);
         }
-        childrenMap.get(parentId)?.push(childId);
+        const children = childrenMap.get(parentId)!;
+        if (!children.includes(childId)) {
+            children.push(childId);
+        }
+    };
+
+    edges.forEach((edge) => {
+        if (edge.type === "attrOf") {
+            if (isAttributeNode(edge.from.nodeId) && isAttributeOwnerNode(edge.to.nodeId)) {
+                attributeRoots.add(edge.from.nodeId);
+            } else if (isAttributeNode(edge.to.nodeId) && isAttributeOwnerNode(edge.from.nodeId)) {
+                attributeRoots.add(edge.to.nodeId);
+            }
+            return;
+        }
+
+        if (edge.type !== "componentOf") return;
+        if (!isAttributeNode(edge.from.nodeId) || !isAttributeNode(edge.to.nodeId)) return;
+
+        componentEdges.push([edge.from.nodeId, edge.to.nodeId]);
+        addAdjacent(edge.from.nodeId, edge.to.nodeId);
+        addAdjacent(edge.to.nodeId, edge.from.nodeId);
+    });
+
+    const visit = (parentId: string, seen: Set<string>) => {
+        for (const childId of componentAdjacency.get(parentId) ?? []) {
+            if (seen.has(childId)) continue;
+
+            addChild(parentId, childId);
+            visit(childId, new Set([...seen, childId]));
+        }
+    };
+
+    attributeRoots.forEach((rootId) => {
+        visit(rootId, new Set([rootId]));
+    });
+
+    // Fallback for detached component chains that have no owner-connected root:
+    // preserve the stored edge direction.
+    componentEdges.forEach(([fromId, toId]) => {
+        if (!parentMap.has(fromId) && !parentMap.has(toId)) {
+            addChild(fromId, toId);
+            visit(toId, new Set([fromId, toId]));
+        }
     });
 
     return { parentMap, childrenMap };
@@ -186,31 +240,29 @@ const buildAttributeFactory = (
             return null;
         }
 
+        // Cache a shell before recursing so malformed cyclic component edges
+        // cannot recurse forever.
+        const attribute: ModelAttribute = {
+            id: getAttributeId(node),
+            name: node.name ?? getAttributeId(node),
+            kind: "simple",
+            isKey: Boolean(node.attributeRender?.underline),
+        };
+        cache.set(nodeId, attribute);
+
         const childrenIds = hierarchy.childrenMap.get(nodeId) ?? [];
-        const components: ModelAttributeComponent[] = childrenIds
-            .map((childId) => {
-                const childNode = storedNodes.get(childId);
-                if (!childNode || childNode.type !== "attribute") return null;
-                return {
-                    id: getAttributeId(childNode),
-                    name: childNode.name ?? getAttributeId(childNode),
-                    kind: "simple",
-                };
-            })
-            .filter((item): item is ModelAttributeComponent => Boolean(item));
+        const componentEntries = childrenIds
+            .map((childId) => ({ childId, attribute: buildAttribute(childId) }))
+            .filter((entry): entry is { childId: string; attribute: ModelAttribute } => Boolean(entry.attribute));
+        const components = componentEntries.map((entry) => entry.attribute);
 
         const hasChildren = components.length > 0;
-        const childHasChildren = childrenIds.some((childId) => {
+        const childHasChildren = componentEntries.some(({ childId }) => {
             const nestedChildren = hierarchy.childrenMap.get(childId);
             return nestedChildren && nestedChildren.length > 0;
         });
 
-        const attribute: ModelAttribute = {
-            id: getAttributeId(node),
-            name: node.name ?? getAttributeId(node),
-            kind: buildAttributeKind(node, hasChildren, childHasChildren),
-            isKey: Boolean(node.attributeRender?.underline),
-        };
+        attribute.kind = buildAttributeKind(node, hasChildren, childHasChildren, components.length);
 
         if (node.attributeRender?.dashed) {
             attribute.derivation = "derived";
@@ -286,20 +338,43 @@ const collectOwnerAttributes = (
 
 const buildRelationshipEnds = (
     relationshipId: string,
+    relationshipNodeId: string,
     storedEdges: StoredDiagramEdge[],
     storedNodes: Map<string, StoredDiagramNode>,
     relationshipMetaCardinality?: Record<string, string>
 ): RelationshipEnd[] => {
     const ends: RelationshipEnd[] = [];
 
-    const relevantEdges = storedEdges.filter(
-        (edge) =>
-            (edge.type === "participation" || edge.type === "identifying") &&
-            edge.relationshipId === relationshipId
-    );
+    const relevantEdges = storedEdges.filter((edge) => {
+        if (edge.type !== "participation" && edge.type !== "identifying") return false;
+        if (edge.relationshipId === relationshipId || edge.relationshipId === relationshipNodeId) {
+            return true;
+        }
 
-    // Track how many times each entity appears so we can generate
-    // distinct role names for recursive (self-referencing) ends.
+        const fromNode = storedNodes.get(edge.from.nodeId);
+        const toNode = storedNodes.get(edge.to.nodeId);
+        const relationshipNode =
+            fromNode?.type === "relationship" ? fromNode : toNode?.type === "relationship" ? toNode : null;
+
+        return Boolean(
+            relationshipNode &&
+            (relationshipNode.id === relationshipNodeId || getRelationshipId(relationshipNode) === relationshipId)
+        );
+    });
+
+    const entityTotalCounts = new Map<string, number>();
+    relevantEdges.forEach((edge) => {
+        const fromNode = storedNodes.get(edge.from.nodeId);
+        const toNode = storedNodes.get(edge.to.nodeId);
+        const entityNode = fromNode?.type === "entity" ? fromNode : toNode?.type === "entity" ? toNode : null;
+        if (!entityNode) return;
+
+        const entityId = getEntityId(entityNode);
+        entityTotalCounts.set(entityId, (entityTotalCounts.get(entityId) ?? 0) + 1);
+    });
+
+    // Track per-entity occurrences so recursive/self-referencing ends get
+    // stable, distinct role names when the edge has no explicit center label.
     const entityEndCounts = new Map<string, number>();
 
     relevantEdges.forEach((edge) => {
@@ -326,7 +401,8 @@ const buildRelationshipEnds = (
         // Read role from edge center label or generate for recursive
         const count = entityEndCounts.get(entityId) ?? 0;
         entityEndCounts.set(entityId, count + 1);
-        const role = labels.center || (count > 0 ? `role_${count}` : undefined);
+        const isRecursiveEnd = (entityTotalCounts.get(entityId) ?? 0) > 1;
+        const role = labels.center || (isRecursiveEnd ? `role_${count + 1}` : undefined);
 
         ends.push({
             entityId,
@@ -473,17 +549,22 @@ const getGeneralizationParentIds = (gen: ModelGeneralization): string[] => {
  * - `fromEntity`/`toEntity`/`fromCardinality`/`toCardinality` → `ends: [...]`
  */
 export function normalizeConceptualModel(raw: Record<string, unknown>): ConceptualModelPayload {
+    const normalizeAttribute = (a: Record<string, unknown>): ModelAttribute => ({
+        id: a.id as string,
+        name: a.name as string,
+        kind: (a.kind ?? "simple") as ModelAttribute["kind"],
+        isKey: Boolean((a.isKey as boolean | undefined) ?? (a.identifier as boolean | undefined) ?? false),
+        ...(Array.isArray(a.semantics) ? { semantics: a.semantics as string[] } : {}),
+        ...(Array.isArray(a.components)
+            ? { components: (a.components as Record<string, unknown>[]).map(normalizeAttribute) }
+            : {}),
+        ...(a.derivation ? { derivation: a.derivation as string } : {}),
+        ...(a.notes ? { notes: a.notes as string } : {}),
+    });
+
     const entities = (Array.isArray(raw.entities) ? raw.entities as Record<string, unknown>[] : []).map((e) => {
-        const attributes = (Array.isArray(e.attributes) ? e.attributes as Record<string, unknown>[] : []).map((a) => ({
-            id: a.id as string,
-            name: a.name as string,
-            kind: (a.kind ?? "simple") as ModelAttribute["kind"],
-            isKey: Boolean((a.isKey as boolean | undefined) ?? (a.identifier as boolean | undefined) ?? false),
-            ...(Array.isArray(a.semantics) ? { semantics: a.semantics as string[] } : {}),
-            ...(Array.isArray(a.components) ? { components: a.components as ModelAttributeComponent[] } : {}),
-            ...(a.derivation ? { derivation: a.derivation as string } : {}),
-            ...(a.notes ? { notes: a.notes as string } : {}),
-        })) as ModelAttribute[];
+        const attributes = (Array.isArray(e.attributes) ? e.attributes as Record<string, unknown>[] : [])
+            .map(normalizeAttribute);
         return {
             id: e.id as string,
             name: e.name as string,
@@ -509,6 +590,9 @@ export function normalizeConceptualModel(raw: Record<string, unknown>): Conceptu
             name: r.name as string,
             type: ((r.type ?? "association") as "association" | "identifying"),
             ends,
+            ...(Array.isArray(r.attributes)
+                ? { attributes: (r.attributes as Record<string, unknown>[]).map(normalizeAttribute) }
+                : {}),
             ...(r.arity ? { arity: r.arity as number } : {}),
             ...(r.semantics ? { semantics: r.semantics as string } : {}),
             ...(r.notes ? { notes: r.notes as string } : {}),
@@ -565,7 +649,7 @@ export const buildConceptualModel = ({
     }
 
     const storedNodeMap = new Map(storedNodes.map((node) => [node.id, node]));
-    const hierarchy = collectAttributeHierarchy(storedEdges);
+    const hierarchy = collectAttributeHierarchy(storedEdges, storedNodeMap);
     const { buildAttribute, hasParent } = buildAttributeFactory(storedNodeMap, hierarchy);
     const { entityAttributes, relationshipAttributes } = collectOwnerAttributes(
         storedEdges,
@@ -590,6 +674,7 @@ export const buildConceptualModel = ({
             const relationshipMetaCardinality = getRelationshipCardinalityMeta(node);
             const ends = buildRelationshipEnds(
                 relationshipId,
+                node.id,
                 storedEdges,
                 storedNodeMap,
                 relationshipMetaCardinality
@@ -931,8 +1016,8 @@ export const buildDiagramFromModel = async ({
         for (const sid of cat.superclassEntityIds) {
             layoutEdges.push({
                 id: `le_catm_${cat.id}_${sid}`,
-                sourceId: cat.id,
-                targetId: sid,
+                sourceId: sid,
+                targetId: cat.id,
             });
         }
     }
@@ -1201,8 +1286,8 @@ export const buildDiagramFromModel = async ({
             edges.push({
                 id: `e_catm_${cat.id}_${sid}`,
                 type: "categoryMember",
-                from: { nodeId: cat.id },
-                to: { nodeId: sid },
+                from: { nodeId: sid },
+                to: { nodeId: cat.id },
                 categoryId: cat.id,
             });
         });
@@ -1247,6 +1332,53 @@ const emitAttributeNodes = (
     edges: StoredDiagramEdge[],
     baseAngle: number,
 ) => {
+    const emitComponentNodes = (
+        parent: ModelAttribute,
+        parentPos: { x: number; y: number },
+        parentAngle: number,
+        path: Set<string>,
+    ) => {
+        if (!parent.components?.length) return;
+
+        const compSizes = parent.components.map(c => attrNodeSize(c.name));
+        const maxCompW = Math.max(...compSizes.map(s => s.w));
+
+        const compArc = autoArcSpan(
+            parent.components.length,
+            LAYOUT.compRadius,
+            maxCompW,
+            LAYOUT.compMinGap,
+        );
+
+        parent.components.forEach((comp, ci) => {
+            if (path.has(comp.id)) return;
+
+            const compSize = compSizes[ci];
+            const cAngle = arcAngle(ci, parent.components!.length, parentAngle, compArc);
+            const cFanPos = polarPos(parentPos.x, parentPos.y, cAngle, LAYOUT.compRadius);
+            const cPos = lookup.get(comp.id) ?? cFanPos;
+
+            nodes.push({
+                id: comp.id,
+                type: "attribute",
+                position: cPos,
+                size: mergeSize(compSize, sizes.get(comp.id)),
+                name: comp.name,
+                attributeId: comp.id,
+                attributeRender: toAttrRender(comp),
+            });
+
+            edges.push({
+                id: `e_comp_${parent.id}_${comp.id}`,
+                type: "componentOf",
+                from: { nodeId: parent.id },
+                to: { nodeId: comp.id },
+            });
+
+            emitComponentNodes(comp, cPos, cAngle, new Set([...path, comp.id]));
+        });
+    };
+
     const attrSizes = attrs.map(a => attrNodeSize(a.name));
     const maxW = attrSizes.length > 0
         ? Math.max(...attrSizes.map(s => s.w))
@@ -1284,40 +1416,7 @@ const emitAttributeNodes = (
             to: { nodeId: ownerId },
         });
 
-        // Composite children — smaller fan around the attribute node
-        if (attr.components?.length) {
-            const compSizes = attr.components.map(c => attrNodeSize(c.name));
-            const maxCompW = Math.max(...compSizes.map(s => s.w));
-
-            const compArc = autoArcSpan(
-                attr.components.length,
-                LAYOUT.compRadius,
-                maxCompW,
-                LAYOUT.compMinGap,
-            );
-
-            attr.components.forEach((comp, ci) => {
-                const compSize = compSizes[ci];
-                const cAngle = arcAngle(ci, attr.components!.length, angle, compArc);
-                const cFanPos = polarPos(pos.x, pos.y, cAngle, LAYOUT.compRadius);
-                const cPos = lookup.get(comp.id) ?? cFanPos;
-
-                nodes.push({
-                    id: comp.id,
-                    type: "attribute",
-                    position: cPos,
-                    size: mergeSize(compSize, sizes.get(comp.id)),
-                    name: comp.name,
-                    attributeId: comp.id,
-                });
-
-                edges.push({
-                    id: `e_comp_${attr.id}_${comp.id}`,
-                    type: "componentOf",
-                    from: { nodeId: attr.id },
-                    to: { nodeId: comp.id },
-                });
-            });
-        }
+        // Composite/complex children — smaller recursive fans around attributes.
+        emitComponentNodes(attr, pos, angle, new Set([attr.id]));
     });
 };

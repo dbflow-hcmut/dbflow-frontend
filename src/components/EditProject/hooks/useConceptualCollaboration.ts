@@ -494,6 +494,16 @@ export const useConceptualCollaboration = ({
 
         const storedNodes = mapReactNodesToStoredNodes(nodes);
         const storedEdges = mapReactEdgesToStoredEdges(edges, nodes);
+        const modelPayload =
+            storedNodes.length > 0
+                ? buildConceptualModel({
+                      storedNodes,
+                      storedEdges,
+                      schemaId: schema?.id ?? undefined,
+                      schemaName: schema?.name ?? undefined,
+                      diagramName,
+                  })
+                : createEmptyConceptualModel(schema?.id ?? undefined, schema?.name ?? diagramName);
 
         const diagramPayload = {
             diagram: {
@@ -503,16 +513,18 @@ export const useConceptualCollaboration = ({
         };
 
         let nextDiagramString: string | null = null;
+        let nextModelString: string | null = null;
 
         try {
             nextDiagramString = JSON.stringify(diagramPayload);
+            nextModelString = JSON.stringify(modelPayload);
         } catch (error) {
-            console.error("Failed to serialize diagram payload:", error);
+            console.error("Failed to serialize conceptual diagram/model payload:", error);
             return;
         }
 
-        const commitDiagramUpdate = () => {
-            if (!ydocRef.current || !nextDiagramString) return;
+        const commitUpdate = () => {
+            if (!ydocRef.current || !nextDiagramString || !nextModelString) return;
             const doc = ydocRef.current;
             const diagramMap = doc.getMap('diagram');
             const modelMap = doc.getMap('model');
@@ -544,20 +556,21 @@ export const useConceptualCollaboration = ({
                 }
             });
             lastSyncedDiagramStringRef.current = nextDiagramString;
+            lastSyncedModelStringRef.current = nextModelString;
         };
 
-        if (nextDiagramString && lastSyncedDiagramStringRef.current !== nextDiagramString) {
+        if (
+            nextDiagramString &&
+            nextModelString &&
+            (lastSyncedDiagramStringRef.current !== nextDiagramString ||
+                lastSyncedModelStringRef.current !== nextModelString)
+        ) {
             if (!ydocRef.current) {
-                pendingDiagramUpdateRef.current = commitDiagramUpdate;
+                pendingDiagramUpdateRef.current = commitUpdate;
             } else {
-                commitDiagramUpdate();
+                commitUpdate();
             }
         }
-
-        // NOTE: Model is NOT written to Yjs from the sync useEffect.
-        // The diagram-only sync to Yjs is sufficient. The model in Yjs
-        // (loaded from S3 via Hocuspocus) stays untouched.
-        // Model is only updated via applyModelPayload() or mutateModel().
     }, [enabled, nodes, edges, schema?.id, schema?.name, diagramName]);
 
     // ── Apply model payload (full replace: Model → Diagram) ─────────────
