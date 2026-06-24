@@ -27,7 +27,8 @@
 * `components`: Tập các thuộc tính con nếu `kind = composite | complex`.
   * `id*`: ID thuộc tính con (prefix `cid_`).
   * `name*`: Tên thuộc tính con.
-  * `kind*`: Luôn là `simple`.
+  * `kind*`: Loại thuộc tính con (`simple`, `composite`, `multi_valued`, `complex`, `derived`).
+  * `components`: Tập thuộc tính con lồng nhau nếu thuộc tính con là `composite | complex`.
 * `derivation`: Công thức tính nếu `kind = derived`.
 * `notes`: Ghi chú nghiệp vụ.
 
