@@ -500,7 +500,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
             abortController.signal,
             schemaLevel,
             effectiveModel,
-            projectId,
+            projectId ?? undefined,
         );
         if (returnedRunId) runIdRef.current = returnedRunId;
         abortControllerRef.current = null;

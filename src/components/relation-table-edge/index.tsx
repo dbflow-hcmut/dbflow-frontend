@@ -72,8 +72,6 @@ const OneBar: React.FC<{
 const RelationTableEdge: React.FC<EdgeProps<RelationTableEdgeData>> = (props) => {
     const {
         id,
-        source,
-        target,
         sourceX,
         sourceY,
         targetX,

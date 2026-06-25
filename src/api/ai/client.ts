@@ -229,6 +229,8 @@ export interface LangGraphStreamRequest {
   input: {
     messages: ChatMessage[];
     current_level?: string;
+    input_model?: Record<string, unknown> | null;
+    project_id?: string;
   };
   config?: {
     configurable?: {
@@ -472,6 +474,7 @@ export async function streamChatToLangGraph(
   abortSignal?: AbortSignal,
   currentLevel?: string,
   currentModel?: Record<string, unknown> | null,
+  projectId?: string,
 ): Promise<string | null> {
   let runId: string | null = null;
   try {
@@ -496,6 +499,7 @@ export async function streamChatToLangGraph(
         messages: messages,
         ...(currentLevel ? { current_level: currentLevel } : {}),
         ...(currentModel ? { input_model: currentModel } : {}),
+        ...(projectId ? { project_id: projectId } : {}),
       },
       config: {
         configurable: {
