@@ -222,15 +222,13 @@ export function buildChatInputFromAttachments(
 }
 
 // Fixed assistant ID for DBFlow AI
-export const DBFLOW_ASSISTANT_ID = "fb2de621-ab0d-47af-b99a-c5955f46f9a2";
+export const DBFLOW_ASSISTANT_ID = "71ce8f7d-18be-4139-b249-0001da5758b7";
 
 export interface LangGraphStreamRequest {
   assistant_id: string;
   input: {
     messages: ChatMessage[];
     current_level?: string;
-    input_model?: Record<string, unknown> | null;
-    project_id?: string | null;
   };
   config?: {
     configurable?: {
@@ -474,7 +472,6 @@ export async function streamChatToLangGraph(
   abortSignal?: AbortSignal,
   currentLevel?: string,
   currentModel?: Record<string, unknown> | null,
-  projectId?: string | null,
 ): Promise<string | null> {
   let runId: string | null = null;
   try {
@@ -499,7 +496,6 @@ export async function streamChatToLangGraph(
         messages: messages,
         ...(currentLevel ? { current_level: currentLevel } : {}),
         ...(currentModel ? { input_model: currentModel } : {}),
-        ...(projectId ? { project_id: projectId } : {}),
       },
       config: {
         configurable: {
