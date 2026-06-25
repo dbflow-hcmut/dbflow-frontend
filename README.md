@@ -35,6 +35,6 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
-## Live Demo
+## Live Demo 
 
 App has been deployed here:  [https://dbflow.vercel.app](https://dbflow.vercel.app) 
