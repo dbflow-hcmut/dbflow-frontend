@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Input, Tooltip } from "antd";
 import { ArrowUp, Loader2, RefreshCw, Square, Plus } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -56,6 +57,7 @@ export const ChatContent: React.FC<ChatContentProps> = ({
     const [attachments, setAttachments] = useState<Attachment[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const router = useRouter();
 
     const messages = externalMessages !== undefined ? externalMessages : internalMessages;
 
@@ -130,7 +132,7 @@ export const ChatContent: React.FC<ChatContentProps> = ({
 
     useEffect(() => {
         if (messagesEndRef.current) {
-            messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+            messagesEndRef.current.scrollIntoView({ behavior: "instant" });
         }
     }, [messages, isLoading]);
 
@@ -195,7 +197,29 @@ export const ChatContent: React.FC<ChatContentProps> = ({
                                             prose-pre:bg-gray-900 prose-pre:text-gray-100
                                             prose-a:text-primary-600 prose-strong:text-gray-900
                                             prose-table:text-xs prose-th:bg-gray-100">
-                                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                            <ReactMarkdown
+                                                remarkPlugins={[remarkGfm]}
+                                                components={{
+                                                    a: ({ href, children }) => {
+                                                        const isInternal = href?.startsWith("/");
+                                                        if (isInternal) {
+                                                            return (
+                                                                <a
+                                                                    href={href}
+                                                                    onClick={(e) => {
+                                                                        e.preventDefault();
+                                                                        router.push(href);
+                                                                    }}
+                                                                    className="cursor-pointer"
+                                                                >
+                                                                    {children}
+                                                                </a>
+                                                            );
+                                                        }
+                                                        return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
+                                                    },
+                                                }}
+                                            >
                                                 {message.text}
                                             </ReactMarkdown>
                                         </div>
