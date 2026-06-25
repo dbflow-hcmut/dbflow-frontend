@@ -202,7 +202,7 @@ export const ChatContent: React.FC<ChatContentProps> = ({
                                                 components={{
                                                     a: ({ href, children }) => {
                                                         const isInternal = href?.startsWith("/");
-                                                        if (isInternal) {
+                                                        if (isInternal && href) {
                                                             return (
                                                                 <a
                                                                     href={href}
