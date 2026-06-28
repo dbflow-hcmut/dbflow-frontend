@@ -49,7 +49,7 @@ import ExportModal, { ExportSettings, ExportFormat, ExportScope } from "./compon
 import DDLExportModal from "./components/DDLExportModal";
 import DDLImportModal from "./components/DDLImportModal";
 import ConvertToPhysicalModal from "./components/ConvertToPhysicalModal";
-import type { DBMSType } from "./utils/dbms-config";
+import { getDBMSConfig, type DBMSType } from "./utils/dbms-config";
 import HTMLDocsExportModal from "./components/HTMLDocsExportModal";
 import VersionHistoryDrawer from "./components/VersionHistoryDrawer";
 import CommentPin, { type CommentData, type MentionableUser } from "./components/CommentPin";
@@ -1533,7 +1533,7 @@ const EditProject = (props: IPropsEditProject) => {
             const storedNodes = mapPhysicalReactToStored(nodes);
             const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
             const model = storedNodes.length > 0
-                ? buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
+                ? buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name, dbms: (_physicalModelData as any)?.model?.dbms })
                 : _physicalModelData;
             return model ? runPhysicalLinter(model) : empty;
         }
@@ -1558,7 +1558,7 @@ const EditProject = (props: IPropsEditProject) => {
             const storedNodes = mapPhysicalReactToStored(nodes);
             const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
             return storedNodes.length > 0
-                ? buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
+                ? buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name, dbms: (_physicalModelData as any)?.model?.dbms })
                 : _physicalModelData;
         }
         return null;
@@ -1568,6 +1568,21 @@ const EditProject = (props: IPropsEditProject) => {
         _logicalModelData, _physicalModelData,
         selectedSchema?.id, selectedSchema?.name,
     ]);
+
+    const currentDbms = useMemo(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const fromNorm = (normalizationModelData as any)?.model?.dbms;
+        if (fromNorm) return fromNorm as string;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const fromPhys = (_physicalModelData as any)?.model?.dbms;
+        if (fromPhys) return fromPhys as string;
+        return selectedSchema?.dbms ?? undefined;
+    }, [normalizationModelData, _physicalModelData, selectedSchema?.dbms]);
+
+    const physicalDbmsConfig = useMemo(() => {
+        if (!isPhysicalSchema) return null;
+        return getDBMSConfig(currentDbms);
+    }, [isPhysicalSchema, currentDbms]);
 
     const effectiveAddEntity = addEntity;
     const effectiveAddDoubleEntity = addDoubleEntity;
@@ -2027,7 +2042,7 @@ const EditProject = (props: IPropsEditProject) => {
             const storedNodes = mapPhysicalReactToStored(nodes);
             const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
             if (storedNodes.length > 0) {
-                return buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
+                return buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name, dbms: (_physicalModelData as any)?.model?.dbms });
             }
             return _physicalModelData;
         };
@@ -2214,7 +2229,7 @@ const EditProject = (props: IPropsEditProject) => {
         const buildFreshPhysical = () => {
             const storedNodes = mapPhysicalReactToStored(nodes);
             const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
-            if (storedNodes.length > 0) return buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
+            if (storedNodes.length > 0) return buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name, dbms: (_physicalModelData as any)?.model?.dbms });
             return _physicalModelData;
         };
         const buildFreshConceptual = () => {
@@ -2890,6 +2905,8 @@ const EditProject = (props: IPropsEditProject) => {
                         onRemovePhysicalFD={removePhysicalFD}
                         onUpdatePhysicalFD={updatePhysicalFD}
                         onTogglePhysicalFDDisplay={togglePhysicalFDDisplay}
+                        dataTypeOptions={physicalDbmsConfig?.dataTypes}
+                        indexTypeOptions={physicalDbmsConfig?.indexTypes}
                     />
                     {commentMode && (
                         <CommentPanel

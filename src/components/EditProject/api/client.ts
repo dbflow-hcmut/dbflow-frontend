@@ -9,6 +9,7 @@ import { revalidateProjectSchemas } from "@/app/projects/actions";
 export interface CreateSchemaRequest {
     name: string;
     type: SchemaType | string;
+    dbms?: string;
 }
 
 export async function createSchema(
