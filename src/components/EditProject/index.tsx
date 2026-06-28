@@ -2637,7 +2637,7 @@ const EditProject = (props: IPropsEditProject) => {
                         if (selectedSchema?.id && projectData?.id && dbms) {
                             try {
                                 await updateSchema(projectData.id, selectedSchema.id, { name: selectedSchema.name, dbms });
-                                await revalidateProjectSchemas(projectData.id);
+                                router.refresh();
                             } catch (e) {
                                 console.error("Failed to update schema dbms:", e);
                             }
