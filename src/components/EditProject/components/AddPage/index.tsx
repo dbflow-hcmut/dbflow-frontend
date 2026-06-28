@@ -8,6 +8,8 @@ import Editor, { type Monaco } from "@monaco-editor/react";
 import type { editor as MonacoEditor } from "monaco-editor";
 import { useCreateSchema } from "../../api/client";
 import { createSchema, saveSchemaModel } from "../../api/client";
+import { revalidateProjectSchemas } from "@/app/projects/actions";
+import { mutate } from "swr";
 import { notificationProvider } from "@/providers/notification";
 import { parseDDL, validateDDLSyntax, ddlToPhysicalModel, detectDBMS } from "../../utils/ddl-parser";
 import type { DBMSType } from "../../utils/dbms-config";
@@ -133,12 +135,13 @@ export function AddPage(props: IAddPageProps) {
                 const physicalModel = ddlToPhysicalModel(parseResult, values.name, ddlDbms);
                 await saveSchemaModel(projectId, schema.id, physicalModel as unknown as Record<string, unknown>);
 
+                await mutate(`schemas-${projectId}`);
+                await revalidateProjectSchemas(projectId);
                 notificationProvider.open({
                     type: "success",
                     message: `Schema created with ${tableCount} table${tableCount !== 1 ? "s" : ""} imported`,
                 });
                 handleClose();
-                window.location.reload();
             } catch (err) {
                 notificationProvider.open({
                     type: "error",
