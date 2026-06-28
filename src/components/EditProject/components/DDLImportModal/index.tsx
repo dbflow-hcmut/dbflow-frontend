@@ -75,7 +75,7 @@ CREATE INDEX idx_posts_user_id ON posts(user_id);
 interface DDLImportModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onImport: (model: PhysicalModelPayload) => void;
+    onImport: (model: PhysicalModelPayload, dbms: DBMSType) => void;
     diagramName: string;
 }
 
@@ -139,8 +139,8 @@ const DDLImportModal: React.FC<DDLImportModalProps> = ({
         if (!parseResult || !canImport) return;
         setImporting(true);
         try {
-            const model = ddlToPhysicalModel(parseResult, diagramName || "Imported Schema");
-            onImport(model);
+            const model = ddlToPhysicalModel(parseResult, diagramName || "Imported Schema", dbms);
+            onImport(model, dbms);
             setDdlText("");
             onClose();
         } finally {

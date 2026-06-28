@@ -41,6 +41,21 @@ export function useCreateSchema(projectId: string | null) {
     };
 }
 
+export interface UpdateSchemaRequest {
+    name: string;
+    dbms?: string;
+}
+
+export async function updateSchema(
+    projectId: string,
+    schemaId: string,
+    body: UpdateSchemaRequest
+): Promise<ProjectSchemasResponse> {
+    const url = `${PROXY_PROJECT_SCHEMAS(projectId)}/${schemaId}`;
+    const res = await apiPut<ProjectSchemasResponse, UpdateSchemaRequest>(url, body);
+    return res;
+}
+
 /**
  * Save model JSON directly to S3 for a schema.
  * Used by AI chat to persist generated model data before the user opens the editor.

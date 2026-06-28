@@ -73,7 +73,8 @@ import { RemoteCursorsOverlay } from "./components/RemoteCursorsOverlay";
 import TourGuide from "./components/TourGuide";
 import { useAuth } from "@/providers/AuthProvider";
 import { checkSchemaExistence, getProjectPermissions } from "@/api/projects/client";
-import { createSchema, saveSchemaModel } from "./api/client";
+import { createSchema, saveSchemaModel, updateSchema } from "./api/client";
+import { revalidateProjectSchemas } from "@/app/projects/actions";
 import { convertLogicalToPhysical, convertPhysicalToLogical, convertLogicalToConceptual, convertConceptualToLogical, convertPhysicalToConceptual, convertConceptualToPhysical } from "./utils/schema-conversion";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import ShareProject from "@/components/ShareProject";
@@ -1732,9 +1733,11 @@ const EditProject = (props: IPropsEditProject) => {
                     logical: "Logical Schema",
                     physical: "Physical Schema",
                 };
+                const aiDbms = detectedLevel === "physical" ? (modelJson as any)?.model?.dbms : undefined;
                 const newSchema = await createSchema(projectData.id, {
                     name: levelLabels[detectedLevel] || `${detectedLevel} Schema`,
                     type: detectedLevel,
+                    ...(aiDbms ? { dbms: aiDbms } : {}),
                 });
                 await saveSchemaModel(projectData.id, newSchema.id, modelJson);
                 notificationProvider.open({ type: "success", message: `Created new ${detectedLevel} schema — switching now` });
@@ -2239,11 +2242,13 @@ const EditProject = (props: IPropsEditProject) => {
             return _conceptualModelData;
         };
 
+        const targetDbms = schemaList.find(s => s.id === targetSchemaId)?.dbms as DBMSType | undefined;
+
         let convertedModel: Record<string, unknown> | null = null;
         if (isLogicalSchema && targetSchemaType === SchemaType.PHYSICAL) {
             const fresh = buildFreshLogical();
             if (!fresh) { notificationProvider.open({ type: 'error', message: 'Logical model is not loaded yet.' }); return; }
-            convertedModel = convertLogicalToPhysical(fresh) as Record<string, unknown>;
+            convertedModel = convertLogicalToPhysical(fresh, { dbms: targetDbms }) as Record<string, unknown>;
         } else if (isLogicalSchema && targetSchemaType === SchemaType.CONCEPTUAL) {
             const fresh = buildFreshLogical();
             if (!fresh) { notificationProvider.open({ type: 'error', message: 'Logical model is not loaded yet.' }); return; }
@@ -2263,7 +2268,7 @@ const EditProject = (props: IPropsEditProject) => {
         } else if (isConceptualSchema && targetSchemaType === SchemaType.PHYSICAL) {
             const fresh = buildFreshConceptual();
             if (!fresh) { notificationProvider.open({ type: 'error', message: 'Conceptual model is not loaded yet.' }); return; }
-            convertedModel = convertConceptualToPhysical(fresh) as Record<string, unknown>;
+            convertedModel = convertConceptualToPhysical(fresh, { dbms: targetDbms }) as Record<string, unknown>;
         }
 
         if (!convertedModel) {
@@ -2309,6 +2314,7 @@ const EditProject = (props: IPropsEditProject) => {
             const newSchema = await createSchema(projectData.id, {
                 name: `${selectedSchema?.name ?? diagramName} (Physical)`,
                 type: SchemaType.PHYSICAL,
+                dbms,
             });
             await saveSchemaModel(projectData.id, newSchema.id, physicalModel as Record<string, unknown>);
             notificationProvider.open({ type: "success", message: "Physical schema created — switching now" });
@@ -2626,8 +2632,16 @@ const EditProject = (props: IPropsEditProject) => {
                 <DDLImportModal
                     isOpen={isDDLImportOpen}
                     onClose={() => setIsDDLImportOpen(false)}
-                    onImport={(model) => {
+                    onImport={async (model, dbms) => {
                         applyPhysicalModelPayload(model);
+                        if (selectedSchema?.id && projectData?.id && dbms) {
+                            try {
+                                await updateSchema(projectData.id, selectedSchema.id, { name: selectedSchema.name, dbms });
+                                await revalidateProjectSchemas(projectData.id);
+                            } catch (e) {
+                                console.error("Failed to update schema dbms:", e);
+                            }
+                        }
                     }}
                     diagramName={diagramName}
                 />
