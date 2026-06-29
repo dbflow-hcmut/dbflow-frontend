@@ -4,7 +4,7 @@ import React, { useState, useCallback, useRef, useEffect } from "react";
 import { Modal, Button, Input } from "antd";
 import { Play, Clock, Rows3, Lock, Sparkles, Database, PlugZap, Network, MonitorSmartphone, User, CheckCircle, XCircle, Info, GripHorizontal, Wand2 } from "lucide-react";
 import Editor from "@monaco-editor/react";
-import { executeQueryDbConnection, type QueryResultDto } from "@/api/db-connections/client";
+import { executeQueryDbConnection, generateSqlFromNl, type QueryResultDto } from "@/api/db-connections/client";
 import type { DBConnection } from "@/types/db-connection.type";
 
 const { TextArea } = Input;
@@ -15,6 +15,7 @@ interface QueryExecutorModalProps {
     connId: string;
     conn?: DBConnection;
     schema?: string;
+    projectId?: string;
 }
 
 interface LogEntry {
@@ -58,6 +59,7 @@ export default function QueryExecutorModal({
     connId,
     conn,
     schema,
+    projectId,
 }: QueryExecutorModalProps) {
     const [sql, setSql] = useState("SELECT * FROM users\nLIMIT 10;");
     const [nlInput, setNlInput] = useState("");
@@ -142,12 +144,20 @@ export default function QueryExecutorModal({
         if (!nlInput.trim() || generating) return;
         setGenerating(true);
         addLog("info", `Generating SQL from: "${nlInput}"`);
-        // TODO: wire up AI text-to-SQL endpoint
-        await new Promise((r) => setTimeout(r, 800));
-        setSql(`-- Generated from: "${nlInput}"\nSELECT * FROM your_table\nLIMIT 10;`);
-        addLog("success", "SQL generated successfully.");
-        setGenerating(false);
-    }, [nlInput, generating, addLog]);
+        try {
+            const res = await generateSqlFromNl(connId, nlInput, {
+                schema,
+                projectId,
+            });
+            setSql(res.sql);
+            addLog("success", "SQL generated successfully.");
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            addLog("error", `Generation failed: ${msg}`);
+        } finally {
+            setGenerating(false);
+        }
+    }, [nlInput, generating, addLog, connId, schema, projectId]);
 
     const handleRun = useCallback(async () => {
         const query = sqlRef.current.trim();

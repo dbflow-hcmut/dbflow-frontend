@@ -189,6 +189,7 @@ export default function DbFlowController({
                 connId={linkedConn?.id ?? ""}
                 conn={linkedConn}
                 schema={activeSchema}
+                projectId={projectId ?? undefined}
             />
             <SeedDataModal
                 open={step === "seed-data"}

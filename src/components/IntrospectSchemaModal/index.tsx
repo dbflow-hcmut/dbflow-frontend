@@ -283,7 +283,6 @@ export default function IntrospectSchemaModal({
             onCancel={onClose}
             title={
                 <div className="flex items-center gap-2">
-                    <Database className="w-5 h-5 text-primary-500" />
                     <span>Import Schema from Database</span>
                 </div>
             }

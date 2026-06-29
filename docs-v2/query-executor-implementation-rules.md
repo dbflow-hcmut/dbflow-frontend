@@ -73,35 +73,58 @@ interface DBConnection {
 
 ## 4. AI SQL Generator
 
-### 4.1. Flow
+### 4.1. Flow (đã implement)
 
 ```
 User nhập mô tả ("lấy tất cả order trong tháng này kèm tên khách hàng")
-  → FE gửi message + current physical schema_model lên AI endpoint
-  → AI đọc schema → sinh SQL
-  → SQL được đặt vào Monaco editor
+  → FE gọi POST /db-connections/:connId/text-to-sql
+      body: { nl_query, schema?, project_id? }
+  → BE introspect live DB schema (ưu tiên thực tế hơn model)
+  → BE gọi dbflow-ai POST /api/text-to-sql
+      body: { nl_query, dbms, schema_tables, project_id? }
+  → dbflow-ai format schema → fetch project docs (ChromaDB, nếu có project_id) → Gemini sinh SQL
+  → SQL trả về FE → đặt vào Monaco editor
   → User review, chỉnh sửa nếu cần
   → User bấm Execute (hoặc huỷ)
 ```
 
-### 4.2. Input cho AI
+### 4.2. Context cho AI (thứ tự ưu tiên)
 
-AI nhận:
-- `schema_model`: physical `model.json` hiện tại (đầy đủ, không cắt)
-- `dbms`: loại DBMS của connection đang active (để sinh đúng syntax)
-- `user_message`: mô tả tự nhiên của user
-- `query_type_hint` (optional): `SELECT` | `INSERT` | `UPDATE` | `DELETE` — nếu user chọn rõ loại query
+1. **DBMS schema (primary)**: backend introspect live DB → danh sách tables + columns + FK + indexes
+2. **Project document hub (secondary)**: dbflow-ai truy vấn ChromaDB với project_id → top-3 chunks liên quan
+3. `dbms`: loại DBMS (để sinh đúng syntax)
+
+Physical schema model từ editor **không** được inject — DBMS introspect là nguồn thực tế hơn.
 
 AI **không** được cấp quyền execute — chỉ sinh text SQL, đặt vào editor.
 
-### 4.3. Output
+### 4.3. API
 
-AI trả về SQL text (plain string, không fenced block). FE đặt nguyên vào editor, không post-process ngoài trim whitespace.
+**Frontend → Backend:**
+```ts
+POST /db-connections/:connId/text-to-sql
+Body: { nl_query: string; schema?: string; project_id?: string }
+Response: { sql: string }
+```
 
-### 4.4. Giới hạn
+**Backend → dbflow-ai:**
+```python
+POST /api/text-to-sql
+Body: { nl_query, dbms, schema_tables: IntrospectedTable[], project_id? }
+Response: { sql: string }
+```
+
+Frontend client: `generateSqlFromNl(connId, nlQuery, { schema?, projectId? })` trong `@/api/db-connections/client`.
+
+### 4.4. Output
+
+AI trả về SQL text (plain string). Backend stripped markdown fences nếu model include chúng. FE đặt nguyên vào editor.
+
+### 4.5. Giới hạn
 
 - AI chỉ sinh **một câu query tại một thời điểm** (không batch).
 - Nếu AI sinh ra câu chứa destructive operation (DELETE/DROP/TRUNCATE), Safeguard Layer vẫn chạy bình thường sau đó — không filter ở bước này.
+- `project_id` optional — nếu không có, chỉ dùng DBMS schema (không có project docs).
 
 ---
 
@@ -257,7 +280,7 @@ interface QueryHistoryItem {
 |---|---|
 | Export DDL (`ddl-generator.ts`) | Query Executor dùng cùng `DBMSType` enum và DBMS config |
 | Physical Schema (`physical-schema-implementation-rules.md`) | `schema_model` từ physical diagram là input cho AI SQL Generator |
-| AI Pipeline (`DOC-schema-gen-pipeline.md`) | AI SQL Generator thêm intent `query` vào `router_node`, **không** inject spec RAG (chỉ cần schema_model) |
+| AI Pipeline (`DOC-schema-gen-pipeline.md`) | AI SQL Generator dùng endpoint riêng `/api/text-to-sql` trong dbflow-ai sidecar (FastAPI), **không** qua LangGraph. Input là DBMS introspect + project docs RAG (ChromaDB). |
 
 ---
 
