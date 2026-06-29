@@ -49,6 +49,8 @@ import ChatBox from "./components/ChatBox";
 import DrawingOverlay from "./components/DrawingOverlay";
 import ExportModal, { ExportSettings, ExportFormat, ExportScope } from "./components/ExportModal";
 import DDLExportModal from "./components/DDLExportModal";
+import DbFlowController from "@/components/db-flow/DbFlowController";
+import ExportHistoryDrawer from "./features/dbms/schema-export/ExportHistoryDrawer";
 import DDLImportModal from "./components/DDLImportModal";
 import ConvertToPhysicalModal from "./components/ConvertToPhysicalModal";
 import { getDBMSConfig, type DBMSType } from "./utils/dbms-config";
@@ -352,6 +354,8 @@ const EditProject = (props: IPropsEditProject) => {
     const [isAddPageOpen, setIsAddPageOpen] = useState(false);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
     const [isDDLExportOpen, setIsDDLExportOpen] = useState(false);
+    const [isSchemaExportOpen, setIsSchemaExportOpen] = useState(false);
+    const [isExportHistoryOpen, setIsExportHistoryOpen] = useState(false);
     const [isDDLImportOpen, setIsDDLImportOpen] = useState(false);
     const [isHTMLDocsExportOpen, setIsHTMLDocsExportOpen] = useState(false);
     const [isVersionHistoryOpen, setIsVersionHistoryOpen] = useState(false);
@@ -2438,13 +2442,13 @@ const EditProject = (props: IPropsEditProject) => {
         };
     }, [broadcastCursorPosition, isConceptualSchema, isLogicalSchema, isPhysicalSchema, diagramWrapperEl]);
 
-    const handleDownload = useCallback(() => {
+    const handleDownload = useCallback((format: ExportFormat) => {
         // Defaults for opening the modal
         const nodesToExport = nodes.filter(n => n.selected);
         const hasSelection = nodesToExport.length > 0;
         
         setExportInitialConfig({ 
-            format: 'png', 
+            format,
             scope: hasSelection ? 'selected' : 'all' 
         });
         setIsExportModalOpen(true);
@@ -2483,7 +2487,7 @@ const EditProject = (props: IPropsEditProject) => {
                 height: String(imageHeight),
                 transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.zoom})`,
             },
-            pixelRatio: format === 'png' ? quality : 1,
+            pixelRatio: format === 'png' || format === 'pdf' ? quality : 1,
             filter: (node: HTMLElement) => {
                 // Ensure node is an HTMLElement to avoid getAttribute error
                 if (!(node instanceof HTMLElement)) return true;
@@ -2525,9 +2529,52 @@ const EditProject = (props: IPropsEditProject) => {
                     console.error('Export failed:', err);
                     notificationProvider.open({ type: "error", message: 'Failed to export diagram.' });
                 });
-        } else {
+        } else if (format === 'svg') {
             toSvg(viewport, options)
                 .then(downloadImage)
+                .catch((err) => {
+                    console.error('Export failed:', err);
+                    notificationProvider.open({ type: "error", message: 'Failed to export diagram.' });
+                });
+        } else {
+            toPng(viewport, options)
+                .then(async (dataUrl) => {
+                    const { jsPDF } = await import('jspdf');
+                    const orientation = imageWidth >= imageHeight ? 'landscape' : 'portrait';
+                    const pdf = new jsPDF({
+                        orientation,
+                        unit: 'mm',
+                        format: 'a4',
+                        compress: true,
+                    });
+                    const pageWidth = pdf.internal.pageSize.getWidth();
+                    const pageHeight = pdf.internal.pageSize.getHeight();
+                    const margin = 10;
+                    const availableWidth = pageWidth - (margin * 2);
+                    const availableHeight = pageHeight - (margin * 2);
+                    const imageRatio = imageWidth / imageHeight;
+                    const pageRatio = availableWidth / availableHeight;
+                    const pdfImageWidth = imageRatio > pageRatio
+                        ? availableWidth
+                        : availableHeight * imageRatio;
+                    const pdfImageHeight = imageRatio > pageRatio
+                        ? availableWidth / imageRatio
+                        : availableHeight;
+                    const x = (pageWidth - pdfImageWidth) / 2;
+                    const y = (pageHeight - pdfImageHeight) / 2;
+
+                    pdf.addImage(
+                        dataUrl,
+                        'PNG',
+                        x,
+                        y,
+                        pdfImageWidth,
+                        pdfImageHeight,
+                        undefined,
+                        'FAST',
+                    );
+                    pdf.save(`${diagramName}.pdf`);
+                })
                 .catch((err) => {
                     console.error('Export failed:', err);
                     notificationProvider.open({ type: "error", message: 'Failed to export diagram.' });
@@ -2592,6 +2639,8 @@ const EditProject = (props: IPropsEditProject) => {
                     onDownload={handleDownload}
                     onExportJson={handleExportJson}
                     onExportDDL={isPhysicalSchema ? () => setIsDDLExportOpen(true) : undefined}
+                    onApplyToDatabase={isPhysicalSchema ? () => setIsSchemaExportOpen(true) : undefined}
+                    onExportHistory={isPhysicalSchema ? () => setIsExportHistoryOpen(true) : undefined}
                     onExportHTMLDocs={() => setIsHTMLDocsExportOpen(true)}
                     onVersionHistory={() => setIsVersionHistoryOpen(true)}
                     onShareClick={() => setIsShareProjectOpen(true)}
@@ -2629,6 +2678,18 @@ const EditProject = (props: IPropsEditProject) => {
                     onClose={() => setIsDDLExportOpen(false)}
                     model={_physicalModelData}
                     diagramName={diagramName}
+                />
+                <DbFlowController
+                    flow="apply-schema"
+                    open={isSchemaExportOpen}
+                    onClose={() => setIsSchemaExportOpen(false)}
+                    projectId={projectData?.id ?? null}
+                    model={_physicalModelData}
+                />
+                <ExportHistoryDrawer
+                    open={isExportHistoryOpen}
+                    onClose={() => setIsExportHistoryOpen(false)}
+                    projectId={projectData?.id ?? null}
                 />
                 <DDLImportModal
                     isOpen={isDDLImportOpen}

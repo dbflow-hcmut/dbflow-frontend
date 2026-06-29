@@ -11,6 +11,7 @@ import {
     PROXY_DB_CONNECTION_SCHEMAS,
     PROXY_DB_CONNECTION_INTROSPECT,
     PROXY_DB_CONNECTION_EXECUTE,
+    PROXY_DB_CONNECTION_TEXT_TO_SQL,
     PROXY_PROJECT_DB_CONNECTIONS,
     PROXY_PROJECT_DB_CONNECTION_LINK,
     PROXY_PROJECT_DB_CONNECTION_UNLINK,
@@ -206,6 +207,23 @@ export async function introspectDbConnection(
         ? `${PROXY_DB_CONNECTION_INTROSPECT(connId)}?schema=${encodeURIComponent(schema)}`
         : PROXY_DB_CONNECTION_INTROSPECT(connId);
     return apiPost<IntrospectedTable[], Record<string, never>>(url, {});
+}
+
+// ─── AI Text-to-SQL ─────────────────────────────────────
+
+export async function generateSqlFromNl(
+    connId: string,
+    nlQuery: string,
+    options?: { schema?: string; projectId?: string },
+): Promise<{ sql: string }> {
+    return apiPost<{ sql: string }, { nl_query: string; schema?: string; project_id?: string }>(
+        PROXY_DB_CONNECTION_TEXT_TO_SQL(connId),
+        {
+            nl_query: nlQuery,
+            schema: options?.schema,
+            project_id: options?.projectId,
+        },
+    );
 }
 
 // ─── Execute Query ──────────────────────────────────────

@@ -6,12 +6,14 @@ import { Download, History, Send, ArrowRightLeft, DatabaseZap, MessageSquareWarn
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { RemoteCollaborator } from "../../hooks/useCollaborationAwareness";
-import ProjectDBConnectionModal from "@/components/ProjectDBConnectionModal";
+import DbFlowController from "@/components/db-flow/DbFlowController";
 import SQLGenerator from "@/components/SQLGenerator";
 import { introspectDbConnection, useProjectDbConnections } from "@/api/db-connections/client";
 import ProjectDocumentsHub from "@/components/ProjectDocumentsHub";
+import ExportPortalDropdown from "@/components/ExportPortalDropdown";
 
 type SchemaType = 'conceptual' | 'logical' | 'physical';
+type DiagramExportFormat = 'png' | 'svg' | 'pdf';
 
 export type SyncableSchema = {
     id: string;
@@ -27,7 +29,7 @@ type HeaderProps = {
     onSetIsEditingDiagramName: (isEditing: boolean) => void;
     collaborators: RemoteCollaborator[];
     onFollowUser: (user: RemoteCollaborator) => void;
-    onDownload: () => void;
+    onDownload: (format: DiagramExportFormat) => void;
     onExportJson: () => void;
     onExportDDL?: () => void;
     onExportHTMLDocs?: () => void;
@@ -48,6 +50,8 @@ type HeaderProps = {
     projectVisibility?: string;
     normalizationOpen?: boolean;
     onToggleNormalizationPanel?: () => void;
+    onApplyToDatabase?: () => void;
+    onExportHistory?: () => void;
 };
 
 type SQLGeneratorTable = {
@@ -89,6 +93,8 @@ const Header: React.FC<HeaderProps> = ({
     projectVisibility,
     normalizationOpen = false,
     onToggleNormalizationPanel,
+    onApplyToDatabase,
+    onExportHistory,
 }) => {
     const inputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
@@ -188,36 +194,6 @@ const Header: React.FC<HeaderProps> = ({
             }));
     }, [schemaType, onConvertSchema]);
 
-    const downloadItems = useMemo(() => {
-        const items = [
-            {
-                key: 'export',
-                label: 'Export Diagram to PNG/SVG',
-                onClick: () => onDownload(),
-            },
-            {
-                key: 'export-json',
-                label: 'Export Diagram to JSON',
-                onClick: () => onExportJson(),
-            },
-        ];
-        if (onExportDDL) {
-            items.push({
-                key: 'export-ddl',
-                label: 'Export SQL (DDL)',
-                onClick: () => onExportDDL(),
-            });
-        }
-        if (onExportHTMLDocs) {
-            items.push({
-                key: 'export-html-docs',
-                label: 'Export HTML Documentation',
-                onClick: () => onExportHTMLDocs(),
-            });
-        }
-        return items;
-    }, [onDownload, onExportJson, onExportDDL, onExportHTMLDocs]);
-
     return (
         <>
         <div className="pt-4 bg-transparent flex items-center justify-between px-4 fixed top-0 z-10 w-full">
@@ -247,22 +223,6 @@ const Header: React.FC<HeaderProps> = ({
                         }}
                     />
                 )}
-                <Dropdown
-                    menu={{ items: downloadItems }}
-                    trigger={['click']}
-                    placement="bottom"
-                    align={{ offset: [0, 10] }}
-                >
-                    <Tooltip title="Export" placement="bottom">
-                        <Button
-                            id="tour-download-btn"
-                            type="text"
-                            className="!px-2"
-                        >
-                            <Download size={18} />
-                        </Button>
-                    </Tooltip>
-                </Dropdown>
                 {projectId && canEdit && (
                     <Tooltip title="Project Documents" placement="bottom">
                         <Button
@@ -285,181 +245,201 @@ const Header: React.FC<HeaderProps> = ({
                     <span className="font-semibold">Share</span>
                 </Button>
             </div>
-            <div className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12">
-                {collaborators.length > 0 && (
-                <div className="rounded-xl py-1 h-10 flex items-center">
-                    <Avatar.Group
-                        max={{
-                            count: 3,
-                            style: { width: 28, height: 28, fontSize: 12 },
-                        }}
-                    >
-                        {avatarItems.map((user) => {
-                            const label = user.name ?? user.sessionId ?? "Collaborator";
-                            const hasAvatar = Boolean(user.avatar);
-                            return (
-                                <Tooltip title={label} key={user.clientId}>
-                                        <Avatar
-                                            size={28}
-                                            src={hasAvatar ? user.avatar : undefined}
-                                            style={{
-                                                backgroundColor: hasAvatar ? undefined : user.color,
-                                                cursor: user.viewport ? "pointer" : "default",
-                                                color: "#fff",
-                                                fontWeight: 600,
-                                            }}
-                                            onClick={() => {
-                                                if (user.viewport) {
-                                                    onFollowUser(user);
-                                                }
-                                            }}
-                                        >
-                                            {!hasAvatar ? collaboratorInitials(user) : null}
-                                        </Avatar>
-                                </Tooltip>
-                            );
-                        })}
-                    </Avatar.Group>
-                </div>
-                )}
-                <Tooltip title="Version History" placement="bottom">
-                    <Button
-                        id="tour-version-history"
-                        type="text"
-                        className="!px-2"
-                        onClick={onVersionHistory}
-                    >
-                        <History size={18} />
-                    </Button>
-                </Tooltip>
-                {/* <Tooltip title="Comment" placement="bottom">
-                    <Button
-                        type={commentMode ? 'primary' : 'text'}
-                        className="!px-2"
-                        onClick={onToggleCommentMode}
-                    >
-                        <MessageCircleMore size={18} />
-                    </Button>
-                </Tooltip> */}
-                <Tooltip title="Connect to Database" placement="bottom">
-                    <Button
-                        type={'text'}
-                        className="!px-2"
-                        onClick={() => setIsDBConnectionOpen(true)}
-                    >
-                        <DatabaseZap size={18} />
-                    </Button>
-                </Tooltip>
-                <Tooltip title={connectedDbId ? "SQL Query Generator" : "Connect a database to generate SQL"} placement="bottom">
-                    <Button
-                        type={isSQLGeneratorOpen ? 'primary' : 'text'}
-                        className="!px-2"
-                        onClick={() => {
-                            if (connectedDbId) {
-                                setIsSQLGeneratorOpen(true);
-                                return;
-                            }
-                            setIsDBConnectionOpen(true);
-                        }}
-                    >
-                        <FileCode2 size={18} />
-                    </Button>
-                </Tooltip>
-                <Tooltip title="Linter & Safety Warning" placement="bottom">
-                    <div className="relative inline-flex">
-                        <Button
-                            type={linterOpen ? 'primary' : 'text'}
-                            className="!px-2"
-                            onClick={onToggleLinterPanel}
+            <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 bg-white rounded-lg shadow-md px-2 py-2 h-12">
+                    {collaborators.length > 0 && (
+                    <div className="rounded-xl py-1 h-10 flex items-center">
+                        <Avatar.Group
+                            max={{
+                                count: 3,
+                                style: { width: 28, height: 28, fontSize: 12 },
+                            }}
                         >
-                            <MessageSquareWarning size={18} />
-                        </Button>
-                        {linterCounts && (linterCounts.error + linterCounts.warning + linterCounts.info) > 0 && (
-                            <span
-                                className="pointer-events-none absolute -top-1 -right-1 flex items-center justify-center rounded-full text-white text-[9px] font-bold leading-none z-10"
-                                style={{
-                                    minWidth: 14,
-                                    height: 14,
-                                    padding: '0 3px',
-                                    backgroundColor: linterCounts.error > 0 ? '#ef4444' : linterCounts.warning > 0 ? '#f59e0b' : '#3b82f6',
-                                }}
-                            >
-                                {linterCounts.error + linterCounts.warning + linterCounts.info}
-                            </span>
-                        )}
+                            {avatarItems.map((user) => {
+                                const label = user.name ?? user.sessionId ?? "Collaborator";
+                                const hasAvatar = Boolean(user.avatar);
+                                return (
+                                    <Tooltip title={label} key={user.clientId}>
+                                            <Avatar
+                                                size={28}
+                                                src={hasAvatar ? user.avatar : undefined}
+                                                style={{
+                                                    backgroundColor: hasAvatar ? undefined : user.color,
+                                                    cursor: user.viewport ? "pointer" : "default",
+                                                    color: "#fff",
+                                                    fontWeight: 600,
+                                                }}
+                                                onClick={() => {
+                                                    if (user.viewport) {
+                                                        onFollowUser(user);
+                                                    }
+                                                }}
+                                            >
+                                                {!hasAvatar ? collaboratorInitials(user) : null}
+                                            </Avatar>
+                                    </Tooltip>
+                                );
+                            })}
+                        </Avatar.Group>
                     </div>
-                </Tooltip>
-                {onToggleNormalizationPanel && (
-                    <Tooltip title="Normalization Analysis" placement="bottom">
+                    )}
+                    <Tooltip title="Version History" placement="bottom">
                         <Button
-                            type={normalizationOpen ? 'primary' : 'text'}
+                            id="tour-version-history"
+                            type="text"
                             className="!px-2"
-                            onClick={onToggleNormalizationPanel}
+                            onClick={onVersionHistory}
                         >
-                            <Layers size={18} />
+                            <History size={18} />
                         </Button>
                     </Tooltip>
-                )}
-                {syncableSchemas.length > 0 && onSyncToSchema && (
-                    <Dropdown
-                        menu={{
-                            items: syncableSchemas.map((s) => ({
-                                key: s.id,
-                                label: s.name,
-                                onClick: () => {
-                                    Modal.confirm({
-                                        title: `Sync to "${s.name}"?`,
-                                        content: `\"${s.name}\" will be updated to reflect the latest changes from the current schema. Its existing content will be replaced.`,
-                                        okText: 'Sync',
-                                        cancelText: 'Cancel',
-                                        okButtonProps: { danger: true },
-                                        onOk: () => onSyncToSchema(s.id, s.type),
-                                    });
-                                },
-                            })),
-                        }}
-                        trigger={isSyncing ? [] : ['click']}
-                        placement="bottomRight"
-                        align={{ offset: [0, 10] }}
-                    >
-                        <Tooltip title="Sync to Schema" placement="bottom">
+                    {/* <Tooltip title="Comment" placement="bottom">
+                        <Button
+                            type={commentMode ? 'primary' : 'text'}
+                            className="!px-2"
+                            onClick={onToggleCommentMode}
+                        >
+                            <MessageCircleMore size={18} />
+                        </Button>
+                    </Tooltip> */}
+                    <Tooltip title="Database Management" placement="bottom">
+                        <Button
+                            type={'text'}
+                            className="!px-2"
+                            onClick={() => setIsDBConnectionOpen(true)}
+                        >
+                            <DatabaseZap size={18} />
+                        </Button>
+                    </Tooltip>
+                    {/* Legacy code, do not use */}
+                    {/* <Tooltip title={connectedDbId ? "SQL Query Generator" : "Connect a database to generate SQL"} placement="bottom">
+                        <Button
+                            type={isSQLGeneratorOpen ? 'primary' : 'text'}
+                            className="!px-2"
+                            onClick={() => {
+                                if (connectedDbId) {
+                                    setIsSQLGeneratorOpen(true);
+                                    return;
+                                }
+                                setIsDBConnectionOpen(true);
+                            }}
+                        >
+                            <FileCode2 size={18} />
+                        </Button>
+                    </Tooltip> */}
+                    <Tooltip title="Linter & Safety Warning" placement="bottom">
+                        <div className="relative inline-flex">
                             <Button
-                                type={'text'}
+                                type={linterOpen ? 'primary' : 'text'}
                                 className="!px-2"
-                                disabled={isSyncing}
+                                onClick={onToggleLinterPanel}
                             >
-                                <RefreshCw size={16} />
+                                <MessageSquareWarning size={18} />
+                            </Button>
+                            {linterCounts && (linterCounts.error + linterCounts.warning + linterCounts.info) > 0 && (
+                                <span
+                                    className="pointer-events-none absolute -top-1 -right-1 flex items-center justify-center rounded-full text-white text-[9px] font-bold leading-none z-10"
+                                    style={{
+                                        minWidth: 14,
+                                        height: 14,
+                                        padding: '0 3px',
+                                        backgroundColor: linterCounts.error > 0 ? '#ef4444' : linterCounts.warning > 0 ? '#f59e0b' : '#3b82f6',
+                                    }}
+                                >
+                                    {linterCounts.error + linterCounts.warning + linterCounts.info}
+                                </span>
+                            )}
+                        </div>
+                    </Tooltip>
+                    {onToggleNormalizationPanel && (
+                        <Tooltip title="Normalization Analysis" placement="bottom">
+                            <Button
+                                type={normalizationOpen ? 'primary' : 'text'}
+                                className="!px-2"
+                                onClick={onToggleNormalizationPanel}
+                            >
+                                <Layers size={18} />
                             </Button>
                         </Tooltip>
-                    </Dropdown>
-                )}
-                {schemaType && convertItems.length > 0 && (
-                    <Dropdown
-                        menu={{ items: convertItems }}
-                        trigger={isConverting ? [] : ['click']}
-                        placement="bottomRight"
-                        align={{ offset: [0, 10] }}
-                    >
-                        <Button
-                            type="primary"
-                            className="!px-3 gap-2 flex items-center"
-                            loading={isConverting}
+                    )}
+                    {syncableSchemas.length > 0 && onSyncToSchema && (
+                        <Dropdown
+                            menu={{
+                                items: syncableSchemas.map((s) => ({
+                                    key: s.id,
+                                    label: s.name,
+                                    onClick: () => {
+                                        Modal.confirm({
+                                            title: `Sync to "${s.name}"?`,
+                                            content: `\"${s.name}\" will be updated to reflect the latest changes from the current schema. Its existing content will be replaced.`,
+                                            okText: 'Sync',
+                                            cancelText: 'Cancel',
+                                            okButtonProps: { danger: true },
+                                            onOk: () => onSyncToSchema(s.id, s.type),
+                                        });
+                                    },
+                                })),
+                            }}
+                            trigger={isSyncing ? [] : ['click']}
+                            placement="bottomRight"
+                            align={{ offset: [0, 10] }}
                         >
-                            {!isConverting && <ArrowRightLeft className="text-white" size={18} />}
-                            <span className="font-semibold">{isConverting ? 'Converting…' : 'Convert'}</span>
-                        </Button>
-                    </Dropdown>
-                )}
+                            <Tooltip title="Sync to Schema" placement="bottom">
+                                <Button
+                                    type={'text'}
+                                    className="!px-2"
+                                    disabled={isSyncing}
+                                >
+                                    <RefreshCw size={16} />
+                                </Button>
+                            </Tooltip>
+                        </Dropdown>
+                    )}
+                    {schemaType && convertItems.length > 0 && (
+                        <Dropdown
+                            menu={{ items: convertItems }}
+                            trigger={isConverting ? [] : ['click']}
+                            placement="bottomRight"
+                            align={{ offset: [0, 10] }}
+                        >
+                            <Tooltip title="Sync to Schema" placement="bottom">
+                                <Button
+                                    type="text"
+                                    className="!px-2"
+                                    loading={isConverting}
+                                >
+                                <ArrowRightLeft size={18} />
+                                </Button>
+                            </Tooltip>
+                        </Dropdown>
+                    )}
+                </div>
+                <ExportPortalDropdown
+                    onDownload={onDownload}
+                    onExportJson={onExportJson}
+                    onExportDDL={onExportDDL}
+                    onExportHTMLDocs={onExportHTMLDocs}
+                    onApplyToDatabase={onApplyToDatabase}
+                    onExportHistory={onExportHistory}
+                >
+                    <button
+                        type="button"
+                        aria-haspopup="menu"
+                        className="flex h-12 cursor-pointer items-center gap-2 rounded-lg bg-primary-500 px-4 py-2 shadow-md transition-colors hover:bg-primary-600"
+                    >
+                        <Download size={18} className="text-white" />
+                        <span className="text-sm! font-semibold text-white">Export</span>
+                    </button>
+                </ExportPortalDropdown>
             </div>
         </div>
             <Modal
-                title={"Project Documents"}
+                title={"Project Documents Hub"}
                 open={isDocumentsOpen}
                 onCancel={() => setIsDocumentsOpen(false)}
                 footer={null}
                 width="min(1100px, calc(100vw - 48px))"
                 destroyOnHidden
-                centered
             >
                 <ProjectDocumentsHub
                     projectId={projectId}
@@ -492,13 +472,15 @@ const Header: React.FC<HeaderProps> = ({
                     </div>
                 )}
             </Modal>
-            {projectId && (
-                <ProjectDBConnectionModal
-                    open={isDBConnectionOpen}
-                    onClose={handleDBConnectionClose}
-                    projectId={projectId}
-                />
-            )}
+            <DbFlowController
+                flow="db-management"
+                open={isDBConnectionOpen}
+                onClose={handleDBConnectionClose}
+                projectId={projectId ?? null}
+                onNewSchemaCreated={(schemaId) => {
+                    if (projectId) router.push(`/projects/${projectId}?schemaId=${schemaId}`);
+                }}
+            />
         </>
     );
 };

@@ -222,7 +222,7 @@ export function buildChatInputFromAttachments(
 }
 
 // Fixed assistant ID for DBFlow AI
-export const DBFLOW_ASSISTANT_ID = "71ce8f7d-18be-4139-b249-0001da5758b7";
+export const DBFLOW_ASSISTANT_ID = "5f35009a-d0f2-4405-9bad-cec762461bca";
 
 export interface LangGraphStreamRequest {
   assistant_id: string;
