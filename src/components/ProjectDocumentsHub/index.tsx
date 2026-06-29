@@ -190,7 +190,7 @@ export default function ProjectDocumentsHub({
   }
 
   return (
-    <div className={embedded ? "flex h-[calc(100vh-220px)] min-h-[calc(100vh-220px)] flex-col bg-white pt-2" : "min-h-full bg-[#FCFCFC]"}>
+    <div className={embedded ? "flex h-[500px] flex-col bg-white pt-2" : "min-h-full bg-[#FCFCFC]"}>
       <AntImage
         src={previewImage?.url}
         alt={previewImage?.title}
@@ -214,15 +214,15 @@ export default function ProjectDocumentsHub({
 
       <div className={embedded ? "flex min-h-0 flex-1 flex-col gap-4" : "mx-auto flex max-w-6xl flex-col gap-5 px-5 py-6"}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+          <div className="rounded-lg bg-[#F3F4F6] px-4 py-3">
             <div className="text-xs font-medium uppercase text-gray-500">Documents</div>
             <div className="mt-1 text-xl font-semibold text-gray-950">{documents.length}</div>
           </div>
-          <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+         <div className="rounded-lg bg-[#F3F4F6] px-4 py-3">
             <div className="text-xs font-medium uppercase text-gray-500">Storage</div>
             <div className="mt-1 text-xl font-semibold text-gray-950">{formatBytes(totalSize)}</div>
           </div>
-          <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+          <div className="rounded-lg bg-[#F3F4F6] px-4 py-3">
             <div className="text-xs font-medium uppercase text-gray-500">Project Scope</div>
             <div className="mt-1 truncate text-xl font-semibold text-gray-950">
               {formatProjectScope(projectScope)}
@@ -230,16 +230,17 @@ export default function ProjectDocumentsHub({
           </div>
         </div>
 
-        <div className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white p-3">
+        <div className="flex items-center gap-3">
           <Input
             allowClear
-            prefix={<Search className="h-4 w-4 text-gray-400" />}
+            prefix={<Search className="h-8 w-4 text-gray-400" />}
             placeholder="Search documents"
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
           />
           <Button
             type="primary"
+            className="h-10!"
             icon={uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
             disabled={uploading}
             onClick={() => fileInputRef.current?.click()}
@@ -248,8 +249,8 @@ export default function ProjectDocumentsHub({
           </Button>
         </div>
 
-        <div className={embedded ? "min-h-0 flex-1 overflow-auto rounded-lg border border-gray-200 bg-white" : "overflow-hidden rounded-lg border border-gray-200 bg-white"}>
-          <div className="grid grid-cols-[1fr_120px_120px] gap-3 border-b border-gray-100 px-4 py-3 text-xs font-medium uppercase text-gray-500 max-md:hidden">
+        <div className={embedded ? "min-h-0 flex-1 overflow-auto rounded-lg bg-white" : "overflow-hidden rounded-lg border border-gray-200 bg-white"}>
+          <div className="grid grid-cols-[1fr_120px_120px] gap-3 border-b border-gray-100 py-3 text-xs font-medium uppercase text-gray-500 max-md:hidden">
             <span>Name</span>
             <span>Size</span>
             <span className="text-right">Actions</span>
@@ -273,7 +274,7 @@ export default function ProjectDocumentsHub({
               {documents.map((doc) => (
                 <div
                   key={doc.id}
-                  className="grid grid-cols-[1fr_120px_120px] items-center gap-3 px-4 py-3 max-md:grid-cols-1"
+                  className="grid grid-cols-[1fr_120px_120px] items-center gap-3 py-3 max-md:grid-cols-1"
                 >
                   <div className="flex min-w-0 items-center gap-3">
                     <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600">
@@ -281,9 +282,9 @@ export default function ProjectDocumentsHub({
                     </div>
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-gray-950">{doc.title}</div>
-                      <div className="flex min-w-0 items-center gap-2">
+                      <div className="flex min-w-0 items-center gap-2 pt-0.5">
                         <span className="truncate text-xs text-gray-500">{doc.fileName}</span>
-                        {doc.source === "ai_chat_upload" && <Tag color="blue">AI Chat</Tag>}
+                        {/* {doc.source === "ai_chat_upload" && <Tag color="blue">AI Chat</Tag>} */}
                         {doc.status === 'ready' && (
                           <Tag color="success">Indexed</Tag>
                         )}

@@ -174,7 +174,6 @@ export default function ImportDDLModal({ open, onClose }: ImportDDLModalProps) {
             onCancel={onClose}
             title={
                 <div className="flex items-center gap-2">
-                    <FileCode2 className="w-5 h-5 text-primary-500" />
                     <span>Import from DDL</span>
                 </div>
             }
@@ -276,7 +275,7 @@ export default function ImportDDLModal({ open, onClose }: ImportDDLModalProps) {
                         <Editor
                             height={280}
                             language="sql"
-                            theme="vs-dark"
+                            theme="light"
                             value={ddlText}
                             onChange={(v) => setDdlText(v ?? "")}
                             onMount={(editor, monaco) => {

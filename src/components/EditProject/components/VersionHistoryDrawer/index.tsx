@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Drawer, Button, Tag, Empty, Input, Select, Segmented, Tooltip, Skeleton } from "antd";
-import { Plus, GitCompare, Copy, Download, ArrowLeft, RotateCcw } from "lucide-react";
+import { Drawer, Button, Tag, Empty, Input, Select, Segmented, Tooltip, Skeleton, Dropdown } from "antd";
+import { Plus, GitCompare, Copy, Download, ArrowLeft, RotateCcw, MoreHorizontal } from "lucide-react";
 import ReactFlow, { Node, Edge, ReactFlowProvider, Background, BackgroundVariant, EdgeTypes, type NodeTypes } from "reactflow";
 import { apiGet, apiPost } from "@/lib/clientFetch";
 import { PROXY_SCHEMA_VERSIONS, PROXY_SCHEMA_VERSION_DETAIL } from "@/api";
@@ -452,7 +452,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
                 if (id === "__current__") {
                     return {
                         model: currentModel,
-                        summary: { id: "__current__", version: 0, label: "Current (live)", createdBy: "", createdAt: new Date().toISOString() },
+                        summary: { id: "__current__", version: 0, label: "Current version", createdBy: "", createdAt: new Date().toISOString() },
                         diagram: { nodes: currentStoredNodes, edges: currentStoredEdges },
                     };
                 }
@@ -528,7 +528,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
 
     const versionOptions = useMemo(
         () => [
-            { label: "Current (live)", value: "__current__" },
+            { label: "Current version", value: "__current__" },
             ...versions.map((v) => ({ label: v.label || `v${v.version}`, value: v.id })),
         ],
         [versions],
@@ -541,15 +541,15 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
     const renderLeftPanel = () => (
         <div className="flex flex-col h-full w-full overflow-hidden">
             {/* ── Create Snapshot ────────────────────── */}
-            <div className="mb-5 border border-gray-200 rounded-lg p-3">
-                <div className="text-sm font-medium mb-2">Create Snapshot</div>
+            <div className="mb-5">
+                <div className="!text-xs font-semibold mb-2">Create Snapshot</div>
                 <div className="flex gap-2">
                     <Input
                         placeholder="Label (optional)"
                         value={newLabel}
                         onChange={(e) => setNewLabel(e.target.value)}
                         onPressEnter={handleCreateVersion}
-                        className="flex-1 !h-8"
+                        className="flex-1 !h-10 !text-xs"
                     />
                     <Button
                         type="primary"
@@ -557,7 +557,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
                         loading={creating}
                         onClick={handleCreateVersion}
                         disabled={!projectId || !schemaId}
-                        className="!h-8"
+                        className="!h-10 !text-xs"
                     >
                         Snapshot
                     </Button>
@@ -567,24 +567,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
             {/* ── Timeline ──────────────────────────── */}
             <div className="mb-5 flex-1 min-h-0 flex flex-col">
                 <div className="flex items-center justify-between mb-3">
-                    <span className="text-sm font-medium">Versions</span>
-                    {previewingVersionId && (
-                        <div className="flex items-center gap-2">
-                            <Button
-                                size="small"
-                                type="primary"
-                                icon={<RotateCcw size={12} />}
-                                loading={restoring}
-                                onClick={handleRestoreVersion}
-                                className="text-xs"
-                            >
-                                Restore
-                            </Button>
-                            <Button size="small" type="link" onClick={onExitPreview} className="text-xs !px-0">
-                                Exit preview
-                            </Button>
-                        </div>
-                    )}
+                    <span className="!text-xs font-semibold">Versions</span>
                 </div>
                 {loading ? (
                     <div className="py-4 px-2">
@@ -601,10 +584,10 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
                                 const isCurrent = !previewingVersionId;
                                 return (
                                     <div
-                                        className={`relative py-2 px-2 rounded-md transition-colors flex ${
+                                        className={`relative py-2 px-2 rounded-md transition-colors flex cursor-pointer ${
                                             isCurrent
                                                 ? "bg-blue-50"
-                                                : "hover:bg-gray-50 cursor-pointer"
+                                                : "hover:bg-gray-50"
                                         }`}
                                         onClick={() => {
                                             if (!isCurrent && onExitPreview) onExitPreview();
@@ -621,20 +604,11 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
                                         />
                                         {/* Content */}
                                         <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                                            <Tag
-                                                color={isCurrent ? "blue" : "green"}
-                                                className="text-[11px] leading-none shrink-0"
-                                                style={{ marginRight: 0 }}
+                                            <div
+                                                className="text-xs font-medium"
                                             >
-                                                Current
-                                            </Tag>
-                                            <span className="text-xs font-medium truncate text-gray-500">Live</span>
-                                            <span className="flex-1" />
-                                            {isCurrent && (
-                                                <Tag color="geekblue" className="shrink-0 text-[10px] leading-none" style={{ marginRight: 0 }}>
-                                                    viewing
-                                                </Tag>
-                                            )}
+                                                Current version
+                                            </div>
                                         </div>
                                     </div>
                                 );
@@ -646,7 +620,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
                                 return (
                                     <div
                                         key={v.id}
-                                        className={`relative py-2 px-2 rounded-md cursor-pointer transition-colors flex ${
+                                        className={`group relative py-2 px-2 rounded-md cursor-pointer transition-colors flex items-center ${
                                             isPreviewing
                                                 ? "bg-blue-50"
                                                 : "hover:bg-gray-50"
@@ -665,24 +639,43 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
                                         {/* Content */}
                                         <div className="flex flex-col gap-0.5 flex-1 min-w-0">
                                             <div className="flex items-center gap-1.5">
-                                                <Tag
-                                                    color={isPreviewing ? "blue" : "default"}
-                                                    className="text-[11px] leading-none shrink-0"
-                                                    style={{ marginRight: 0 }}
-                                                >
+                                                <div className="text-xs font-medium">
                                                     v{v.version}
-                                                </Tag>
-                                                {v.label && <span className="text-xs font-medium truncate">{v.label}</span>}
-                                                <span className="flex-1" />
-                                                {isLoadingThis && <Skeleton.Button active size="small" style={{ width: 40, height: 16, minWidth: 40 }} />}
-                                                {isPreviewing && !isLoadingThis && (
-                                                    <Tag color="geekblue" className="shrink-0 text-[10px] leading-none" style={{ marginRight: 0 }}>
-                                                        viewing
-                                                    </Tag>
-                                                )}
+                                                </div>
+                                                {v.label && <span className="text-xs font-medium truncate"> - {v.label}</span>}
                                             </div>
                                             <span className="text-[10px] text-gray-400">{formatDate(v.createdAt)}</span>
                                         </div>
+                                        {/* 3-dot menu */}
+                                        <Dropdown
+                                            trigger={["click"]}
+                                            menu={{
+                                                items: [
+                                                    {
+                                                        key: "restore",
+                                                        icon: <RotateCcw size={12} />,
+                                                        label: restoring ? "Restoring…" : "Restore",
+                                                        disabled: restoring,
+                                                        onClick: ({ domEvent }) => {
+                                                            domEvent.stopPropagation();
+                                                            handleRestoreVersion();
+                                                        },
+                                                    },
+                                                    ...(isPreviewing ? [{
+                                                        key: "exit-preview",
+                                                        label: "Exit preview",
+                                                        onClick: () => onExitPreview?.(),
+                                                    }] : []),
+                                                ],
+                                            }}
+                                        >
+                                            <button
+                                                className="shrink-0 cursor-pointer ml-1 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-gray-200 transition-opacity"
+                                                onClick={(e) => e.stopPropagation()}
+                                            >
+                                                <MoreHorizontal size={14} className="text-gray-500" />
+                                            </button>
+                                        </Dropdown>
                                     </div>
                                 );
                             })}
@@ -693,26 +686,30 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
 
             {/* ── Compare Controls ───────────────────── */}
             {versions.length >= 1 && (
-                <div className="border border-gray-200 rounded-lg p-3 shrink-0">
-                    <div className="text-sm font-medium mb-2">Compare</div>
+                <div className="shrink-0">
+                    <div className="!text-xs font-semibold mb-2">Compare</div>
                     <div className="flex items-center gap-1.5 mb-2">
-                        <Select
-                            placeholder="From"
-                            value={compareFrom}
-                            onChange={setCompareFrom}
-                            options={versionOptions}
-                            className="flex-1"
-                            size="middle"
-                        />
+                        <div className="flex-1 min-w-0">
+                            <Select
+                                placeholder="From"
+                                value={compareFrom}
+                                onChange={setCompareFrom}
+                                options={versionOptions}
+                                className="w-full"
+                                size="middle"
+                            />
+                        </div>
                         <span className="text-xs text-gray-400 shrink-0">→</span>
-                        <Select
-                            placeholder="To"
-                            value={compareTo}
-                            onChange={setCompareTo}
-                            options={versionOptions}
-                            className="flex-1"
-                            size="middle"
-                        />
+                        <div className="flex-1 min-w-0">
+                            <Select
+                                placeholder="To"
+                                value={compareTo}
+                                onChange={setCompareTo}
+                                options={versionOptions}
+                                className="w-full"
+                                size="middle"
+                            />
+                        </div>
                     </div>
                     <Button
                         icon={<GitCompare size={14} />}
@@ -720,7 +717,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
                         loading={comparing}
                         disabled={!compareFrom || !compareTo || compareFrom === compareTo}
                         block
-                        className="!h-8"
+                        className="!h-10 !text-xs !font-semibold"
                     >
                         Compare
                     </Button>

@@ -19,6 +19,7 @@ import {
     Search,
     Table2,
     Columns3,
+    RotateCcw,
     Key,
     Link2,
     Download,
@@ -39,6 +40,7 @@ import { introspectToPhysicalModel } from "@/utils/introspect-to-model";
 import { useRouter } from "next/navigation";
 import { notificationProvider } from "@/providers/notification";
 import { SchemaType } from "@/utils/constants";
+import { getCachedSchemas, setCachedSchemas, pickDefaultSchema, setCachedSelectedSchema } from "@/utils/schema-session-cache";
 
 interface IntrospectSchemaModalProps {
     open: boolean;
@@ -109,44 +111,29 @@ export default function IntrospectSchemaModal({
         }
     }, [selectedConn, form]);
 
-    // Fetch schemas whenever selectedConnId changes
-    useEffect(() => {
-        if (!selectedConnId) {
-            setSchemas([]);
-            setSelectedSchema(null);
-            setTables([]);
-            return;
+    const loadSchemas = useCallback((force = false) => {
+        if (!selectedConnId) { setSchemas([]); setSelectedSchema(null); setTables([]); return; }
+        if (!force) {
+            const cached = getCachedSchemas(selectedConnId);
+            if (cached) { setSchemas(cached); setSelectedSchema(pickDefaultSchema(cached, selectedConnId)); return; }
         }
         setSchemasLoading(true);
         setSchemas([]);
         setSelectedSchema(null);
         setTables([]);
         setSelectedTableNames(new Set());
+        const id = selectedConnId;
+        const isAgent = (connections ?? []).find((c) => c.id === id)?.method === "local_agent";
+        const load = isAgent
+            ? getDbConnectionPlainParams(id).then((params) => agentListSchemas(params))
+            : listSchemasDbConnection(id);
+        load
+            .then((s) => { setCachedSchemas(id, s); setSchemas(s); setSelectedSchema(pickDefaultSchema(s, id)); })
+            .catch(() => setSchemas([]))
+            .finally(() => setSchemasLoading(false));
+    }, [selectedConnId, connections]); // eslint-disable-line react-hooks/exhaustive-deps
 
-        const isAgent = (connections ?? []).find((c) => c.id === selectedConnId)?.method === "local_agent";
-
-        if (isAgent) {
-            // For local_agent: get plain params from backend, then call agent
-            getDbConnectionPlainParams(selectedConnId)
-                .then((params) => agentListSchemas(params))
-                .then((s) => {
-                    setSchemas(s);
-                    const def = s.includes("public") ? "public" : s[0] ?? null;
-                    setSelectedSchema(def);
-                })
-                .catch(() => setSchemas([]))
-                .finally(() => setSchemasLoading(false));
-        } else {
-            listSchemasDbConnection(selectedConnId)
-                .then((s) => {
-                    setSchemas(s);
-                    const def = s.includes("public") ? "public" : s[0] ?? null;
-                    setSelectedSchema(def);
-                })
-                .catch(() => setSchemas([]))
-                .finally(() => setSchemasLoading(false));
-        }
-    }, [selectedConnId, connections]);
+    useEffect(() => { loadSchemas(); }, [selectedConnId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const handleIntrospect = useCallback(async () => {
         if (!selectedConnId) return;
@@ -362,21 +349,34 @@ export default function IntrospectSchemaModal({
                         }}
                         options={connOptions}
                     />
-                    <Select
-                        className="shrink-0"
-                        style={{ minWidth: 120 }}
-                        placeholder="Schema"
-                        loading={schemasLoading}
-                        disabled={!selectedConnId || schemasLoading || schemas.length === 0}
-                        value={selectedSchema}
-                        onChange={(val) => {
-                            setSelectedSchema(val);
-                            setTables([]);
-                            setSelectedTableNames(new Set());
-                        }}
-                        options={schemas.map((s) => ({ label: s, value: s }))}
-                        notFoundContent={schemasLoading ? <Spin size="small" /> : "No schemas"}
-                    />
+                    {schemasLoading ? (
+                        <div className="h-8 w-28 rounded-md bg-gray-200 animate-pulse shrink-0" />
+                    ) : (
+                        <Select
+                            className="shrink-0"
+                            style={{ minWidth: 120 }}
+                            placeholder="Schema"
+                            disabled={!selectedConnId || schemas.length === 0}
+                            value={selectedSchema}
+                            onChange={(val) => {
+                                setSelectedSchema(val);
+                                if (selectedConnId) setCachedSelectedSchema(selectedConnId, val);
+                                setTables([]);
+                                setSelectedTableNames(new Set());
+                            }}
+                            options={schemas.map((s) => ({ label: s, value: s }))}
+                            notFoundContent="No schemas"
+                        />
+                    )}
+                    <Tooltip title="Reload schemas">
+                        <button
+                            onClick={() => loadSchemas(true)}
+                            disabled={schemasLoading || !selectedConnId}
+                            className="cursor-pointer text-gray-400 hover:text-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
+                        >
+                            <RotateCcw size={14} />
+                        </button>
+                    </Tooltip>
                     <Button
                         type="primary"
                         icon={<Database size={15} />}

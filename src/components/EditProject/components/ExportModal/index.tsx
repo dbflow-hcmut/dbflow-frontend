@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Modal, Radio, Form, Segmented, Checkbox, Slider, ColorPicker } from 'antd';
+import { Modal, Radio, Form, Checkbox, Slider, ColorPicker } from 'antd';
 import { Download } from 'lucide-react';
 import { Color } from 'antd/es/color-picker';
 
-export type ExportFormat = 'png' | 'svg';
+export type ExportFormat = 'png' | 'svg' | 'pdf';
 export type ExportScope = 'all' | 'selected';
 
 export interface ExportSettings {
@@ -30,19 +30,16 @@ const ExportModal: React.FC<ExportModalProps> = ({
     hasSelection,
 }) => {
     const [form] = Form.useForm();
-    const [format, setFormat] = useState<ExportFormat>(initialValues.format);
     const [isTransparent, setIsTransparent] = useState(false);
 
     useEffect(() => {
         if (isOpen) {
             form.setFieldsValue({
-                format: initialValues.format,
                 scope: hasSelection ? initialValues.scope : 'all',
                 transparent: false,
                 backgroundColor: '#ffffff', // Default white
                 quality: 2,
             });
-            setFormat(initialValues.format);
             setIsTransparent(false);
         }
     }, [isOpen, initialValues, hasSelection, form]);
@@ -59,6 +56,7 @@ const ExportModal: React.FC<ExportModalProps> = ({
 
             onExport({
                 ...values,
+                format: initialValues.format,
                 backgroundColor,
             });
             onClose();
@@ -70,7 +68,7 @@ const ExportModal: React.FC<ExportModalProps> = ({
             open={isOpen}
             onCancel={onClose}
             onOk={handleOk}
-            title="Export Diagram"
+            title={`Export Diagram as ${initialValues.format.toUpperCase()}`}
             okText="Export"
             cancelText="Cancel"
             okButtonProps={{ icon: <Download size={16} /> }}
@@ -81,17 +79,6 @@ const ExportModal: React.FC<ExportModalProps> = ({
                 layout="vertical"
                 className="pt-4"
             >
-                <Form.Item name="format" label="Format">
-                    <Segmented
-                        block
-                        options={[
-                            { label: 'PNG Image', value: 'png' },
-                            { label: 'SVG Vector', value: 'svg' },
-                        ]}
-                        onChange={(val) => setFormat(val as ExportFormat)}
-                    />
-                </Form.Item>
-
                 <Form.Item name="scope" label="Scope">
                     <Radio.Group className="flex flex-col gap-2">
                         <Radio value="all">
@@ -125,7 +112,7 @@ const ExportModal: React.FC<ExportModalProps> = ({
                     )}
                 </Form.Item>
 
-                {format === 'png' && (
+                {(initialValues.format === 'png' || initialValues.format === 'pdf') && (
                     <Form.Item name="quality" label="Quality (Scale)">
                         <Slider
                             min={1}

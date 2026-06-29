@@ -19,6 +19,7 @@ import {
     CheckCircle2,
     XCircle,
     Loader2,
+    ArrowLeft,
 } from "lucide-react";
 import { notificationProvider } from "@/providers/notification";
 import LocalAgentBanner from "./LocalAgentBanner";
@@ -42,6 +43,7 @@ interface DBConnectionModalProps {
     onClose: () => void;
     projectId?: string;
     onSaved?: (conn: DBConnection) => void;
+    onBack?: () => void;
 }
 
 const DBMS_OPTIONS: { label: string; value: DBConnectionDBMS }[] = [
@@ -78,19 +80,19 @@ const METHOD_CARDS: {
 }[] = [
     {
         value: "direct",
-        icon: <PlugZap className="w-5 h-5" />,
+        icon: <PlugZap className="w-4 h-4" />,
         title: "Direct",
         description: "Standard TCP connection",
     },
     {
         value: "ssh",
-        icon: <Network className="w-5 h-5" />,
+        icon: <Network className="w-4 h-4" />,
         title: "SSH Tunnel",
         description: "Tunnel through an SSH server",
     },
     {
         value: "local_agent",
-        icon: <MonitorSmartphone className="w-5 h-5" />,
+        icon: <MonitorSmartphone className="w-4 h-4" />,
         title: "Local Agent",
         description: "Connect via agent on your machine",
     },
@@ -101,6 +103,7 @@ export default function DBConnectionModal({
     onClose,
     projectId,
     onSaved,
+    onBack,
 }: DBConnectionModalProps) {
     const [form] = Form.useForm<DBConnectionFormValues>();
     const [method, setMethod] = useState<DBConnectionMethod>("direct");
@@ -123,7 +126,6 @@ export default function DBConnectionModal({
             } else {
                 form.setFieldValue("port", null);
             }
-            // Lock host for local agent
             if (method === "local_agent") {
                 form.setFieldValue("host", "127.0.0.1");
             }
@@ -157,7 +159,6 @@ export default function DBConnectionModal({
             let result: { success: boolean; message: string; latencyMs?: number };
 
             if (method === "local_agent") {
-                // Call the local agent directly for localhost databases
                 result = await agentTestConnection({
                     dbms,
                     host: testPayload.host,
@@ -170,8 +171,7 @@ export default function DBConnectionModal({
                     success: false,
                     message:
                         err instanceof Error
-                            ? err.message.includes("Failed to fetch") ||
-                              err.message.includes("NetworkError")
+                            ? err.message.includes("Failed to fetch") || err.message.includes("NetworkError")
                                 ? "Local Agent is not running. Start it at localhost:27182"
                                 : err.message
                             : "Failed to reach local agent",
@@ -226,7 +226,6 @@ export default function DBConnectionModal({
                     ssl: sslEnabled,
                     projectId,
                 });
-                // Invalidate SWR cache so IntrospectSchemaModal sees the new connection immediately
                 await mutate("my-db-connections");
                 form.resetFields();
                 setMethod("direct");
@@ -259,24 +258,20 @@ export default function DBConnectionModal({
 
     const testIcon =
         testStatus === "testing" ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
         ) : testStatus === "success" ? (
-            <CheckCircle2 className="w-4 h-4 text-green-500" />
+            <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
         ) : testStatus === "failed" ? (
-            <XCircle className="w-4 h-4 text-red-500" />
+            <XCircle className="w-3.5 h-3.5 text-red-500" />
         ) : null;
 
     return (
         <Modal
             open={open}
             onCancel={handleClose}
-            title={
-                <div className="flex items-center gap-2">
-                    <PlugZap className="w-5 h-5 text-primary-500" />
-                    <span>Connect to Database</span>
-                </div>
-            }
+            title={<span className="text-xs font-medium">Connect to Database</span>}
             width={680}
+            centered
             styles={{
                 content: { padding: 0 },
                 header: { padding: "20px 24px 8px" },
@@ -286,10 +281,12 @@ export default function DBConnectionModal({
             footer={
                 <div className="flex items-center justify-between">
                     <Button
+                        size="small"
                         onClick={handleTestConnection}
                         loading={testStatus === "testing"}
                         icon={testIcon}
                         disabled={testStatus === "testing"}
+                        className="!text-xs"
                     >
                         {testStatus === "success"
                             ? "Connection OK"
@@ -298,11 +295,18 @@ export default function DBConnectionModal({
                               : "Test Connection"}
                     </Button>
                     <div className="flex gap-2">
-                        <Button onClick={handleClose}>Cancel</Button>
+                        {onBack && (
+                            <Button size="small" icon={<ArrowLeft size={12} />} onClick={onBack} className="!text-xs">
+                                Back
+                            </Button>
+                        )}
+                        <Button size="small" onClick={handleClose} className="!text-xs">Cancel</Button>
                         <Button
+                            size="small"
                             type="primary"
                             loading={isSaving}
                             onClick={() => form.submit()}
+                            className="!text-xs"
                         >
                             Connect
                         </Button>
@@ -311,248 +315,216 @@ export default function DBConnectionModal({
             }
             forceRender
         >
-            <div style={{ maxHeight: "65vh", overflowY: "auto", padding: "4px 24px 8px" }}>
-                <Form
-                form={form}
-                layout="vertical"
-                onFinish={handleSave}
-                initialValues={{
-                    dbms: "postgresql",
-                    method: "direct",
-                    port: PORTS["postgresql"],
-                    ssl: false,
-                    sshPort: 22,
-                    sshAuthType: "password",
-                }}
-                className="pt-0 pb-2"
+            {/* Wrapper overrides Ant Design Form label + explain text sizes */}
+            <div
+                style={{ maxHeight: "65vh", overflowY: "auto", padding: "4px 24px 8px" }}
+                className="[&_.ant-form-item-label_label]:!text-xs [&_.ant-form-item-explain]:!text-xs [&_.ant-radio-wrapper]:!text-xs [&_.ant-radio-wrapper_span]:!text-xs"
             >
-                {/* ── Section A: General ── */}
-                <Form.Item
-                    name="name"
-                    label="Connection Name"
-                    rules={[{ required: true, message: "Enter a name for this connection" }]}
+                <Form
+                    form={form}
+                    layout="vertical"
+                    onFinish={handleSave}
+                    initialValues={{
+                        dbms: "postgresql",
+                        method: "direct",
+                        port: PORTS["postgresql"],
+                        ssl: false,
+                        sshPort: 22,
+                        sshAuthType: "password",
+                    }}
+                    className="pt-0 pb-2"
                 >
-                    <Input placeholder="e.g. Production PostgreSQL" className="!h-9" />
-                </Form.Item>
+                    <Form.Item
+                        name="name"
+                        label="Connection Name"
+                        rules={[{ required: true, message: "Enter a name for this connection" }]}
+                    >
+                        <Input placeholder="e.g. Production PostgreSQL" className="!h-8 !text-xs" />
+                    </Form.Item>
 
-                {/* DBMS Selector */}
-                <div className="mb-4">
-                    <div className="text-sm font-medium text-gray-700 mb-1.5">
-                        Database System
+                    <div className="mb-4">
+                        <div className="text-xs font-medium text-gray-700 mb-1.5">Database System</div>
+                        <Segmented
+                            block
+                            value={dbms}
+                            onChange={handleDbmsChange}
+                            options={DBMS_OPTIONS}
+                            className="!text-xs"
+                        />
                     </div>
-                    <Segmented
-                        block
-                        value={dbms}
-                        onChange={handleDbmsChange}
-                        options={DBMS_OPTIONS}
-                    />
-                </div>
 
-                <Divider className="!my-4" />
+                    <Divider className="!my-4" />
 
-                {/* ── Section B: Connection Method ── */}
-                <div className="mb-4">
-                    <div className="text-sm font-medium text-gray-700 mb-2">
-                        Connection Method
-                    </div>
-                    <div className="grid grid-cols-3 gap-2">
-                        {METHOD_CARDS.map((card) => (
-                            <button
-                                key={card.value}
-                                type="button"
-                                onClick={() => handleMethodChange(card.value)}
-                                className={`flex flex-col items-start gap-1 p-3 rounded-lg border text-left transition-all cursor-pointer ${
-                                    method === card.value
-                                        ? "border-primary-500 bg-blue-50 text-primary-500"
-                                        : "border-gray-200 hover:border-gray-300 text-gray-600 hover:bg-gray-50"
-                                }`}
-                            >
-                                <span
-                                    className={
+                    <div className="mb-4">
+                        <div className="text-xs font-medium text-gray-700 mb-2">Connection Method</div>
+                        <div className="grid grid-cols-3 gap-2">
+                            {METHOD_CARDS.map((card) => (
+                                <button
+                                    key={card.value}
+                                    type="button"
+                                    onClick={() => handleMethodChange(card.value)}
+                                    className={`flex flex-col items-start gap-1 p-3 rounded-lg border text-left transition-all cursor-pointer ${
                                         method === card.value
-                                            ? "text-primary-500"
-                                            : "text-gray-500"
+                                            ? "border-primary-500 bg-blue-50"
+                                            : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                                    }`}
+                                >
+                                    <span className={method === card.value ? "text-primary-500" : "text-gray-500"}>
+                                        {card.icon}
+                                    </span>
+                                    <span className="text-xs font-semibold text-gray-900">{card.title}</span>
+                                    <span className="text-xs text-gray-500">{card.description}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <Divider className="!my-4" />
+
+                    {method === "local_agent" && (
+                        <div className="mb-4"><LocalAgentBanner /></div>
+                    )}
+
+                    <div className="grid grid-cols-3 gap-3">
+                        <Form.Item
+                            name="host"
+                            label="Host"
+                            className="col-span-2"
+                            rules={[{ required: true, message: "Enter host" }]}
+                            validateStatus={fh("host")}
+                            hasFeedback={!!fh("host")}
+                        >
+                            <Input
+                                placeholder={method === "local_agent" ? "127.0.0.1" : "e.g. db.example.com"}
+                                className="!h-8 !text-xs"
+                                readOnly={method === "local_agent"}
+                            />
+                        </Form.Item>
+                        <Form.Item
+                            name="port"
+                            label="Port"
+                            rules={[{ required: true, message: "Enter port" }]}
+                            validateStatus={fh("port")}
+                            hasFeedback={!!fh("port")}
+                        >
+                            <InputNumber placeholder="5432" className="!h-8 w-full !text-xs" min={1} max={65535} />
+                        </Form.Item>
+                    </div>
+
+                    <Form.Item
+                        name="database"
+                        label="Database Name"
+                        rules={[{ required: true, message: "Enter database name" }]}
+                        validateStatus={fh("database")}
+                        hasFeedback={!!fh("database")}
+                    >
+                        <Input placeholder="e.g. mydb" className="!h-8 !text-xs" />
+                    </Form.Item>
+
+                    <div className="grid grid-cols-2 gap-3">
+                        <Form.Item
+                            name="username"
+                            label="Username"
+                            rules={[{ required: true, message: "Enter username" }]}
+                            validateStatus={fh("username")}
+                            hasFeedback={!!fh("username")}
+                        >
+                            <Input placeholder="postgres" className="!h-8 !text-xs" />
+                        </Form.Item>
+                        <Form.Item
+                            name="password"
+                            label="Password"
+                            validateStatus={fh("password")}
+                        >
+                            <Input.Password placeholder="••••••••" className="!h-8 !text-xs" />
+                        </Form.Item>
+                    </div>
+
+                    <div className="flex items-center gap-2 mb-4">
+                        <Switch size="small" checked={sslEnabled} onChange={setSslEnabled} />
+                        <span className="text-xs text-gray-700">Use SSL / TLS</span>
+                    </div>
+
+                    {method === "ssh" && (
+                        <>
+                            <Divider orientation="left" className="!my-4 !text-xs !text-gray-400">
+                                SSH Tunnel
+                            </Divider>
+
+                            <div className="grid grid-cols-3 gap-3">
+                                <Form.Item
+                                    name="sshHost"
+                                    label="SSH Host"
+                                    className="col-span-2"
+                                    rules={[{ required: true, message: "Enter SSH host" }]}
+                                    validateStatus={fh("sshHost")}
+                                    hasFeedback={!!fh("sshHost")}
+                                >
+                                    <Input placeholder="e.g. bastion.example.com" className="!h-8 !text-xs" />
+                                </Form.Item>
+                                <Form.Item
+                                    name="sshPort"
+                                    label="SSH Port"
+                                    validateStatus={fh("sshPort")}
+                                    hasFeedback={!!fh("sshPort")}
+                                >
+                                    <Input type="number" placeholder="22" className="!h-8 !text-xs" />
+                                </Form.Item>
+                            </div>
+
+                            <Form.Item
+                                name="sshUsername"
+                                label="SSH Username"
+                                rules={[{ required: true, message: "Enter SSH username" }]}
+                                validateStatus={fh("sshUsername")}
+                                hasFeedback={!!fh("sshUsername")}
+                            >
+                                <Input placeholder="ubuntu" className="!h-8 !text-xs" />
+                            </Form.Item>
+
+                            <Form.Item label="SSH Authentication">
+                                <Radio.Group
+                                    value={sshAuthType}
+                                    onChange={(e) => setSshAuthType(e.target.value)}
+                                    className="flex gap-4"
+                                >
+                                    <Radio value="password">Password</Radio>
+                                    <Radio value="private_key">Private Key</Radio>
+                                </Radio.Group>
+                            </Form.Item>
+
+                            {sshAuthType === "password" ? (
+                                <Form.Item
+                                    name="sshPassword"
+                                    label="SSH Password"
+                                    rules={[{ required: true, message: "Enter SSH password" }]}
+                                    validateStatus={fh("sshPassword")}
+                                >
+                                    <Input.Password placeholder="••••••••" className="!h-8 !text-xs" />
+                                </Form.Item>
+                            ) : (
+                                <Form.Item
+                                    name="sshPrivateKey"
+                                    label="Private Key (PEM)"
+                                    rules={[{ required: true, message: "Paste your PEM private key" }]}
+                                    validateStatus={fh("sshPrivateKey")}
+                                    extra={
+                                        <span className="text-xs text-gray-400">
+                                            Paste the contents of your <code>id_rsa</code> or{" "}
+                                            <code>id_ed25519</code> file.
+                                        </span>
                                     }
                                 >
-                                    {card.icon}
-                                </span>
-                                <span className="text-sm font-semibold text-gray-900">
-                                    {card.title}
-                                </span>
-                                <span className="text-xs text-gray-500">{card.description}</span>
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
-                <Divider className="!my-4" />
-
-                {/* ── Section C: Connection Details ── */}
-
-                {/* Local Agent Banner */}
-                {method === "local_agent" && (
-                    <div className="mb-4">
-                        <LocalAgentBanner />
-                    </div>
-                )}
-
-                {/* Host + Port */}
-                <div className="grid grid-cols-3 gap-3">
-                    <Form.Item
-                        name="host"
-                        label="Host"
-                        className="col-span-2"
-                        rules={[{ required: true, message: "Enter host" }]}
-                        validateStatus={fh("host")}
-                        hasFeedback={!!fh("host")}
-                    >
-                        <Input
-                            placeholder={
-                                method === "local_agent" ? "127.0.0.1" : "e.g. db.example.com"
-                            }
-                            className="!h-9"
-                            readOnly={method === "local_agent"}
-                        />
-                    </Form.Item>
-                    <Form.Item
-                        name="port"
-                        label="Port"
-                        rules={[{ required: true, message: "Enter port" }]}
-                        validateStatus={fh("port")}
-                        hasFeedback={!!fh("port")}
-                    >
-                        <InputNumber
-                            placeholder="5432"
-                            className="!h-9 w-full"
-                            min={1}
-                            max={65535}
-                        />
-                    </Form.Item>
-                </div>
-
-                {/* Database */}
-                <Form.Item
-                    name="database"
-                    label="Database Name"
-                    rules={[{ required: true, message: "Enter database name" }]}
-                    validateStatus={fh("database")}
-                    hasFeedback={!!fh("database")}
-                >
-                    <Input placeholder="e.g. mydb" className="!h-9" />
-                </Form.Item>
-
-                {/* Username + Password */}
-                <div className="grid grid-cols-2 gap-3">
-                    <Form.Item
-                        name="username"
-                        label="Username"
-                        rules={[{ required: true, message: "Enter username" }]}
-                        validateStatus={fh("username")}
-                        hasFeedback={!!fh("username")}
-                    >
-                        <Input placeholder="postgres" className="!h-9" />
-                    </Form.Item>
-                    <Form.Item
-                        name="password"
-                        label="Password"
-                        validateStatus={fh("password")}
-                    >
-                        <Input.Password placeholder="••••••••" className="!h-9" />
-                    </Form.Item>
-                </div>
-
-                {/* SSL Toggle */}
-                <div className="flex items-center gap-3 mb-4">
-                    <Switch
-                        size="small"
-                        checked={sslEnabled}
-                        onChange={setSslEnabled}
-                    />
-                    <span className="text-sm text-gray-700">Use SSL / TLS</span>
-                </div>
-
-                {/* ── SSH Fields (only when method = ssh) ── */}
-                {method === "ssh" && (
-                    <>
-                        <Divider orientation="left" className="!my-4 !text-xs !text-gray-400">
-                            SSH Tunnel
-                        </Divider>
-
-                        <div className="grid grid-cols-3 gap-3">
-                            <Form.Item
-                                name="sshHost"
-                                label="SSH Host"
-                                className="col-span-2"
-                                rules={[{ required: true, message: "Enter SSH host" }]}
-                                validateStatus={fh("sshHost")}
-                                hasFeedback={!!fh("sshHost")}
-                            >
-                                <Input placeholder="e.g. bastion.example.com" className="!h-9" />
-                            </Form.Item>
-                            <Form.Item
-                                name="sshPort"
-                                label="SSH Port"
-                                validateStatus={fh("sshPort")}
-                                hasFeedback={!!fh("sshPort")}
-                            >
-                                <Input type="number" placeholder="22" className="!h-9" />
-                            </Form.Item>
-                        </div>
-
-                        <Form.Item
-                            name="sshUsername"
-                            label="SSH Username"
-                            rules={[{ required: true, message: "Enter SSH username" }]}
-                            validateStatus={fh("sshUsername")}
-                            hasFeedback={!!fh("sshUsername")}
-                        >
-                            <Input placeholder="ubuntu" className="!h-9" />
-                        </Form.Item>
-
-                        {/* SSH Auth Type */}
-                        <Form.Item label="SSH Authentication">
-                            <Radio.Group
-                                value={sshAuthType}
-                                onChange={(e) => setSshAuthType(e.target.value)}
-                                className="flex gap-4"
-                            >
-                                <Radio value="password">Password</Radio>
-                                <Radio value="private_key">Private Key</Radio>
-                            </Radio.Group>
-                        </Form.Item>
-
-                        {sshAuthType === "password" ? (
-                            <Form.Item
-                                name="sshPassword"
-                                label="SSH Password"
-                                rules={[{ required: true, message: "Enter SSH password" }]}
-                                validateStatus={fh("sshPassword")}
-                            >
-                                <Input.Password placeholder="••••••••" className="!h-9" />
-                            </Form.Item>
-                        ) : (
-                            <Form.Item
-                                name="sshPrivateKey"
-                                label="Private Key (PEM)"
-                                rules={[{ required: true, message: "Paste your PEM private key" }]}
-                                validateStatus={fh("sshPrivateKey")}
-                                extra={
-                                    <span className="text-xs text-gray-400">
-                                        Paste the contents of your <code>id_rsa</code> or{" "}
-                                        <code>id_ed25519</code> file.
-                                    </span>
-                                }
-                            >
-                                <Input.TextArea
-                                    rows={4}
-                                    placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----"
-                                    className="!font-mono !text-xs"
-                                />
-                            </Form.Item>
-                        )}
-                    </>
-                )}
-            </Form>
+                                    <Input.TextArea
+                                        rows={4}
+                                        placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----"
+                                        className="!font-mono !text-xs"
+                                    />
+                                </Form.Item>
+                            )}
+                        </>
+                    )}
+                </Form>
             </div>
         </Modal>
     );

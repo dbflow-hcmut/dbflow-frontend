@@ -1,63 +1,58 @@
-import { Skeleton } from "antd";
+const Pulse = ({ className }: { className: string }) => (
+  <div className={`animate-pulse rounded-md bg-gray-200 ${className}`} />
+);
 
 export default function ProjectDetailLoading() {
   return (
-    <div className="flex flex-col h-screen">
-      {/* Header Skeleton */}
-      <div className="h-16 border-b border-gray-200 bg-white flex items-center justify-between px-4">
-        <div className="flex items-center gap-4">
-          <div className="h-8 w-32 bg-gray-200 rounded animate-pulse" />
-          <div className="h-8 w-48 bg-gray-200 rounded animate-pulse" />
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="h-10 w-24 bg-gray-200 rounded animate-pulse" />
-          <div className="h-10 w-24 bg-gray-200 rounded animate-pulse" />
-          <div className="h-10 w-24 bg-gray-200 rounded animate-pulse" />
-        </div>
+    <div
+      className="relative h-screen w-full overflow-hidden bg-white"
+      style={{
+        backgroundImage:
+          "radial-gradient(circle, rgba(148, 163, 184, 0.3) 1px, transparent 1px)",
+        backgroundSize: "16px 16px",
+      }}
+    >
+      <div className="absolute left-4 top-4 z-20 flex h-12 items-center gap-3 rounded-lg bg-white px-4 shadow-md">
+        <Pulse className="h-5 w-5 rounded-full" />
+        <Pulse className="h-4 w-44" />
+        <Pulse className="h-8 w-20 bg-blue-200" />
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar Skeleton */}
-        <div className="w-64 border-r border-gray-200 bg-white p-4">
-          <div className="space-y-3">
-            <div className="h-10 w-full bg-gray-200 rounded animate-pulse" />
-            <div className="h-10 w-full bg-gray-200 rounded animate-pulse" />
-            <div className="h-10 w-full bg-gray-200 rounded animate-pulse" />
-            <div className="h-10 w-full bg-gray-200 rounded animate-pulse" />
-          </div>
-        </div>
-
-        {/* Center Canvas Area */}
-        <div className="flex-1 bg-gray-50 relative">
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-gray-400">
-              <Skeleton active paragraph={{ rows: 2 }} />
-            </div>
-          </div>
-        </div>
-
-        {/* Right Panel Skeleton */}
-        <div className="w-80 border-l border-gray-200 bg-white p-4">
-          <div className="space-y-4">
-            <div className="h-6 w-32 bg-gray-200 rounded animate-pulse" />
-            <div className="space-y-2">
-              <div className="h-4 w-24 bg-gray-200 rounded animate-pulse" />
-              <div className="h-10 w-full bg-gray-200 rounded animate-pulse" />
-            </div>
-            <div className="space-y-2">
-              <div className="h-4 w-24 bg-gray-200 rounded animate-pulse" />
-              <div className="h-10 w-full bg-gray-200 rounded animate-pulse" />
-            </div>
-          </div>
-        </div>
+      <div className="absolute right-4 top-4 z-20 flex items-center gap-2">
+        <div className="h-12 w-64 rounded-lg bg-white shadow-md" />
+        <Pulse className="h-12 w-24 rounded-lg bg-blue-200 shadow-md" />
       </div>
 
-      {/* Footer Skeleton */}
-      <div className="h-10 border-t border-gray-200 bg-white px-4 flex items-center justify-between">
-        <div className="h-6 w-48 bg-gray-200 rounded animate-pulse" />
-        <div className="h-6 w-32 bg-gray-200 rounded animate-pulse" />
+      <aside className="absolute bottom-20 left-4 top-20 z-10 w-64 rounded-lg bg-white p-4 shadow-md">
+        <Pulse className="h-5 w-20" />
+        <Pulse className="mt-5 h-10 w-full" />
+        <Pulse className="mt-3 h-10 w-full" />
+
+        <Pulse className="mt-10 h-5 w-24" />
+        <Pulse className="mt-5 h-8 w-8" />
+
+        <Pulse className="mt-10 h-5 w-32" />
+        <div className="mt-5 space-y-4">
+          <Pulse className="h-3 w-28" />
+          <Pulse className="h-3 w-20" />
+          <Pulse className="h-3 w-24" />
+        </div>
+      </aside>
+
+      <aside className="absolute bottom-20 right-4 top-20 z-10 hidden w-64 rounded-lg bg-white p-4 shadow-md md:block">
+        <Pulse className="h-5 w-24" />
+        <div className="mt-12 flex flex-col items-center gap-3">
+          <Pulse className="h-3 w-36" />
+          <Pulse className="h-3 w-24" />
+        </div>
+      </aside>
+
+      <div className="absolute bottom-4 left-4 z-20 flex items-center gap-2">
+        <Pulse className="h-14 w-14 rounded-full shadow-md" />
+        <div className="h-12 w-72 rounded-lg bg-white shadow-md" />
       </div>
+
+      <div className="absolute bottom-4 right-4 z-20 h-12 w-72 rounded-lg bg-white shadow-md" />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Modal, Segmented, Checkbox, Alert, Button, Tooltip } from "antd";
+import { Modal, Segmented, Checkbox, Button, Tooltip } from "antd";
 import { notificationProvider } from "@/providers/notification";
 import { Copy, Download } from "lucide-react";
 import Editor from "@monaco-editor/react";
@@ -73,6 +73,8 @@ const DDLExportModal: React.FC<DDLExportModalProps> = ({
             onCancel={onClose}
             title="Export DDL (SQL Script)"
             width={720}
+            styles={{ body: { padding: 0, height: "calc(80vh - 55px)", overflow: "hidden" } }}
+            centered
             footer={
                 <div className="flex items-center justify-between">
                     <span className="text-xs text-gray-400">
@@ -80,7 +82,7 @@ const DDLExportModal: React.FC<DDLExportModalProps> = ({
                     </span>
                     <div className="flex gap-2">
                         <Tooltip title="Copy to clipboard">
-                            <Button icon={<Copy size={15} />} onClick={handleCopy} disabled={!result?.sql}>
+                            <Button icon={<Copy size={15} />} onClick={handleCopy} disabled={!result?.sql} className="!text-xs">
                                 Copy
                             </Button>
                         </Tooltip>
@@ -89,6 +91,7 @@ const DDLExportModal: React.FC<DDLExportModalProps> = ({
                             icon={<Download size={15} />}
                             onClick={handleDownload}
                             disabled={!result?.sql}
+                            className="!text-xs"
                         >
                             Download .sql
                         </Button>
@@ -96,49 +99,55 @@ const DDLExportModal: React.FC<DDLExportModalProps> = ({
                 </div>
             }
         >
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-4 text-xs">
                 {/* DBMS selector */}
                 <div>
-                    <div className="text-sm font-medium mb-1.5">Target DBMS</div>
+                    <div className="text-xs font-medium mb-1.5">Target DBMS</div>
                     <Segmented
                         block
                         value={options.dbms}
                         onChange={(val) => updateOption("dbms", val as DBMSType)}
                         options={DBMS_OPTIONS}
+                        className="!text-xs"
                     />
                 </div>
 
                 {/* Options */}
                 <div>
-                    <div className="text-sm font-medium mb-1.5">Options</div>
+                    <div className="text-xs font-medium mb-1.5">Options</div>
                     <div className="flex flex-col gap-1">
                         <Checkbox
                             checked={options.includeCreateTable}
                             onChange={(e) => updateOption("includeCreateTable", e.target.checked)}
+                            className="!text-xs"
                         >
                             CREATE TABLE statements
                         </Checkbox>
                         <Checkbox
                             checked={options.includeForeignKeys}
                             onChange={(e) => updateOption("includeForeignKeys", e.target.checked)}
+                            className="!text-xs"
                         >
                             FOREIGN KEY constraints (ALTER TABLE)
                         </Checkbox>
                         <Checkbox
                             checked={options.includeIndexes}
                             onChange={(e) => updateOption("includeIndexes", e.target.checked)}
+                            className="!text-xs"
                         >
                             CREATE INDEX statements
                         </Checkbox>
                         <Checkbox
                             checked={options.includeDropIfExists}
                             onChange={(e) => updateOption("includeDropIfExists", e.target.checked)}
+                            className="!text-xs"
                         >
                             Add DROP TABLE IF EXISTS before each table
                         </Checkbox>
                         <Checkbox
                             checked={options.includeIfNotExists}
                             onChange={(e) => updateOption("includeIfNotExists", e.target.checked)}
+                            className="!text-xs"
                         >
                             Add IF NOT EXISTS to CREATE TABLE
                         </Checkbox>
@@ -147,36 +156,27 @@ const DDLExportModal: React.FC<DDLExportModalProps> = ({
 
                 {/* Warnings */}
                 {result && result.warnings.length > 0 && (
-                    <Alert
-                        type="warning"
-                        showIcon
-                        message={result.warnings.length === 1 ? result.warnings[0] : undefined}
-                        description={
-                            result.warnings.length > 1 ? (
-                                <ul className="list-disc pl-4 mb-0">
-                                    {result.warnings.map((w, i) => (
-                                        <li key={i}>{w}</li>
-                                    ))}
-                                </ul>
-                            ) : undefined
-                        }
-                    />
+                    <div className="flex flex-col gap-0.5">
+                        {result.warnings.map((w, i) => (
+                            <span key={i} className="text-xs text-amber-600">{w}</span>
+                        ))}
+                    </div>
                 )}
 
                 {/* SQL Preview */}
                 <div>
-                    <div className="text-sm font-medium mb-1.5">SQL Preview</div>
+                    <div className="text-xs font-medium mb-1.5">SQL Preview</div>
                     <div className="border border-gray-200 rounded-lg overflow-hidden">
                         <Editor
                             height={340}
                             language="sql"
                             value={result?.sql || "-- No tables to export"}
-                            theme="vs-dark"
+                            theme="light"
                             options={{
-                                readOnly: true,
+                                readOnly: false,
                                 minimap: { enabled: false },
                                 scrollBeyondLastLine: false,
-                                fontSize: 13,
+                                fontSize: 12,
                                 lineNumbers: "on",
                                 renderLineHighlight: "none",
                                 overviewRulerLanes: 0,

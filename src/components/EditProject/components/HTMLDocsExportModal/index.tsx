@@ -120,6 +120,8 @@ const HTMLDocsExportModal: React.FC<HTMLDocsExportModalProps> = ({
             onCancel={onClose}
             title="Export HTML Documentation"
             width={780}
+            styles={{ body: { padding: 0, height: "calc(80vh - 55px)" } }}
+            centered
             footer={
                 <div className="flex items-center justify-between">
                     <span className="text-xs text-gray-400">
@@ -127,17 +129,17 @@ const HTMLDocsExportModal: React.FC<HTMLDocsExportModalProps> = ({
                     </span>
                     <div className="flex gap-2">
                         <Tooltip title="Create a public shareable link (no login required)">
-                            <Button icon={<Link2 size={15} />} onClick={handleShareLink} loading={sharing} disabled={!result?.html}>
+                            <Button icon={<Link2 size={15} />} onClick={handleShareLink} loading={sharing} disabled={!result?.html} className="!h-8 !px-3 !text-xs !font-medium">
                                 Copy Link
                             </Button>
                         </Tooltip>
                         <Tooltip title="Preview in browser">
-                            <Button icon={<ExternalLink size={15} />} onClick={handlePreviewInBrowser} disabled={!result?.html}>
+                            <Button icon={<ExternalLink size={15} />} onClick={handlePreviewInBrowser} disabled={!result?.html} className="!h-8 !px-3 !text-xs !font-medium">
                                 Preview
                             </Button>
                         </Tooltip>
                         <Tooltip title="Copy HTML source">
-                            <Button icon={<Copy size={15} />} onClick={handleCopy} disabled={!result?.html}>
+                            <Button icon={<Copy size={15} />} onClick={handleCopy} disabled={!result?.html} className="!h-8 !px-3 !text-xs !font-medium">
                                 Copy
                             </Button>
                         </Tooltip>
@@ -146,6 +148,7 @@ const HTMLDocsExportModal: React.FC<HTMLDocsExportModalProps> = ({
                             icon={<Download size={15} />}
                             onClick={handleDownload}
                             disabled={!result?.html}
+                            className="!h-8 !px-3 !text-xs !font-medium"
                         >
                             Download .html
                         </Button>
@@ -153,10 +156,10 @@ const HTMLDocsExportModal: React.FC<HTMLDocsExportModalProps> = ({
                 </div>
             }
         >
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-4 h-full overflow-y-auto p-4">
                 {/* Schema kind indicator */}
                 <div>
-                    <div className="text-sm font-medium mb-1.5">Schema Type</div>
+                    <div className="text-xs font-medium mb-1.5">Schema Type</div>
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                         schemaKind === "physical" ? "bg-blue-100 text-blue-700" :
                         schemaKind === "logical" ? "bg-purple-100 text-purple-700" :
@@ -168,36 +171,40 @@ const HTMLDocsExportModal: React.FC<HTMLDocsExportModalProps> = ({
 
                 {/* Options */}
                 <div>
-                    <div className="text-sm font-medium mb-1.5">Options</div>
+                    <div className="text-xs font-medium mb-1.5">Options</div>
                     <div className="flex flex-col gap-1">
                         <Checkbox
+                            className="text-xs"
                             checked={options.includeNotes}
                             onChange={(e) => updateOption("includeNotes", e.target.checked)}
                         >
-                            Include notes / descriptions
+                            <span className="text-xs">Include notes / descriptions</span>
                         </Checkbox>
                         {schemaKind === "physical" && (
                             <>
                                 <Checkbox
+                                    className="text-xs"
                                     checked={options.includeIndexes}
                                     onChange={(e) => updateOption("includeIndexes", e.target.checked)}
                                 >
-                                    Include indexes
+                                    <span className="text-xs">Include indexes</span>
                                 </Checkbox>
                                 <Checkbox
+                                    className="text-xs"
                                     checked={options.includeFKDetails}
                                     onChange={(e) => updateOption("includeFKDetails", e.target.checked)}
                                 >
-                                    Include foreign key details
+                                    <span className="text-xs">Include foreign key details</span>
                                 </Checkbox>
                             </>
                         )}
                         {schemaKind === "logical" && (
                             <Checkbox
+                                className="text-xs"
                                 checked={options.includeFKDetails}
                                 onChange={(e) => updateOption("includeFKDetails", e.target.checked)}
                             >
-                                Include foreign key references
+                                <span className="text-xs">Include foreign key references</span>
                             </Checkbox>
                         )}
                     </div>
@@ -206,7 +213,7 @@ const HTMLDocsExportModal: React.FC<HTMLDocsExportModalProps> = ({
                 {/* Preview */}
                 <div>
                     <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-sm font-medium">Preview</span>
+                        <span className="text-xs font-medium">Preview</span>
                         <div className="flex items-center gap-1.5">
                             <Pencil size={13} className={editMode ? "text-amber-500" : "text-gray-400"} />
                             <Switch
