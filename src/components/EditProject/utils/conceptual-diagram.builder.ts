@@ -235,6 +235,9 @@ const mapAttributeNode = (node: StoredDiagramNode): Node<AttributeData> => {
         meta?.isKey ??
         dataSource?.isKey ??
         (node.attributeRender?.underline ? true : undefined);
+    const underlineStyle =
+        dataSource?.underlineStyle ??
+        node.attributeRender?.underlineStyle;
 
     return {
         id: node.attributeId ?? node.id,
@@ -244,6 +247,7 @@ const mapAttributeNode = (node: StoredDiagramNode): Node<AttributeData> => {
             name: node.name ?? dataSource?.name ?? node.attributeId ?? node.id,
             variant,
             isKey,
+            underlineStyle,
         },
         style: ensureStyle(node),
         zIndex: node.zIndex,
@@ -444,8 +448,11 @@ const mapReactRelationshipNode = (node: Node<RelationshipData>): StoredDiagramNo
     };
 };
 
-const mapReactAttributeNode = (node: Node<AttributeData>): StoredDiagramNode => {
-    const { name, variant = "single", isKey } = node.data;
+const mapReactAttributeNode = (
+    node: Node<AttributeData>,
+    underlineStyleOverride?: AttributeData["underlineStyle"]
+): StoredDiagramNode => {
+    const { name, variant = "single", isKey, underlineStyle } = node.data;
     const attributeRender: NonNullable<StoredDiagramNode["attributeRender"]> = {};
 
     if (variant === "double") {
@@ -456,7 +463,7 @@ const mapReactAttributeNode = (node: Node<AttributeData>): StoredDiagramNode => 
     }
     if (isKey) {
         attributeRender.underline = true;
-        attributeRender.underlineStyle = "solid";
+        attributeRender.underlineStyle = underlineStyleOverride ?? underlineStyle ?? "solid";
     }
 
     return {
@@ -502,7 +509,34 @@ const mapReactRelationNode = (node: Node<RelationTableData>): StoredDiagramNode 
     };
 };
 
-const mapReactNodeToStoredNode = (node: Node<NodeData>): StoredDiagramNode => {
+const isWeakEntityNode = (node?: Node<NodeData>) =>
+    node?.type === "entity" && (node.data as EntityData | undefined)?.variant === "double";
+
+const getWeakEntityPartialKeyAttributeIds = (
+    reactNodes: Node<NodeData>[] = [],
+    reactEdges: Edge<ErdEdgeData>[] = []
+) => {
+    const nodeMap = new Map(reactNodes.map((node) => [node.id, node]));
+    const partialKeyAttributeIds = new Set<string>();
+
+    reactEdges.forEach((edge) => {
+        const sourceNode = nodeMap.get(edge.source);
+        const targetNode = nodeMap.get(edge.target);
+        if (sourceNode?.type === "attribute" && isWeakEntityNode(targetNode)) {
+            partialKeyAttributeIds.add(sourceNode.id);
+        }
+        if (targetNode?.type === "attribute" && isWeakEntityNode(sourceNode)) {
+            partialKeyAttributeIds.add(targetNode.id);
+        }
+    });
+
+    return partialKeyAttributeIds;
+};
+
+const mapReactNodeToStoredNode = (
+    node: Node<NodeData>,
+    partialKeyAttributeIds?: Set<string>
+): StoredDiagramNode => {
     console.log("mapReactNodeToStoredNode", node);
     switch (node.type) {
         case "entity":
@@ -510,7 +544,10 @@ const mapReactNodeToStoredNode = (node: Node<NodeData>): StoredDiagramNode => {
         case "relationship":
             return mapReactRelationshipNode(node as Node<RelationshipData>);
         case "attribute":
-            return mapReactAttributeNode(node as Node<AttributeData>);
+            return mapReactAttributeNode(
+                node as Node<AttributeData>,
+                partialKeyAttributeIds?.has(node.id) ? "dashed" : "solid"
+            );
         case "constraint":
             return mapReactConstraintNode(node as Node<{ symbol: "d" | "o" | "u" }>);
         case "relation":
@@ -528,8 +565,12 @@ const mapReactNodeToStoredNode = (node: Node<NodeData>): StoredDiagramNode => {
     }
 };
 
-export const mapReactNodesToStoredNodes = (reactNodes: Node<NodeData>[] = []): StoredDiagramNode[] => {
-    return reactNodes.map(mapReactNodeToStoredNode);
+export const mapReactNodesToStoredNodes = (
+    reactNodes: Node<NodeData>[] = [],
+    reactEdges: Edge<ErdEdgeData>[] = []
+): StoredDiagramNode[] => {
+    const partialKeyAttributeIds = getWeakEntityPartialKeyAttributeIds(reactNodes, reactEdges);
+    return reactNodes.map((node) => mapReactNodeToStoredNode(node, partialKeyAttributeIds));
 };
 
 type EdgeClassification = {

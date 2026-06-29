@@ -231,6 +231,17 @@ function generateConceptualHTML(model: ConceptualModelPayload, options: HTMLDocs
     const entities = model.entities ?? [];
     const relationships = model.relationships ?? [];
     const generalizations = model.generalizations ?? [];
+    type ConceptualAttribute = ConceptualModelPayload["entities"][number]["attributes"][number];
+    const formatComponents = (components?: ConceptualAttribute[]): string => {
+        if (!components?.length) return "";
+
+        return components
+            .map((component) => {
+                const nested = formatComponents(component.components);
+                return nested ? `${esc(component.name)} (${nested})` : esc(component.name);
+            })
+            .join(", ");
+    };
 
     const entityMap = new Map<string, string>();
     for (const e of entities) entityMap.set(e.id, e.name);
@@ -244,10 +255,9 @@ function generateConceptualHTML(model: ConceptualModelPayload, options: HTMLDocs
                 if (attr.kind === "multi_valued") badges.push(badge("MV", "#f59e0b"));
                 if (attr.kind === "derived") badges.push(badge("DER", "#8b5cf6"));
                 if (attr.kind === "composite") badges.push(badge("COMP", "#06b6d4"));
+                if (attr.kind === "complex") badges.push(badge("CX", "#0f766e"));
 
-                const components = attr.components?.length
-                    ? attr.components.map((c) => esc(c.name)).join(", ")
-                    : "";
+                const components = formatComponents(attr.components);
 
                 return `<tr>
                     <td style="padding:5px 10px;border-bottom:1px solid #eee;font-weight:500;">${badges.join("")} ${esc(attr.name)}</td>

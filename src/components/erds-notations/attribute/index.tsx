@@ -6,12 +6,22 @@ import ErdHandle from "../../erd-handle";
 type AttributeData = {
     name: string;
     isKey?: boolean;
+    underlineStyle?: 'solid' | 'dashed';
     variant?: 'single' | 'double' | 'dashed';
 };
 
 const AttributeNode: React.FC<{ data: AttributeData }> = ({ data }) => {
     const nodeId = useNodeId();
     const isSelected = useStore((store) => store.nodeInternals.get(nodeId!)?.selected);
+    const isPartialKeyFromWeakEntity = useStore((store) => {
+        if (!nodeId || !data.isKey) return false;
+        return store.edges.some((edge) => {
+            if (edge.source !== nodeId && edge.target !== nodeId) return false;
+            const otherNodeId = edge.source === nodeId ? edge.target : edge.source;
+            const otherNode = store.nodeInternals.get(otherNodeId);
+            return otherNode?.type === 'entity' && (otherNode.data as { variant?: string })?.variant === 'double';
+        });
+    });
     const [isHovered, setIsHovered] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [localName, setLocalName] = useState(data.name);
@@ -102,6 +112,7 @@ const AttributeNode: React.FC<{ data: AttributeData }> = ({ data }) => {
     const sy = size.h > 0 ? size.h / 100 : 1;
     const offX = gapPx / sx;
     const offY = gapPx / sy;
+    const keyUnderlineStyle = isPartialKeyFromWeakEntity ? 'dashed' : 'solid';
 
     return (
         <div 
@@ -158,9 +169,14 @@ const AttributeNode: React.FC<{ data: AttributeData }> = ({ data }) => {
                         "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2",
                         "text-xs font-semibold text-black text-center whitespace-pre-wrap cursor-text pointer-events-auto nodrag nopan",
                         "bg-transparent outline-none border border-transparent focus:outline-none",
-                        "min-w-[80%] max-w-[90%] px-1"
+                        "min-w-[80%] max-w-[90%] px-1",
+                        { 'underline underline-offset-3': data.isKey }
                     )}
-                    style={{ userSelect: "text", WebkitUserSelect: "text" }}
+                    style={{
+                        userSelect: "text",
+                        WebkitUserSelect: "text",
+                        textDecorationStyle: data.isKey ? keyUnderlineStyle : undefined,
+                    }}
                     tabIndex={0}
                     draggable={false}
                 >
@@ -174,6 +190,7 @@ const AttributeNode: React.FC<{ data: AttributeData }> = ({ data }) => {
                         "min-w-[80%] max-w-[90%] px-1",
                         { 'underline underline-offset-3': data.isKey }
                     )}
+                    style={{ textDecorationStyle: data.isKey ? keyUnderlineStyle : undefined }}
                     onDoubleClick={(e) => {
                         e.stopPropagation();
                         setIsEditing(true);
