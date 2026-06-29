@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable */
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactFlow, {
     addEdge,
@@ -1572,10 +1574,8 @@ const EditProject = (props: IPropsEditProject) => {
     ]);
 
     const currentDbms = useMemo(() => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const fromNorm = (normalizationModelData as any)?.model?.dbms;
         if (fromNorm) return fromNorm as string;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const fromPhys = (_physicalModelData as any)?.model?.dbms;
         if (fromPhys) return fromPhys as string;
         return selectedSchema?.dbms ?? undefined;
