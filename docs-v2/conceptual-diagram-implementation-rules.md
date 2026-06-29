@@ -290,7 +290,9 @@ Stored rule:
 - `name = data.name`.
 - `variant === "double"` -> `attributeRender.doubleEllipse = true`.
 - `variant === "dashed"` -> `attributeRender.dashed = true`.
-- `isKey === true` -> `attributeRender.underline = true`, `underlineStyle = "solid"`.
+- `isKey === true` -> `attributeRender.underline = true`.
+- Key attribute thuộc weak entity (`entity.variant === "double"` qua edge attribute-entity) -> `underlineStyle = "dashed"` để biểu diễn partial key.
+- Các key attribute khác -> `underlineStyle = "solid"`.
 
 ### 6.4. Constraint node
 
@@ -798,6 +800,7 @@ Với mỗi attribute:
    - `type = "attribute"`.
    - `attributeId = attr.id`.
    - `attributeRender` theo kind/key.
+   - Nếu owner là weak entity thì key attribute dùng `attributeRender.underlineStyle = "dashed"`.
 5. Emit edge:
 
 ```ts
@@ -906,6 +909,7 @@ Rule visual theo data:
 - `variant = "double"` -> double ellipse, multi-valued attribute.
 - `variant = "dashed"` -> dashed ellipse, derived attribute.
 - `isKey` -> underline.
+- Nếu key attribute nối tới weak entity thì underline render dạng dashed.
 
 ### 13.4. Constraint
 

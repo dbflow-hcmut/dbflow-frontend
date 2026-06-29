@@ -266,7 +266,7 @@ export const useConceptualCollaboration = ({
             const currentEdges = edgesRef.current;
             const existingStoredNodes =
                 currentNodes.length > 0
-                    ? mapReactNodesToStoredNodes(currentNodes)
+                    ? mapReactNodesToStoredNodes(currentNodes, currentEdges)
                     : undefined;
             const existingStoredEdges =
                 currentEdges.length > 0
@@ -492,7 +492,7 @@ export const useConceptualCollaboration = ({
             return;
         }
 
-        const storedNodes = mapReactNodesToStoredNodes(nodes);
+        const storedNodes = mapReactNodesToStoredNodes(nodes, edges);
         const storedEdges = mapReactEdgesToStoredEdges(edges, nodes);
 
         const diagramPayload = {
@@ -569,7 +569,7 @@ export const useConceptualCollaboration = ({
     const applyModelPayload = useCallback(
         async (modelPayload: ConceptualModelPayload) => {
             const normalized = normalizeConceptualModel(modelPayload as unknown as Record<string, unknown>);
-            const existingStoredNodes = mapReactNodesToStoredNodes(nodesRef.current);
+            const existingStoredNodes = mapReactNodesToStoredNodes(nodesRef.current, edgesRef.current);
             const existingStoredEdges = mapReactEdgesToStoredEdges(edgesRef.current, nodesRef.current);
             const { nodes: storedNodes, edges: storedEdges } = await buildDiagramFromModel({
                 model: normalized,
@@ -613,7 +613,7 @@ export const useConceptualCollaboration = ({
             // Rebuild model from current diagram state so diagram-only edits
             // (node add/delete, attribute changes, etc.) are captured before
             // applying the mutation.
-            const existingStoredNodesForModel = mapReactNodesToStoredNodes(nodesRef.current);
+            const existingStoredNodesForModel = mapReactNodesToStoredNodes(nodesRef.current, edgesRef.current);
             const existingStoredEdgesForModel = mapReactEdgesToStoredEdges(edgesRef.current, nodesRef.current);
             const current =
                 existingStoredNodesForModel.length > 0

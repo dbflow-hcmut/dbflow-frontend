@@ -387,7 +387,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
             sNodes = mapPhysicalReactToStored(effectiveLiveNodes);
             sEdges = mapPhysicalEdgesReactToStored(effectiveLiveEdges, effectiveLiveNodes);
         } else {
-            sNodes = mapConceptualReactToStored(effectiveLiveNodes);
+            sNodes = mapConceptualReactToStored(effectiveLiveNodes, effectiveLiveEdges);
             sEdges = mapConceptualEdgesReactToStored(effectiveLiveEdges, effectiveLiveNodes);
         }
         const model = isPhysical

@@ -868,13 +868,14 @@ const polarPos = (
 
 const toAttrRender = (
     attr: ModelAttribute,
+    underlineStyle: "solid" | "dashed" = "solid",
 ): StoredDiagramNode["attributeRender"] | undefined => {
     const r: NonNullable<StoredDiagramNode["attributeRender"]> = {};
     if (attr.kind === "multi_valued") r.doubleEllipse = true;
     if (attr.kind === "derived" || attr.derivation) r.dashed = true;
     if (attr.isKey) {
         r.underline = true;
-        r.underlineStyle = "solid";
+        r.underlineStyle = underlineStyle;
     }
     return Object.keys(r).length ? r : undefined;
 };
@@ -1157,6 +1158,7 @@ export const buildDiagramFromModel = async ({
         ownerPos: { x: number; y: number },
         ownerId: string,
         defaultAngle: number,
+        keyUnderlineStyle: "solid" | "dashed" = "solid",
     ) => {
         if (!attrs?.length) return;
 
@@ -1181,13 +1183,19 @@ export const buildDiagramFromModel = async ({
             }
         }
 
-        emitAttributeNodes(attrs, ownerPos, ownerId, lookup, sizeLookup, nodes, edges, baseAngle);
+        emitAttributeNodes(attrs, ownerPos, ownerId, lookup, sizeLookup, nodes, edges, baseAngle, keyUnderlineStyle);
     };
 
     // Entity attributes
     for (const entity of model.entities ?? []) {
         const pos = entityPos.get(entity.id)!;
-        emitAttrsForOwner(entity.attributes, pos, entity.id, LAYOUT.attrBaseAngle);
+        emitAttrsForOwner(
+            entity.attributes,
+            pos,
+            entity.id,
+            LAYOUT.attrBaseAngle,
+            entity.kind === "weak" ? "dashed" : "solid"
+        );
     }
 
     // Relationship attributes
@@ -1331,6 +1339,7 @@ const emitAttributeNodes = (
     nodes: StoredDiagramNode[],
     edges: StoredDiagramEdge[],
     baseAngle: number,
+    keyUnderlineStyle: "solid" | "dashed" = "solid",
 ) => {
     const emitComponentNodes = (
         parent: ModelAttribute,
@@ -1365,7 +1374,7 @@ const emitAttributeNodes = (
                 size: mergeSize(compSize, sizes.get(comp.id)),
                 name: comp.name,
                 attributeId: comp.id,
-                attributeRender: toAttrRender(comp),
+                attributeRender: toAttrRender(comp, keyUnderlineStyle),
             });
 
             edges.push({
@@ -1406,7 +1415,7 @@ const emitAttributeNodes = (
             size: mergeSize(size, sizes.get(attr.id)),
             name: attr.name,
             attributeId: attr.id,
-            attributeRender: toAttrRender(attr),
+            attributeRender: toAttrRender(attr, keyUnderlineStyle),
         });
 
         edges.push({

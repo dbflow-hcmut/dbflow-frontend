@@ -127,6 +127,7 @@ export type RelationshipData = {
 export type AttributeData = {
     name: string;
     isKey?: boolean;
+    underlineStyle?: 'solid' | 'dashed';
     variant?: 'single' | 'double' | 'dashed';
 };
 
@@ -1514,7 +1515,7 @@ const EditProject = (props: IPropsEditProject) => {
     const lintResult = useMemo((): LintResult => {
         const empty: LintResult = { issues: [], counts: { error: 0, warning: 0, info: 0 } };
         if (isConceptualSchema) {
-            const storedNodes = mapConceptualReactToStored(nodes);
+            const storedNodes = mapConceptualReactToStored(nodes, edges);
             const storedEdges = mapConceptualReactEdgesToStored(edges, nodes);
             const model = storedNodes.length > 0
                 ? buildConceptualModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
@@ -2030,7 +2031,7 @@ const EditProject = (props: IPropsEditProject) => {
         };
 
         const buildFreshConceptualModel = () => {
-            const storedNodes = mapConceptualReactToStored(nodes);
+            const storedNodes = mapConceptualReactToStored(nodes, edges);
             const storedEdges = mapConceptualReactEdgesToStored(edges, nodes);
             if (storedNodes.length > 0) {
                 return buildConceptualModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
@@ -2215,7 +2216,7 @@ const EditProject = (props: IPropsEditProject) => {
             return _physicalModelData;
         };
         const buildFreshConceptual = () => {
-            const storedNodes = mapConceptualReactToStored(nodes);
+            const storedNodes = mapConceptualReactToStored(nodes, edges);
             const storedEdges = mapConceptualReactEdgesToStored(edges, nodes);
             if (storedNodes.length > 0) return buildConceptualModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
             return _conceptualModelData;
