@@ -585,7 +585,7 @@ export function parseDDL(sql: string): DDLParseResult {
 export function ddlToPhysicalModel(
     parseResult: DDLParseResult,
     modelName: string = "Imported Schema",
-    dbms?: string,
+    dbms?: DBMSType,
 ): PhysicalModelPayload {
     const tableIdMap = new Map<string, string>(); // tableName → tableId
     const columnIdMap = new Map<string, Map<string, string>>(); // tableName → (colName → colId)
