@@ -24,6 +24,7 @@ export const PROXY_DELETE_SCHEMA = (projectId: string, schemaId: string) => `${P
 export const PROXY_UPDATE_SCHEMA = (projectId: string, schemaId: string) => `${PROXY_PROJECT_DETAIL(projectId)}/schemas/${schemaId}`;
 export const PROXY_SCHEMA_DIAGRAM = (schemaId: string) => `${PROXY_BASE}/schemas/${schemaId}/diagram`;
 export const PROXY_S3_AI_ATTACHMENT_PRESIGNED_UPLOAD = `${PROXY_BASE}/s3/presigned-ai-attachment`;
+export const PROXY_S3_AVATAR_PRESIGNED_UPLOAD = `${PROXY_BASE}/s3/presigned-avatar`;
 
 // LangGraph API endpoints
 export const LANGGRAPH_THREADS = `${LANGGRAPH_API_BASE}/threads`;

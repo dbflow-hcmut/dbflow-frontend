@@ -11,9 +11,10 @@ export type UserResponse = {
 
 export type UpdateProfileDto = {
     firstName: string;
-    lastName: string;
+    lastName?: string;
     phone?: string;
     bio?: string;
+    avatarKey?: string;
 };
 
 export type ChangePasswordDto = {
