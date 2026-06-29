@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Form, Input, Button, Alert, Segmented } from "antd";
-import { Upload, FileCode2 } from "lucide-react";
+import { Upload, FileCode2, FileUp } from "lucide-react";
 import Editor, { type Monaco } from "@monaco-editor/react";
 import type { editor as MonacoEditor } from "monaco-editor";
 import { useRouter } from "next/navigation";
@@ -10,7 +10,7 @@ import { notificationProvider } from "@/providers/notification";
 import { useCreateProject } from "@/components/CreateProject/api/client";
 import { createSchema, saveSchemaModel } from "@/components/EditProject/api/client";
 import { revalidateProjects } from "@/app/projects/actions";
-import { parseDDL, validateDDLSyntax, ddlToPhysicalModel } from "@/components/EditProject/utils/ddl-parser";
+import { parseDDL, validateDDLSyntax, ddlToPhysicalModel, detectDBMS } from "@/components/EditProject/utils/ddl-parser";
 import { SchemaType } from "@/utils/constants";
 import type { DBMSType } from "@/components/EditProject/utils/dbms-config";
 
@@ -19,6 +19,12 @@ const DBMS_OPTIONS: { label: string; value: DBMSType }[] = [
     { label: "MySQL", value: "mysql" },
     { label: "SQL Server", value: "sqlserver" },
 ];
+
+const DBMS_LABELS: Record<string, string> = {
+    postgresql: "PostgreSQL",
+    mysql: "MySQL",
+    sqlserver: "SQL Server",
+};
 
 interface ImportDDLModalProps {
     open: boolean;
@@ -32,19 +38,56 @@ export default function ImportDDLModal({ open, onClose }: ImportDDLModalProps) {
 
     const [ddlText, setDdlText] = useState("");
     const [dbms, setDbms] = useState<DBMSType>("postgresql");
+    const [mismatchWarning, setMismatchWarning] = useState<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
     const monacoRef = useRef<Monaco | null>(null);
 
-    // Reset when modal closes
     useEffect(() => {
         if (!open) {
             setDdlText("");
             setDbms("postgresql");
+            setMismatchWarning(null);
             form.resetFields();
         }
     }, [open, form]);
 
-    // Sync Monaco markers
+    const applyDDLText = useCallback((text: string) => {
+        setDdlText(text);
+        if (text.trim()) {
+            const detected = detectDBMS(text);
+            if (detected) {
+                setDbms(detected);
+                setMismatchWarning(null);
+            }
+        }
+    }, []);
+
+    const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            const text = ev.target?.result as string;
+            applyDDLText(text);
+        };
+        reader.readAsText(file);
+        e.target.value = "";
+    }, [applyDDLText]);
+
+    useEffect(() => {
+        if (!ddlText.trim()) {
+            setMismatchWarning(null);
+            return;
+        }
+        const detected = detectDBMS(ddlText);
+        if (detected && detected !== dbms) {
+            setMismatchWarning(`DDL looks like ${DBMS_LABELS[detected]} but ${DBMS_LABELS[dbms]} is selected. Consider switching dialect.`);
+        } else {
+            setMismatchWarning(null);
+        }
+    }, [ddlText, dbms]);
+
     useEffect(() => {
         const monaco = monacoRef.current;
         const editor = editorRef.current;
@@ -90,7 +133,6 @@ export default function ImportDDLModal({ open, onClose }: ImportDDLModalProps) {
         async (values: { name: string; description?: string }) => {
             if (!canImport || !parseResult) return;
             try {
-                // Step 1: Create project
                 const project = await create({
                     name: values.name,
                     description: values.description,
@@ -98,16 +140,15 @@ export default function ImportDDLModal({ open, onClose }: ImportDDLModalProps) {
                 });
                 if (!project) return;
 
-                // Step 2: Create a physical schema under the new project
                 const schema = await createSchema(project.id, {
                     name: values.name,
                     type: SchemaType.PHYSICAL,
+                    dbms,
                 });
                 const schemaId = schema.id;
                 if (!schemaId) throw new Error("Failed to create physical schema");
 
-                // Step 3: Convert DDL → PhysicalModelPayload and save via REST
-                const physicalModel = ddlToPhysicalModel(parseResult, values.name);
+                const physicalModel = ddlToPhysicalModel(parseResult, values.name, dbms);
                 await saveSchemaModel(project.id, schemaId, physicalModel as unknown as Record<string, unknown>);
 
                 await revalidateProjects();
@@ -124,7 +165,7 @@ export default function ImportDDLModal({ open, onClose }: ImportDDLModalProps) {
                 });
             }
         },
-        [canImport, parseResult, create, tableCount, router, onClose]
+        [canImport, parseResult, create, dbms, tableCount, router, onClose]
     );
 
     return (
@@ -149,7 +190,7 @@ export default function ImportDDLModal({ open, onClose }: ImportDDLModalProps) {
                     <span className="text-xs text-gray-400">
                         {tableCount > 0
                             ? `${tableCount} table${tableCount !== 1 ? "s" : ""} · ${columnCount} column${columnCount !== 1 ? "s" : ""}${fkCount > 0 ? ` · ${fkCount} FK${fkCount !== 1 ? "s" : ""}` : ""}`
-                            : "Paste DDL to preview tables"}
+                            : "Paste or upload DDL to preview tables"}
                     </span>
                     <div className="flex gap-2">
                         <Button onClick={onClose}>Cancel</Button>
@@ -175,7 +216,6 @@ export default function ImportDDLModal({ open, onClose }: ImportDDLModalProps) {
                     autoComplete="off"
                     className="pt-0 pb-2"
                 >
-                {/* Project name + description */}
                 <div className="grid grid-cols-2 gap-3">
                     <Form.Item
                         name="name"
@@ -192,7 +232,6 @@ export default function ImportDDLModal({ open, onClose }: ImportDDLModalProps) {
                     </Form.Item>
                 </div>
 
-                {/* DBMS */}
                 <div className="mb-4">
                     <div className="text-sm font-medium text-gray-700 mb-1.5">SQL Dialect</div>
                     <Segmented
@@ -201,15 +240,37 @@ export default function ImportDDLModal({ open, onClose }: ImportDDLModalProps) {
                         onChange={(val) => setDbms(val as DBMSType)}
                         options={DBMS_OPTIONS}
                     />
+                    {mismatchWarning ? (
+                        <Alert type="warning" showIcon message={mismatchWarning} className="!mt-2" />
+                    ) : ddlText.trim() && !detectDBMS(ddlText) ? (
+                        <Alert type="info" showIcon message={`DDL will be imported as ${DBMS_LABELS[dbms]} syntax. Make sure the correct dialect is selected.`} className="!mt-2" />
+                    ) : null}
                 </div>
 
-                {/* DDL Editor */}
                 <div className="mb-1">
-                    <div className="text-sm font-medium text-gray-700 mb-1.5">
-                        DDL Script
-                        <span className="ml-1.5 font-normal text-gray-400 text-xs">
-                            (CREATE TABLE statements)
-                        </span>
+                    <div className="flex items-center justify-between mb-1.5">
+                        <div className="text-sm font-medium text-gray-700">
+                            DDL Script
+                            <span className="ml-1.5 font-normal text-gray-400 text-xs">
+                                (CREATE TABLE statements)
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept=".sql,.ddl,.txt"
+                                className="hidden"
+                                onChange={handleFileUpload}
+                            />
+                            <Button
+                                size="small"
+                                icon={<FileUp size={14} />}
+                                onClick={() => fileInputRef.current?.click()}
+                            >
+                                Upload .sql
+                            </Button>
+                        </div>
                     </div>
                     <div className="border border-gray-200 rounded-lg overflow-hidden">
                         <Editor
@@ -234,7 +295,6 @@ export default function ImportDDLModal({ open, onClose }: ImportDDLModalProps) {
                     </div>
                 </div>
 
-                {/* Feedback */}
                 <div className="flex flex-col gap-2 mt-2">
                     {syntaxErrors.length > 0 && (
                         <Alert
@@ -270,7 +330,7 @@ export default function ImportDDLModal({ open, onClose }: ImportDDLModalProps) {
                             }
                         />
                     )}
-                    {canImport && parseWarnings.length === 0 && (
+                    {canImport && parseWarnings.length === 0 && !mismatchWarning && (
                         <Alert
                             type="success"
                             showIcon

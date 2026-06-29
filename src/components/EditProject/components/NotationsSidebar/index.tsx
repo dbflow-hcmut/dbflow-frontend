@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { Button, Collapse, Dropdown } from "antd";
+import { Button, Collapse, Dropdown, Tooltip } from "antd";
 import { Plus, Table2, MoreVertical, Edit, Trash2, ChevronDown } from "lucide-react";
 import type { MenuProps } from "antd";
 import RectangleIcon from "@/components/Icons/rectangleIcon";
@@ -172,16 +172,23 @@ const NotationsSidebar: React.FC<NotationsSidebarProps> = ({
                                     {schema.name}
                                 </div>
                                 <div className="flex items-center gap-2 shrink-0">
-                                    <span className={classNames(
-                                        "px-2 py-0.5 text-xs font-medium rounded",
-                                        {
-                                            "bg-green-50 text-green-600": schema.type === SchemaType.CONCEPTUAL,
-                                            "bg-amber-50 text-amber-600": schema.type === SchemaType.LOGICAL,
-                                            "bg-cyan-50 text-cyan-600": schema.type === SchemaType.PHYSICAL,
-                                        }
-                                    )}>
-                                        {schema.type}
-                                    </span>
+                                    <Tooltip title={schema.type === SchemaType.PHYSICAL && schema.dbms ? ({ postgresql: 'PostgreSQL', mysql: 'MySQL', sqlserver: 'SQL Server' } as Record<string, string>)[schema.dbms] ?? schema.dbms : undefined}>
+                                        <span className={classNames(
+                                            "px-2 py-0.5 text-xs font-medium rounded",
+                                            {
+                                                "bg-green-50 text-green-600": schema.type === SchemaType.CONCEPTUAL,
+                                                "bg-amber-50 text-amber-600": schema.type === SchemaType.LOGICAL,
+                                                "bg-cyan-50 text-cyan-600": schema.type === SchemaType.PHYSICAL,
+                                            }
+                                        )}>
+                                            {schema.type}
+                                            {schema.type === SchemaType.PHYSICAL && schema.dbms && (
+                                                <span className="ml-1 opacity-70">
+                                                    · {({ postgresql: 'PG', mysql: 'MY', sqlserver: 'MS' } as Record<string, string>)[schema.dbms] ?? schema.dbms}
+                                                </span>
+                                            )}
+                                        </span>
+                                    </Tooltip>
                                     {canEdit && (
                                         <Dropdown
                                             menu={{ items: getMenuItems(schema) }}

@@ -1,7 +1,7 @@
 import useSWRMutation from "swr/mutation";
 import { mutate } from "swr";
-import { apiPost, apiPut } from "@/lib/clientFetch";
-import { PROXY_PROJECT_SCHEMAS, PROXY_SCHEMA_MODEL } from "@/api";
+import { apiPatch, apiPost, apiPut } from "@/lib/clientFetch";
+import { PROXY_PROJECT_SCHEMAS, PROXY_UPDATE_SCHEMA, PROXY_SCHEMA_MODEL } from "@/api";
 import { ProjectSchemasResponse } from "@/types/projects.type";
 import { SchemaType } from "@/utils/constants";
 import { revalidateProjectSchemas } from "@/app/projects/actions";
@@ -9,6 +9,7 @@ import { revalidateProjectSchemas } from "@/app/projects/actions";
 export interface CreateSchemaRequest {
     name: string;
     type: SchemaType | string;
+    dbms?: string;
 }
 
 export async function createSchema(
@@ -38,6 +39,21 @@ export function useCreateSchema(projectId: string | null) {
         error,
         isLoading: isMutating,
     };
+}
+
+export interface UpdateSchemaRequest {
+    name: string;
+    dbms?: string;
+}
+
+export async function updateSchema(
+    projectId: string,
+    schemaId: string,
+    body: UpdateSchemaRequest
+): Promise<ProjectSchemasResponse> {
+    const url = PROXY_UPDATE_SCHEMA(projectId, schemaId);
+    const res = await apiPatch<ProjectSchemasResponse, UpdateSchemaRequest>(url, body);
+    return res;
 }
 
 /**

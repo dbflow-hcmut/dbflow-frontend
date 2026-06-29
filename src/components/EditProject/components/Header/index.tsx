@@ -247,9 +247,9 @@ const Header: React.FC<HeaderProps> = ({
                         }}
                     />
                 )}
-                <Dropdown 
-                    menu={{ items: downloadItems }} 
-                    trigger={['click']} 
+                <Dropdown
+                    menu={{ items: downloadItems }}
+                    trigger={['click']}
                     placement="bottom"
                     align={{ offset: [0, 10] }}
                 >

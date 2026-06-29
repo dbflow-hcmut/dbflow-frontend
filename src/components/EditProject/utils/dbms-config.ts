@@ -1,6 +1,6 @@
 export type FKAction = 'NO ACTION' | 'CASCADE' | 'SET NULL' | 'SET DEFAULT' | 'RESTRICT';
 
-export type IndexType = 'BTREE' | 'HASH' | 'GIN' | 'GIST' | 'BRIN';
+export type IndexType = 'BTREE' | 'HASH' | 'GIN' | 'GIST' | 'BRIN' | 'CLUSTERED' | 'NONCLUSTERED';
 
 export type ColumnSortOrder = 'ASC' | 'DESC';
 
@@ -172,7 +172,7 @@ const sqlserverConfig: DBMSConfig = {
         // Other
         { value: 'xml', label: 'XML', category: 'other' },
     ],
-    indexTypes: ['BTREE', 'HASH'],
+    indexTypes: ['CLUSTERED', 'NONCLUSTERED'],
     fkActions: COMMON_FK_ACTIONS,
     autoIncrementKeyword: 'IDENTITY(1,1)',
     defaultType: 'varchar',

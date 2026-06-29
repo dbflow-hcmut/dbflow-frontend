@@ -305,7 +305,7 @@ Rule:
 3. `model.version = 1`.
 4. Nếu không có stored node thì trả về empty physical model.
 
-`buildPhysicalModel` không tự khôi phục `model.dbms`, `description`, `notes`. Khi mutate model, `usePhysicalCollaboration` có logic preserve metadata cũ.
+`buildPhysicalModel` nhận `dbms` param và set `model.dbms` khi có. Khi mutate model, `usePhysicalCollaboration` có logic preserve metadata cũ bao gồm `dbms`, `description`, `notes`.
 
 ### 8.2. Step 2: lọc table nodes
 
@@ -742,7 +742,7 @@ Các tính năng trên không đọc trực tiếp ReactFlow nodes khi đã có 
 7. Reorder/delete column có thể ảnh hưởng FK vì stored edge dùng `foreignKeyIndex`; physical reorder giữ edge theo column name và stored `foreignKeyIndex` được tính lại khi serialize diagram.
 8. Index và FD lưu bằng tên column, không bằng column id.
 9. `autoIncrement` được lưu trong model nhưng DDL generator hiện chỉ render auto increment chắc chắn khi data type là serial-like, không render trực tiếp từ boolean này.
-10. Physical model `model.dbms` là optional. Physical schema tạo thủ công có thể không có DBMS.
+10. Physical model `model.dbms` required khi tạo mới (backend bắt buộc chọn DBMS khi tạo physical schema). Schema cũ không có DBMS vẫn load được, default PostgreSQL. DBMS quyết định data type dropdown, index type dropdown, DDL syntax. Giá trị hợp lệ: `postgresql`, `mysql`, `sqlserver`.
 11. `showFDs` là UI state, được preserve khi build diagram từ model nhưng không thuộc semantic model chính.
 12. Cardinality override trên physical edge là visual metadata, không quyết định FK trong model.
 13. Stored node cần `data` đầy đủ; nếu chỉ còn stored `columns` rút gọn thì mất nhiều thông tin physical.
@@ -761,3 +761,36 @@ Các tính năng trên không đọc trực tiếp ReactFlow nodes khi đã có 
 | `buildDiagramFromPhysicalModel` | `PhysicalModelPayload` | Stored diagram | Preserve position/size, auto-layout table mới, tạo FK edge từ column roles |
 | `applyModelPayload` | Full model mới | ReactFlow + Yjs model | Replace model, regenerate diagram |
 | `mutateModel` | Mutator function | Model mới + diagram mới | Rebuild model từ diagram trước, preserve metadata, mutate, regenerate |
+
+## 17. DBMS Integration
+
+Physical schema bắt buộc có DBMS (`postgresql`, `mysql`, `sqlserver`) khi tạo mới.
+
+### 17.1. Nơi lưu DBMS
+
+| Nơi | Field | Mục đích |
+|---|---|---|
+| DB `schemas` table | `dbms varchar(20)` column | Query/filter, backward compat (nullable) |
+| S3 `model.schema.json` | `model.dbms` | Source of truth cho canvas, DDL, AI |
+| Frontend `selectedSchema` | `ProjectSchemasResponse.dbms` | UI state từ API |
+
+### 17.2. Flow tạo physical schema
+
+1. `AddPage` modal hiện DBMS selector (Segmented: PostgreSQL/MySQL/SQL Server) khi type = physical.
+2. Frontend gửi `{ name, type: "physical", dbms: "postgresql" }` lên API.
+3. Backend lưu `dbms` vào DB column và set `model.dbms` trong S3 JSON template.
+4. Canvas đọc `model.dbms` từ Yjs model để quyết định data types và index types.
+
+### 17.3. DBMS-specific UI behavior
+
+- **Data type dropdown**: `PropertiesPanel` nhận `dataTypeOptions` prop từ `EditProject`. Nếu DBMS có, dùng `getDBMSConfig(dbms).dataTypes`. Nếu không có, fallback `GENERIC_DATA_TYPES`.
+- **Index type dropdown**: `PropertiesPanel` nhận `indexTypeOptions` prop. Nếu DBMS có, dùng `getDBMSConfig(dbms).indexTypes`. Mặc định fallback tất cả 5 types.
+- **DBMS badge**: Header hiển thị badge (vd: "PostgreSQL") khi physical schema active.
+
+### 17.4. Backward compatibility
+
+Schema cũ không có `model.dbms`:
+- Load bình thường, không có DBMS badge.
+- Data types fallback generic.
+- DDL export dùng PostgreSQL syntax mặc định.
+- `getDBMSConfig(undefined)` trả về PostgreSQL config.

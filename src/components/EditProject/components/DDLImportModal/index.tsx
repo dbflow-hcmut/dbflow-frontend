@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Button, Alert, Segmented } from "antd";
-import { Upload, FileCode2 } from "lucide-react";
+import { Upload, FileCode2, FileUp } from "lucide-react";
 import Editor, { type Monaco } from "@monaco-editor/react";
 import type { editor as MonacoEditor } from "monaco-editor";
-import { parseDDL, ddlToPhysicalModel, validateDDLSyntax } from "../../utils/ddl-parser";
+import { parseDDL, ddlToPhysicalModel, validateDDLSyntax, detectDBMS } from "../../utils/ddl-parser";
 import type { PhysicalModelPayload } from "../../utils/physical-model.builder";
 import type { DBMSType } from "../../utils/dbms-config";
 
@@ -13,69 +13,16 @@ const DBMS_OPTIONS: { label: string; value: DBMSType }[] = [
     { label: "SQL Server", value: "sqlserver" },
 ];
 
-const SAMPLE_DDL: Record<DBMSType, string> = {
-    postgresql: `-- PostgreSQL DDL
-CREATE TABLE users (
-    id SERIAL PRIMARY KEY,
-    email VARCHAR(255) NOT NULL UNIQUE,
-    name VARCHAR(100),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE posts (
-    id SERIAL PRIMARY KEY,
-    title VARCHAR(255) NOT NULL,
-    body TEXT,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_posts_user_id ON posts(user_id);
-`,
-    mysql: `-- MySQL DDL
-CREATE TABLE users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    email VARCHAR(255) NOT NULL UNIQUE,
-    name VARCHAR(100),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE posts (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    title VARCHAR(255) NOT NULL,
-    body TEXT,
-    user_id INT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE INDEX idx_posts_user_id ON posts(user_id);
-`,
-    sqlserver: `-- SQL Server DDL
-CREATE TABLE users (
-    id INT IDENTITY(1,1) PRIMARY KEY,
-    email NVARCHAR(255) NOT NULL UNIQUE,
-    name NVARCHAR(100),
-    created_at DATETIME DEFAULT GETDATE()
-);
-
-CREATE TABLE posts (
-    id INT IDENTITY(1,1) PRIMARY KEY,
-    title NVARCHAR(255) NOT NULL,
-    body NVARCHAR(MAX),
-    user_id INT NOT NULL,
-    created_at DATETIME DEFAULT GETDATE(),
-    CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE INDEX idx_posts_user_id ON posts(user_id);
-`,
+const DBMS_LABELS: Record<string, string> = {
+    postgresql: "PostgreSQL",
+    mysql: "MySQL",
+    sqlserver: "SQL Server",
 };
 
 interface DDLImportModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onImport: (model: PhysicalModelPayload) => void;
+    onImport: (model: PhysicalModelPayload, dbms: DBMSType) => void | Promise<void>;
     diagramName: string;
 }
 
@@ -88,22 +35,57 @@ const DDLImportModal: React.FC<DDLImportModalProps> = ({
     const [ddlText, setDdlText] = useState("");
     const [dbms, setDbms] = useState<DBMSType>("postgresql");
     const [importing, setImporting] = useState(false);
+    const [mismatchWarning, setMismatchWarning] = useState<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
     const monacoRef = useRef<Monaco | null>(null);
 
-    // Run structural validation and push markers into Monaco
+    const applyDDLText = useCallback((text: string) => {
+        setDdlText(text);
+        if (text.trim()) {
+            const detected = detectDBMS(text);
+            if (detected && detected !== dbms) {
+                setDbms(detected);
+                setMismatchWarning(null);
+            }
+        }
+    }, [dbms]);
+
+    const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            const text = ev.target?.result as string;
+            applyDDLText(text);
+        };
+        reader.readAsText(file);
+        e.target.value = "";
+    }, [applyDDLText]);
+
+    useEffect(() => {
+        if (!ddlText.trim()) {
+            setMismatchWarning(null);
+            return;
+        }
+        const detected = detectDBMS(ddlText);
+        if (detected && detected !== dbms) {
+            setMismatchWarning(`DDL looks like ${DBMS_LABELS[detected]} but ${DBMS_LABELS[dbms]} is selected. Consider switching dialect.`);
+        } else {
+            setMismatchWarning(null);
+        }
+    }, [ddlText, dbms]);
+
     useEffect(() => {
         const monaco = monacoRef.current;
         const editor = editorRef.current;
         if (!monaco || !editor) return;
         const model = editor.getModel();
         if (!model) return;
-
         if (!ddlText.trim()) {
             monaco.editor.setModelMarkers(model, "ddl-validator", []);
             return;
         }
-
         const markers = validateDDLSyntax(ddlText).map((m) => ({
             startLineNumber: m.startLineNumber,
             startColumn: m.startColumn,
@@ -114,7 +96,6 @@ const DDLImportModal: React.FC<DDLImportModalProps> = ({
                 ? monaco.MarkerSeverity.Error
                 : monaco.MarkerSeverity.Warning,
         }));
-
         monaco.editor.setModelMarkers(model, "ddl-validator", markers);
     }, [ddlText]);
 
@@ -135,22 +116,18 @@ const DDLImportModal: React.FC<DDLImportModalProps> = ({
     const parseWarnings = parseResult?.warnings ?? [];
     const canImport = syntaxErrors.length === 0 && tableCount > 0 && !hasParseErrors;
 
-    const handleImport = useCallback(() => {
+    const handleImport = useCallback(async () => {
         if (!parseResult || !canImport) return;
         setImporting(true);
         try {
-            const model = ddlToPhysicalModel(parseResult, diagramName || "Imported Schema");
-            onImport(model);
+            const model = ddlToPhysicalModel(parseResult, diagramName || "Imported Schema", dbms);
+            await onImport(model, dbms);
             setDdlText("");
             onClose();
         } finally {
             setImporting(false);
         }
-    }, [parseResult, canImport, diagramName, onImport, onClose]);
-
-    const handleLoadSample = useCallback(() => {
-        setDdlText(SAMPLE_DDL[dbms]);
-    }, [dbms]);
+    }, [parseResult, canImport, diagramName, dbms, onImport, onClose]);
 
     return (
         <Modal
@@ -194,15 +171,33 @@ const DDLImportModal: React.FC<DDLImportModalProps> = ({
                         onChange={(val) => setDbms(val as DBMSType)}
                         options={DBMS_OPTIONS}
                     />
+                    {mismatchWarning ? (
+                        <Alert type="warning" showIcon message={mismatchWarning} className="!mt-2" />
+                    ) : ddlText.trim() && !detectDBMS(ddlText) ? (
+                        <Alert type="info" showIcon message={`DDL will be imported as ${DBMS_LABELS[dbms]} syntax. Make sure the correct dialect is selected.`} className="!mt-2" />
+                    ) : null}
                 </div>
 
                 <div className="flex items-center justify-between">
                     <p className="text-sm text-gray-500">
-                        Paste {DBMS_OPTIONS.find(o => o.value === dbms)?.label} DDL (CREATE TABLE statements) to generate a physical schema.
+                        Paste or upload {DBMS_LABELS[dbms]} DDL (CREATE TABLE statements).
                     </p>
-                    <Button size="small" type="link" onClick={handleLoadSample} className="!px-0 text-xs">
-                        Load sample
-                    </Button>
+                    <div className="flex items-center gap-2">
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept=".sql,.ddl,.txt"
+                            className="hidden"
+                            onChange={handleFileUpload}
+                        />
+                        <Button
+                            size="small"
+                            icon={<FileUp size={14} />}
+                            onClick={() => fileInputRef.current?.click()}
+                        >
+                            Upload .sql
+                        </Button>
+                    </div>
                 </div>
 
                 <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -223,7 +218,6 @@ const DDLImportModal: React.FC<DDLImportModalProps> = ({
                             scrollBeyondLastLine: false,
                             wordWrap: "on",
                             padding: { top: 8 },
-                            placeholder: "Paste CREATE TABLE ... statements here",
                         }}
                     />
                 </div>
@@ -265,7 +259,7 @@ const DDLImportModal: React.FC<DDLImportModalProps> = ({
                     />
                 )}
 
-                {canImport && parseWarnings.length === 0 && (
+                {canImport && parseWarnings.length === 0 && !mismatchWarning && (
                     <Alert
                         type="success"
                         showIcon

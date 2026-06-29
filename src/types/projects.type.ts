@@ -64,6 +64,7 @@ export interface ProjectSchemasResponse {
     projectId: string;
     name: string;
     type: SchemaType;
+    dbms?: string | null;
     createdAt: string;
     updatedAt: string;
 }

@@ -264,7 +264,11 @@ export const convertLogicalToPhysical = (
                     };
                 }),
                 indexes: [],
-                functionalDependencies: table.functionalDependencies,
+                functionalDependencies: (table.functionalDependencies ?? []).map(fd => ({
+                    ...fd,
+                    left: fd.left.map(remapColId),
+                    right: fd.right.map(remapColId),
+                })),
             };
         }),
     };
@@ -337,7 +341,11 @@ export const convertPhysicalToLogical = (
                     : undefined,
                 notes: col.comment || col.notes,
             })),
-            functionalDependencies: table.functionalDependencies,
+            functionalDependencies: (table.functionalDependencies ?? []).map(fd => ({
+                ...fd,
+                left: fd.left.map(remapColIdToLogical),
+                right: fd.right.map(remapColIdToLogical),
+            })),
         })),
     };
 };

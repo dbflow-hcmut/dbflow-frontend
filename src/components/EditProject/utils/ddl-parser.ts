@@ -2,7 +2,53 @@
  * DDL Parser — Converts SQL DDL (CREATE TABLE) statements into PhysicalModelPayload
  */
 import type { PhysicalModelPayload } from "./physical-model.builder";
-import type { FKAction, IndexType } from "./dbms-config";
+import type { DBMSType, FKAction, IndexType } from "./dbms-config";
+
+/**
+ * Detect DBMS dialect from DDL text by looking for dialect-specific keywords.
+ * Returns null if no strong signal is found.
+ */
+export function detectDBMS(ddl: string): DBMSType | null {
+    const upper = ddl.toUpperCase();
+
+    const pgScore =
+        +/\b(SERIAL|BIGSERIAL|SMALLSERIAL)\b/.test(upper) +
+        +/\b(BOOLEAN)\b/.test(upper) * 0.5 +
+        +/\b(TIMESTAMPTZ|JSONB|UUID|CITEXT|INET|MACADDR)\b/.test(upper) +
+        +/\bINHERITS\s*\(/.test(upper) +
+        +/\b(GIN|GIST|BRIN)\b/.test(upper) +
+        +/::[\w\s]+/.test(ddl) +
+        +/\bRETURNING\b/.test(upper) * 0.5 +
+        +/\bON\s+CONFLICT\b/.test(upper) +
+        +/\bCREATE\s+(UNIQUE\s+)?INDEX\s+.*\bUSING\b/i.test(ddl) * 0.5 +
+        +/"\w+"/.test(ddl) * 0.3;
+
+    const myScore =
+        +/\bAUTO_INCREMENT\b/.test(upper) +
+        +/\bENGINE\s*=/.test(upper) +
+        +/\b(TINYINT|MEDIUMINT|MEDIUMTEXT|LONGTEXT|TINYTEXT)\b/.test(upper) +
+        +/\bUNSIGNED\b/.test(upper) +
+        +/\bDEFAULT\s+CHARSET\b/.test(upper) +
+        +/`\w+`/.test(ddl) +
+        +/\bENUM\s*\(/.test(upper) * 0.5 +
+        +/\bON\s+UPDATE\s+CURRENT_TIMESTAMP\b/.test(upper) * 0.5;
+
+    const msScore =
+        +/\bIDENTITY\s*\(/.test(upper) +
+        +/\b(NVARCHAR|NCHAR|NTEXT|DATETIME2|DATETIMEOFFSET|HIERARCHYID|SQL_VARIANT|UNIQUEIDENTIFIER)\b/.test(upper) +
+        +/\bGETDATE\s*\(\)/.test(upper) +
+        +/\bGO\b/.test(upper) * 0.5 +
+        +/\[\w+\]/.test(ddl) +
+        +/\bCLUSTERED\b/.test(upper) +
+        +/\bNEWID\s*\(\)/.test(upper) * 0.5;
+
+    const max = Math.max(pgScore, myScore, msScore);
+    if (max < 0.5) return null;
+    if (pgScore === max && pgScore > 0) return "postgresql";
+    if (myScore === max && myScore > 0) return "mysql";
+    if (msScore > 0) return "sqlserver";
+    return null;
+}
 
 // ── Internal parse types ─────────────────────────────────────────────
 
@@ -492,6 +538,29 @@ export function parseDDL(sql: string): DDLParseResult {
         }
     }
 
+    // ── Extract ALTER TABLE ... ADD FOREIGN KEY statements ──
+    const alterFKRegex = /ALTER\s+TABLE\s+(\S+)\s+ADD\s+(?:CONSTRAINT\s+\S+\s+)?FOREIGN\s+KEY\s*\(([^)]+)\)\s*REFERENCES\s+(\S+)\s*\(([^)]+)\)([^;]*);?/gi;
+    while ((match = alterFKRegex.exec(clean)) !== null) {
+        const srcTableName = stripSchemaPrefix(match[1]);
+        const fkCols = match[2].split(",").map((s) => unquote(s.trim()));
+        const refTable = stripSchemaPrefix(match[3]);
+        const refCols = match[4].split(",").map((s) => unquote(s.trim()));
+        const rest = match[5] || "";
+        const onDeleteMatch = rest.match(/ON\s+DELETE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION)/i);
+        const onUpdateMatch = rest.match(/ON\s+UPDATE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION)/i);
+
+        const table = tables.find((t) => t.name.toLowerCase() === srcTableName.toLowerCase());
+        if (table) {
+            table.foreignKeys.push({
+                columns: fkCols,
+                refTable,
+                refColumns: refCols,
+                onDelete: onDeleteMatch ? parseFKAction(onDeleteMatch[1]) : undefined,
+                onUpdate: onUpdateMatch ? parseFKAction(onUpdateMatch[1]) : undefined,
+            });
+        }
+    }
+
     if (tables.length === 0) {
         errors.push("No CREATE TABLE statements found in the input.");
     }
@@ -516,6 +585,7 @@ export function parseDDL(sql: string): DDLParseResult {
 export function ddlToPhysicalModel(
     parseResult: DDLParseResult,
     modelName: string = "Imported Schema",
+    dbms?: string,
 ): PhysicalModelPayload {
     const tableIdMap = new Map<string, string>(); // tableName → tableId
     const columnIdMap = new Map<string, Map<string, string>>(); // tableName → (colName → colId)
@@ -622,6 +692,7 @@ export function ddlToPhysicalModel(
             id: generateId(),
             name: modelName,
             version: 1,
+            ...(dbms ? { dbms } : {}),
         },
         tables,
     };
