@@ -643,6 +643,9 @@ const EditProject = (props: IPropsEditProject) => {
             } else if (selectedNode.type === 'entity') {
                 const data = selectedNode.data as EntityData;
                 setPropertiesName(data.name || "");
+            } else if (selectedNode.type === 'logical-table') {
+                const data = selectedNode.data as LogicalTableData;
+                setPropertiesName(data.name || "");
             } else if (selectedNode.type === 'relation') {
                 const data = selectedNode.data as RelationTableData;
                 setPropertiesName(data.name || "");
