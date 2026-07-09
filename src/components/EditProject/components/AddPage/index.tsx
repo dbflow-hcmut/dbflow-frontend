@@ -13,11 +13,13 @@ import { mutate } from "swr";
 import { notificationProvider } from "@/providers/notification";
 import { parseDDL, validateDDLSyntax, ddlToPhysicalModel, detectDBMS } from "../../utils/ddl-parser";
 import type { DBMSType } from "../../utils/dbms-config";
+import type { ProjectSchemasResponse } from "@/types/projects.type";
 
 export interface IAddPageProps {
     open: boolean;
     onClose: () => void;
     projectId: string | null;
+    onCreated?: (schema: ProjectSchemasResponse) => void;
 }
 
 const DBMS_OPTIONS = [
@@ -35,7 +37,7 @@ const DBMS_LABELS: Record<string, string> = {
 type CreateMode = "empty" | "ddl";
 
 export function AddPage(props: IAddPageProps) {
-    const { open, onClose, projectId } = props;
+    const { open, onClose, projectId, onCreated } = props;
 
     const [form] = Form.useForm();
     const { create, isLoading } = useCreateSchema(projectId);
@@ -141,6 +143,7 @@ export function AddPage(props: IAddPageProps) {
                     type: "success",
                     message: `Schema created with ${tableCount} table${tableCount !== 1 ? "s" : ""} imported`,
                 });
+                onCreated?.(schema);
                 handleClose();
             } catch (err) {
                 notificationProvider.open({
@@ -165,6 +168,7 @@ export function AddPage(props: IAddPageProps) {
 
             if (result) {
                 notificationProvider.open({ type: "success", message: "Schema created successfully!" });
+                onCreated?.(result);
                 handleClose();
             }
         } catch (err) {

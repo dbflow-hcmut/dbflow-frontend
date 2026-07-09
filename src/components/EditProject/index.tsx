@@ -2630,6 +2630,7 @@ const EditProject = (props: IPropsEditProject) => {
                     open={isAddPageOpen}
                     onClose={() => setIsAddPageOpen(false)}
                     projectId={projectData?.id || null}
+                    onCreated={handleSetSelectedSchema}
                 />
                 <Header
                     diagramName={diagramName}
@@ -3094,9 +3095,25 @@ const EditProject = (props: IPropsEditProject) => {
                                 setEdges((es) => es.map((e) => ({ ...e, selected: e.id === edge.id })));
                             }}
                             connectionMode={ConnectionMode.Loose}
-                            isValidConnection={() => {
+                            isValidConnection={(connection) => {
                                 // Allow multiple connections to the same handle
-                                return canEdit;
+                                if (!canEdit) return false;
+
+                                // Reject connecting a column to itself (same table + same column).
+                                // Logical handles are `${columnId}-left` / `${columnId}-right`;
+                                // physical handles are just the bare column name — stripping the
+                                // side suffix lets one check cover both diagram types.
+                                if (connection.source && connection.target && connection.source === connection.target) {
+                                    const stripSide = (handle?: string | null) =>
+                                        handle?.replace(/-(left|right)$/, "");
+                                    const sourceColumn = stripSide(connection.sourceHandle);
+                                    const targetColumn = stripSide(connection.targetHandle);
+                                    if (sourceColumn && targetColumn && sourceColumn === targetColumn) {
+                                        return false;
+                                    }
+                                }
+
+                                return true;
                             }}
                             onInit={(instance) => {
                                 reactFlowInstanceRef.current = instance;
