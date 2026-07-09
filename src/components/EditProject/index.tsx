@@ -283,8 +283,19 @@ const EditProject = (props: IPropsEditProject) => {
         };
     }, [canEdit]);
 
+    const getViewportCenter = useCallback(() => {
+        const instance = reactFlowInstanceRef.current;
+        const wrapper = reactFlowWrapperRef.current;
+        if (!instance || !wrapper) return null;
+        const rect = wrapper.getBoundingClientRect();
+        const centerPoint = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        return instance.project(centerPoint);
+    }, []);
+
     // Ctrl+C / Ctrl+V copy-paste — works across schemas as long as the target
     // schema is the same type (Conceptual/Logical/Physical) as the source.
+    // Pasted nodes are centered on whatever part of the canvas the user is
+    // currently looking at, not dropped back at their original position.
     useCopyPasteSchema({
         nodes,
         edges,
@@ -292,6 +303,7 @@ const EditProject = (props: IPropsEditProject) => {
         setEdges,
         schemaType: selectedSchema?.type,
         canEdit,
+        getViewportCenter,
     });
 
     useEffect(() => {
@@ -669,15 +681,6 @@ const EditProject = (props: IPropsEditProject) => {
             setPropertiesName("");
         }
     }, [selectedNode]);
-
-    const getViewportCenter = useCallback(() => {
-        const instance = reactFlowInstanceRef.current;
-        const wrapper = reactFlowWrapperRef.current;
-        if (!instance || !wrapper) return null;
-        const rect = wrapper.getBoundingClientRect();
-        const centerPoint = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-        return instance.project(centerPoint);
-    }, []);
 
     const {
         addRelationship,

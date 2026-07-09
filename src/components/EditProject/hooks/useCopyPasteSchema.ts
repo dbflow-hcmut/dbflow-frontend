@@ -21,7 +21,9 @@ export type SchemaClipboardPayload = {
 // Chrome tabs AND across domains, unlike localStorage which is per-origin.
 let clipboardMemory: SchemaClipboardPayload | null = null;
 
-const PASTE_OFFSET = 48;
+// Fallback offset only used when the viewport center can't be read (e.g. the
+// canvas hasn't mounted yet) — normally paste centers on the viewport instead.
+const PASTE_FALLBACK_OFFSET = 48;
 
 type UseCopyPasteSchemaOptions = {
     nodes: Node<NodeData>[];
@@ -30,6 +32,27 @@ type UseCopyPasteSchemaOptions = {
     setEdges: (updater: Edge[] | ((prev: Edge[]) => Edge[])) => void;
     schemaType?: string | null;
     canEdit: boolean;
+    // Flow-space center of whatever part of the canvas the user currently has
+    // in view — pasted nodes get recentered here instead of landing back at
+    // their original (copy-time) position, which may not even be visible if
+    // the user has since panned/zoomed or switched to a different schema.
+    getViewportCenter?: () => { x: number; y: number } | null;
+};
+
+// Center of the bounding box of a set of nodes' top-left `position` points
+// (plus measured width/height when available), used to compute how far to
+// shift a pasted group so its center lands on the current viewport center.
+const getNodesBoundsCenter = (nodes: Node<NodeData>[]): { x: number; y: number } => {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of nodes) {
+        const w = n.width ?? 0;
+        const h = n.height ?? 0;
+        minX = Math.min(minX, n.position.x);
+        minY = Math.min(minY, n.position.y);
+        maxX = Math.max(maxX, n.position.x + w);
+        maxY = Math.max(maxY, n.position.y + h);
+    }
+    return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
 };
 
 // Rewrites every embedded reference to `oldId` inside a JSON-serializable
@@ -46,7 +69,7 @@ const isEditableTarget = (target: EventTarget | null): boolean => {
 };
 
 export function useCopyPasteSchema(options: UseCopyPasteSchemaOptions) {
-    const { nodes, edges, setNodes, setEdges, schemaType, canEdit } = options;
+    const { nodes, edges, setNodes, setEdges, schemaType, canEdit, getViewportCenter } = options;
 
     // Mirrored in refs so the copy/paste listeners don't need to re-attach on
     // every node/edge change — only when schemaType/canEdit/setters change.
@@ -113,13 +136,23 @@ export function useCopyPasteSchema(options: UseCopyPasteSchemaOptions) {
         const edgeIdMap = new Map<string, string>();
         payload.edges.forEach((e) => edgeIdMap.set(e.id, generateDiagramId()));
 
+        // Recenter the pasted group on the current viewport (falls back to a
+        // small fixed offset only if the viewport center isn't readable yet).
+        const viewportCenter = getViewportCenter?.() ?? null;
+        const offset = viewportCenter
+            ? (() => {
+                const sourceCenter = getNodesBoundsCenter(payload!.nodes);
+                return { x: viewportCenter.x - sourceCenter.x, y: viewportCenter.y - sourceCenter.y };
+            })()
+            : { x: PASTE_FALLBACK_OFFSET, y: PASTE_FALLBACK_OFFSET };
+
         const pastedNodes: Node<NodeData>[] = payload.nodes.map((n) => {
             const newId = nodeIdMap.get(n.id)!;
             return {
                 ...n,
                 id: newId,
                 data: remapEmbeddedId(n.data, n.id, newId),
-                position: { x: n.position.x + PASTE_OFFSET, y: n.position.y + PASTE_OFFSET },
+                position: { x: n.position.x + offset.x, y: n.position.y + offset.y },
                 selected: true,
             };
         });
@@ -155,7 +188,7 @@ export function useCopyPasteSchema(options: UseCopyPasteSchemaOptions) {
         setNodes((prev) => [...prev.map((n) => ({ ...n, selected: false })), ...finalNodes]);
         setEdges((prev) => [...prev.map((e) => ({ ...e, selected: false })), ...pastedEdges]);
         return true;
-    }, [canEdit, schemaType, setNodes, setEdges]);
+    }, [canEdit, schemaType, setNodes, setEdges, getViewportCenter]);
 
     useEffect(() => {
         const handleCopy = (event: ClipboardEvent) => {

@@ -7,8 +7,9 @@ Tài liệu này mô tả tính năng copy/paste node+edge trong canvas (EditPro
 | Phần | File |
 |---|---|
 | Hook chứa toàn bộ logic copy/paste + listener cho native `copy`/`paste` event | `src/components/EditProject/hooks/useCopyPasteSchema.ts` |
-| Nơi gọi hook, truyền `nodes/edges/setNodes/setEdges/schemaType/canEdit` | `src/components/EditProject/index.tsx` |
+| Nơi gọi hook, truyền `nodes/edges/setNodes/setEdges/schemaType/canEdit/getViewportCenter` | `src/components/EditProject/index.tsx` |
 | Sinh id mới cho node/edge được paste | `generateDiagramId` trong `src/components/EditProject/utils/functions.ts` |
+| Tính tâm viewport hiện tại (dùng chung với các nút "Add ..." ở sidebar) | `getViewportCenter` trong `src/components/EditProject/index.tsx` |
 
 ## 2. Clipboard lưu ở đâu
 
@@ -32,7 +33,7 @@ Dùng **clipboard thật của OS**, qua native browser event `copy`/`paste` (`d
 2. Đọc `event.clipboardData.getData("text/plain")`, `JSON.parse`, kiểm tra `kind === "dbflow-schema-clipboard"` — nếu không parse được hoặc không có `kind` đúng (user paste text/nội dung khác từ ngoài vào) → fallback `clipboardMemory`, nếu vẫn không có gì → return false, để trình duyệt xử lý paste như thường (ví dụ paste text vào ô đang gõ).
 3. **Chặn paste khác loại schema**: nếu `payload.schemaType !== schemaType hiện tại` → `notificationProvider.open({ type: "error", message: "You can only paste into a schema of the same type (Conceptual / Logical / Physical)." })` (tiếng Anh), return true (đã "xử lý" — vẫn preventDefault để tránh browser paste chuỗi JSON thô vào đâu đó). Đây là rule chính mà user yêu cầu ("cùng loại mới paste được").
 3. Sinh id mới cho từng node (`nodeIdMap: oldId -> newId`) và từng edge (`edgeIdMap: oldId -> newId`) bằng `generateDiagramId()` — id có prefix `cid_` + UUID, unique toàn cục, không phân biệt schema nào.
-4. Với mỗi node: gán id mới, offset `position` +48/+48 (để không đè lên node gốc khi paste cùng schema), set `selected: true`.
+4. Với mỗi node: gán id mới, dịch `position` sao cho tâm của cả nhóm node paste rơi đúng vào **tâm viewport hiện tại** (chỗ user đang nhìn trên canvas), không phải vị trí cũ lúc copy — vì vị trí cũ thuộc tọa độ của canvas/schema nguồn, paste sang schema khác (hoặc cùng schema nhưng đã pan/zoom) thì vị trí đó có thể không còn nằm trong khung nhìn. Cách tính: `getViewportCenter()` (hàm đã có sẵn, dùng khi bấm nút "Add Entity/Table" ở sidebar — `EditProject/index.tsx`) trả về tâm viewport theo tọa độ flow; `getNodesBoundsCenter(payload.nodes)` tính tâm bounding-box của các node được copy; offset = `viewportCenter - sourceCenter`, cộng vào `position` của từng node để cả nhóm dịch chuyển nguyên khối (giữ đúng layout tương đối giữa các node) đến giữa khung nhìn. Nếu `getViewportCenter()` trả `null` (canvas chưa mount) thì fallback offset cố định +48/+48 như cũ. Set `selected: true`.
 5. Remap id nhúng trong `data` bằng cách stringify `data`, `.split(oldId).join(newId)`, rồi parse lại — xem mục 5 để hiểu tại sao cách này đúng cho cả 3 loại schema mà không cần code riêng theo từng loại.
 6. Với mỗi edge: remap `source`/`target` theo `nodeIdMap`; remap `sourceHandle`/`targetHandle` bằng cách thay chuỗi `oldSourceId` → `newSourceId` (và tương tự cho target) — vì handle của Logical nhúng luôn table id (`lid_<tableId>_col_<n>-left|right`).
 7. Riêng node `type === 'relationship'` (Conceptual): `data.cardinalities` là map keyed theo **edge id** (không phải node id) — phải remap key theo `edgeIdMap` riêng, key nào không có trong `edgeIdMap` (vì edge đó không được copy) thì bị drop.
