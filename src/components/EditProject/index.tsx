@@ -1191,10 +1191,15 @@ const EditProject = (props: IPropsEditProject) => {
             const tgtType = targetNode?.type;
             const hasRelationship = srcType === 'relationship' || tgtType === 'relationship';
             const hasEntity = srcType === 'entity' || tgtType === 'entity';
+            const isEntityEntity = srcType === 'entity' && tgtType === 'entity';
             const hasAttribute = srcType === 'attribute' || tgtType === 'attribute';
             const hasConstraint = srcType === 'constraint' || tgtType === 'constraint';
 
-            if (hasRelationship && hasEntity) {
+            if (isEntityEntity) {
+                storedType = 'isaChild';
+                edgeData.lineStyle = 'bracket';
+                edgeData.bracketDirection = 'from';
+            } else if (hasRelationship && hasEntity) {
                 storedType = 'participation';
             } else if (hasAttribute) {
                 storedType = 'componentOf';
@@ -2823,12 +2828,18 @@ const EditProject = (props: IPropsEditProject) => {
                             const isRelationshipEntity =
                                 (sourceType === 'relationship' && targetType === 'entity') ||
                                 (sourceType === 'entity' && targetType === 'relationship');
-                            if (style === 'bracket' && !hasConstraint && !isRelationshipEntity) return;
+                            const isEntityEntity = sourceType === 'entity' && targetType === 'entity';
+                            if (isEntityEntity && style !== 'bracket') return;
+                            if (style === 'bracket' && !hasConstraint && !isRelationshipEntity && !isEntityEntity) return;
                             const constraintBracketDirection =
                                 hasConstraint && style === 'bracket'
                                     ? sourceType === 'constraint'
                                         ? 'from'
                                         : 'to'
+                                    : undefined;
+                            const entityEntityBracketDirection =
+                                isEntityEntity && style === 'bracket'
+                                    ? selectedEdge.data?.bracketDirection ?? 'from'
                                     : undefined;
                             setEdges((existingEdges) =>
                                 existingEdges.map((edge) =>
@@ -2840,6 +2851,8 @@ const EditProject = (props: IPropsEditProject) => {
                                                 lineStyle: style,
                                                 ...(constraintBracketDirection
                                                     ? { bracketDirection: constraintBracketDirection }
+                                                    : entityEntityBracketDirection
+                                                    ? { bracketDirection: entityEntityBracketDirection }
                                                     : {}),
                                             },
                                         }

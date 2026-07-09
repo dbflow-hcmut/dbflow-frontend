@@ -68,11 +68,11 @@
   * `componentOf`: attribute con → attribute composite/complex.
   * `identifying`: entity ↔ relationship (identifying relationship).
   * `isaParent`: entity cha → isaCircle.
-  * `isaChild`: isaCircle → entity con.
+  * `isaChild`: isaCircle → entity con, hoặc entity cha → entity con khi dùng direct identifying/bracket edge cho generalization.
   * `categoryLink`: categoryEntity → unionCircle.
   * `categoryMember`: unionCircle → superclass entity.
 * `relationshipId`: Tham chiếu model.relationships (bắt buộc nếu type = `participation` hoặc `identifying`).
-* `generalizationId`: Tham chiếu model.generalizations (bắt buộc nếu type = `isaParent` / `isaChild`). Với d/o circle, edge không có bracket là parent, edge có bracket là child.
+* `generalizationId`: Tham chiếu model.generalizations (bắt buộc nếu type = `isaParent` / `isaChild`). Với d/o circle, edge không có bracket là parent, edge có bracket là child. Entity → entity edge luôn được lưu như direct identifying/bracket generalization edge; `generalizationId` bằng chính `id` của edge; đầu mút có bracket là parent entity, đầu còn lại là child entity. Mặc định bracket ở `from`, nên `from.nodeId` là parent entity và `to.nodeId` là child entity nếu người dùng không đổi direction.
 * `categoryId`: Tham chiếu model.categories (bắt buộc nếu type = `categoryLink` / `categoryMember`). Với u circle, edge không có bracket là superclass, edge có bracket là category entity.
 * `from*`: Đầu mút nguồn.
   * `nodeId*`: ID node nguồn (prefix `cid_`).
@@ -87,8 +87,8 @@
 * `endStyle`: Trang trí riêng cho mỗi đầu mút.
   * `from.doubleLine`: `true` = total participation.
   * `from.marker`: `none` / `one` / `many`.
-  * `from.bracket`: `true` = bracket line (identifying relationship).
+  * `from.bracket`: `true` = bracket line (identifying relationship hoặc direct generalization).
   * `to.doubleLine`: `true` = total participation.
   * `to.marker`: `none` / `one` / `many`.
-  * `to.bracket`: `true` = bracket line (identifying relationship).
+  * `to.bracket`: `true` = bracket line (identifying relationship hoặc direct generalization).
 

@@ -669,6 +669,13 @@ const classifyEdge = (
         }
     }
 
+    if (isEntity(sourceNode) && isEntity(targetNode)) {
+        return {
+            type: "isaChild",
+            generalizationId: edge.id,
+        };
+    }
+
     if (isRelationship(sourceNode) && isEntity(targetNode)) {
         if (edge.data?.lineStyle === "bracket") {
             return {
@@ -712,8 +719,13 @@ const mapReactEdgeToStoredEdge = (
     if (!classification) return null;
 
     const labels = buildEdgeLabels(edge);
-    const bracketDirection = edge.data?.bracketDirection;
-    const endStyle = buildEdgeEndStyle(edge.data?.lineStyle, bracketDirection);
+    const isDirectEntityGeneralization =
+        classification.type === "isaChild" &&
+        sourceNode.type === "entity" &&
+        targetNode.type === "entity";
+    const lineStyle = isDirectEntityGeneralization ? "bracket" : edge.data?.lineStyle;
+    const bracketDirection = edge.data?.bracketDirection ?? (isDirectEntityGeneralization ? "from" : undefined);
+    const endStyle = buildEdgeEndStyle(lineStyle, bracketDirection);
 
     const extractPortId = (handleId?: string | null): string | undefined => {
         if (!handleId) return undefined;

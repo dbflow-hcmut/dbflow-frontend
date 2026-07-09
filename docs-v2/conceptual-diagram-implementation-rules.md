@@ -37,7 +37,7 @@ Flow chính:
 4. Nếu không có diagram nhưng có model thì generate diagram từ model.
 5. User chỉnh entity/relationship/attribute/constraint/edge trên canvas.
 6. Diagram edits được serialize vào Yjs `diagram`.
-7. Model chỉ được ghi vào Yjs `model` khi gọi `applyModelPayload()` hoặc `mutateModel()`.
+7. Diagram edits cũng được project lại thành conceptual model và ghi vào Yjs `model` nếu model projection thay đổi.
 
 Conceptual hiện là kiến trúc hybrid:
 
@@ -364,7 +364,19 @@ Nếu constraint symbol là `d` hoặc `o` và phía còn lại là entity:
 - Constraint là target -> `isaParent`.
 - `generalizationId = constraint.id`.
 
-### 7.4. Relationship - entity
+### 7.4. Direct entity - entity generalization
+
+Nếu source và target đều là entity:
+
+- Stored edge `type = "isaChild"`.
+- `generalizationId = edge.id`.
+- Edge luôn được lưu/render như identifying bracket edge.
+- Bracket side là parent entity, đầu còn lại là child entity.
+- UI cho phép chọn `bracketDirection`.
+- Khi tạo edge hoặc khi edge thiếu direction, default direct entity - entity là `bracketDirection = "from"`, nghĩa là `from.nodeId` là parent và `to.nodeId` là child.
+- Khi build conceptual model, edge này tạo `model.generalizations[]` với `id = edge.generalizationId ?? edge.id`, parent/child lấy theo bracket side, `constraints.disjointness = "disjoint"`, `constraints.completeness = "partial"`.
+
+### 7.5. Relationship - entity
 
 Nếu relationship nối entity:
 
@@ -372,7 +384,7 @@ Nếu relationship nối entity:
 - Ngược lại -> `participation`.
 - `relationshipId` là id của relationship node.
 
-### 7.5. Fallback
+### 7.6. Fallback
 
 Nếu không match rule nào:
 
@@ -404,6 +416,7 @@ Rule:
    - optional `from.portId`, `to.portId`.
    - classification metadata.
 7. Riêng `categoryLink` luôn ép bracket ở phía `to`.
+8. Riêng direct entity - entity generalization luôn lưu `generalizationId = edge.id`; line style bị ép thành `bracket`, bracket side lấy theo `data.bracketDirection ?? "from"`.
 
 ## 9. Thuật toán map stored diagram -> ReactFlow
 
@@ -622,6 +635,14 @@ Rule:
 7. Completeness:
    - parent edge có double line ở from hoặc to -> `total`.
    - ngược lại -> `partial`.
+8. Sau circle-based generalization, đọc thêm direct entity - entity generalization edge:
+   - Chỉ nhận edge `type === "isaChild"` có cả `from` và `to` là entity.
+   - `id = edge.generalizationId ?? edge.id`.
+   - Bỏ qua nếu đã có generalization cùng id.
+   - Nếu `endStyle.to.bracket === true`: `parentEntityIds = [to entity id]`, `childEntityIds = [from entity id]`.
+   - Ngược lại: `parentEntityIds = [from entity id]`, `childEntityIds = [to entity id]`.
+   - `constraints.disjointness = "disjoint"`.
+   - `constraints.completeness = "partial"`.
 
 ### 10.9. Step 9: build categories
 
@@ -937,7 +958,10 @@ Rule render:
 PropertiesPanel cho conceptual edge:
 
 - Chọn edge line style: single, double, identifying/bracket.
-- Nếu bracket thì chọn direction `from` hoặc `to`.
+- Entity - relationship, constraint, và entity - entity edge được phép chọn identifying/bracket.
+- Entity - entity edge chỉ có option identifying/bracket; không cho đổi sang single/double.
+- Nếu bracket trên entity - relationship hoặc entity - entity thì chọn direction `from` hoặc `to`.
+- Entity - entity bracket direction default là `from`.
 - Nếu edge là participation/identifying thì có label.
 - Relationship cardinality update ghi vào relationship node `data.cardinalities` và edge `fromMult` hoặc `toMult`.
 
@@ -1045,16 +1069,21 @@ Khi local `nodes` hoặc `edges` đổi:
 { diagram: { nodes, edges } }
 ```
 
-4. Ghi vào Yjs `diagram`.
-
-Code comment ghi rõ: effect này không ghi model vào Yjs. Model chỉ cập nhật qua `applyModelPayload()` hoặc `mutateModel()`.
+4. Build `modelProjection = buildConceptualModel({ storedNodes, storedEdges })`.
+5. Merge projection với `modelDataRef.current` bằng `mergeConceptualModelFromDiagramProjection`.
+6. Nếu model changed:
+   - serialize model mới.
+   - ghi vào Yjs `model`.
+   - update `modelDataRef`.
+   - update `modelDataState` để caller như ChatBox/export nhận model file mới trong React render.
+7. Ghi diagram vào Yjs `diagram`.
 
 ### 16.4. Model change
 
 Khi model từ Yjs thay đổi bên ngoài:
 
 1. Parse model.
-2. Lưu vào `modelDataRef`.
+2. Lưu vào `modelDataRef` và `modelDataState`.
 3. Nếu initial sync đã hoàn tất và change không phải cùng batch diagram sync, regenerate diagram từ model.
 4. Trong initial sync, model change chỉ được lưu ref, không regenerate ngay để tránh overwrite saved positions.
 
@@ -1069,6 +1098,7 @@ Rule:
 3. Map stored diagram sang ReactFlow.
 4. Set nodes/edges.
 5. Ghi normalized model vào Yjs `model`.
+6. Update `modelDataRef` và `modelDataState`.
 
 ### 16.6. mutateModel
 
@@ -1083,6 +1113,7 @@ Rule:
 5. Preserve unmodeled nodes.
 6. Set nodes/edges.
 7. Ghi model mới vào Yjs `model`.
+8. Update `modelDataRef` và `modelDataState`.
 
 ## 17. Tích hợp với tính năng khác
 

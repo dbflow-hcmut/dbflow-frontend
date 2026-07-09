@@ -65,6 +65,7 @@ export const useConceptualCollaboration = ({
     const pendingDiagramUpdateRef = useRef<(() => void) | null>(null);
     const pendingModelUpdateRef = useRef<(() => void) | null>(null);
     const modelDataRef = useRef<ConceptualModelPayload | null>(null);
+    const [modelDataState, setModelDataState] = useState<ConceptualModelPayload | null>(null);
     const [awareness, setAwareness] = useState<CollaborationAwareness | null>(null);
     const currentSchemaIdRef = useRef<string | null>(null);
     /** Becomes `true` only after the initial Yjs sync handler has finished
@@ -97,6 +98,7 @@ export const useConceptualCollaboration = ({
             initialSyncDoneRef.current = false;
             isGeneratingDiagramRef.current = false;
             modelDataRef.current = null;
+            setModelDataState(null);
             currentSchemaIdRef.current = null;
             return;
         }
@@ -109,6 +111,7 @@ export const useConceptualCollaboration = ({
         initialSyncDoneRef.current = false;
         isGeneratingDiagramRef.current = false;
         modelDataRef.current = null;
+        setModelDataState(null);
         currentSchemaIdRef.current = schema?.id ?? null;
     }, [enabled, schema?.id]);
 
@@ -290,6 +293,7 @@ export const useConceptualCollaboration = ({
             lastAppliedModelStringRef.current = modelStr;
             lastSyncedModelStringRef.current = modelStr;
             modelDataRef.current = modelPayload;
+            setModelDataState(modelPayload);
 
             // Write diagram to Yjs so it persists to the backend AND so
             // that `loadDiagramFromYjs` can read it back immediately.
@@ -326,6 +330,7 @@ export const useConceptualCollaboration = ({
             try {
                 const parsedModel = normalizeConceptualModel(JSON.parse(modelDataString) as Record<string, unknown>);
                 modelDataRef.current = parsedModel;
+                setModelDataState(parsedModel);
                 lastSyncedModelStringRef.current = modelDataString;
                 // Mark initial model as "applied" so the Y.Map observer
                 // does not mistake it for an external change and regenerate
@@ -376,6 +381,7 @@ export const useConceptualCollaboration = ({
             try {
                 const newModel = JSON.parse(modelDataString) as ConceptualModelPayload;
                 modelDataRef.current = newModel;
+                setModelDataState(newModel);
                 lastSyncedModelStringRef.current = modelDataString;
 
                 // Only regenerate diagram for EXTERNAL model changes that
@@ -535,6 +541,7 @@ export const useConceptualCollaboration = ({
                 lastAppliedModelStringRef.current = nextModelString;
                 lastSyncedModelStringRef.current = nextModelString;
                 modelDataRef.current = nextModel;
+                setModelDataState(nextModel);
             }
 
             doc.transact(() => {
@@ -585,6 +592,7 @@ export const useConceptualCollaboration = ({
             setNodes(reactNodes);
             setEdges(reactEdges);
             modelDataRef.current = normalized;
+            setModelDataState(normalized);
 
             // Persist model to Yjs so it survives page refresh / reconnect
             const modelStr = JSON.stringify(normalized);
@@ -654,6 +662,7 @@ export const useConceptualCollaboration = ({
             setNodes(reactNodes);
             setEdges(reactEdges);
             modelDataRef.current = next;
+            setModelDataState(next);
 
             // Persist model to Yjs so it survives page refresh / reconnect
             const modelStr = JSON.stringify(next);
@@ -675,6 +684,6 @@ export const useConceptualCollaboration = ({
         /** Incremental model mutation → regenerates diagram (sidebar add). */
         mutateModel,
         /** Current model (derived from diagram or last applied). */
-        modelData: modelDataRef.current,
+        modelData: modelDataState,
     };
 };
