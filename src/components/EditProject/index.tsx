@@ -81,6 +81,7 @@ import { createSchema, saveSchemaModel, updateSchema } from "./api/client";
 import { revalidateProjectSchemas } from "@/app/projects/actions";
 import { convertLogicalToPhysical, convertPhysicalToLogical, convertLogicalToConceptual, convertConceptualToLogical, convertPhysicalToConceptual, convertConceptualToPhysical } from "./utils/schema-conversion";
 import { useUndoRedo } from "./hooks/useUndoRedo";
+import { useCopyPasteSchema } from "./hooks/useCopyPasteSchema";
 import ShareProject from "@/components/ShareProject";
 import type { ConceptualModelPayload } from "./utils/conceptual-model.builder";
 import { buildConceptualModel } from "./utils/conceptual-model.builder";
@@ -281,6 +282,17 @@ const EditProject = (props: IPropsEditProject) => {
             document.removeEventListener('keydown', handleKeyDown, true);
         };
     }, [canEdit]);
+
+    // Ctrl+C / Ctrl+V copy-paste — works across schemas as long as the target
+    // schema is the same type (Conceptual/Logical/Physical) as the source.
+    useCopyPasteSchema({
+        nodes,
+        edges,
+        setNodes,
+        setEdges,
+        schemaType: selectedSchema?.type,
+        canEdit,
+    });
 
     useEffect(() => {
         if (!projectData?.id || !selectedSchema?.id) {
