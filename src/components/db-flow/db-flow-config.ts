@@ -12,10 +12,10 @@ export type DbFlowStep =
     | 'connect-db'        // Select an existing connection or go to create
     | 'create-connection' // Form to create a brand-new DB connection
     | 'schema-export'     // Apply physical schema to the connected DB
-    | 'db-management'     // View / manage the linked DB for this project
+    | 'ai-tools'          // Hub for Generate Query / Seed Data — no connection required
     | 'query-executor'    // SQL query executor feature
     | 'seed-data'         // Seed data feature
-    | 'sync-schema'       // Sync schema from live DB feature
+    | 'sync-schema'       // Sync schema from live DB feature — connection required
 
 export type DbFlowEvent =
     | 'connected'           // User successfully linked a connection to the project
@@ -25,7 +25,6 @@ export type DbFlowEvent =
     | 'closed'              // Modal closed (X button or Cancel)
     | 'open-query-executor' // Open the Query Executor feature
     | 'open-seed-data'      // Open the Seed Data feature
-    | 'open-sync-schema'    // Open the Sync Schema feature
 
 export type DbFlowTransition = DbFlowStep | 'close'
 
@@ -73,19 +72,50 @@ export const DB_FLOW_CONFIGS = {
     },
 
     /**
-     * "Database Management" — launched from the toolbar DatabaseZap button.
-     * If no connection: guide user through connecting, then show management view.
-     * If already connected: jump straight to management view.
+     * "AI Data Tools" — launched from the toolbar Sparkles button.
+     * Never gated on a connection — Generate Query / Seed Data both work
+     * without one (query generation is grounded in the physical schema
+     * model, not a live DB; seed data is generation-only for now).
      */
-    'db-management': {
+    'ai-tools': {
+        initialStep: (): DbFlowStep => 'ai-tools',
+        steps: {
+            'ai-tools': {
+                on: {
+                    'open-query-executor': 'query-executor', // open feature → transition to feature step
+                    'open-seed-data': 'seed-data',
+                    closed: 'close',                          // X → close everything
+                },
+            },
+            'query-executor': {
+                on: {
+                    closed: 'ai-tools', // X → back to hub (not close all)
+                    back: 'ai-tools',
+                },
+            },
+            'seed-data': {
+                on: {
+                    closed: 'ai-tools',
+                    back: 'ai-tools',
+                },
+            },
+        },
+    },
+
+    /**
+     * "Sync Schema" — launched from its own toolbar button.
+     * If no connection: guide user through connecting first, then show the sync view.
+     * If already connected: jump straight to the sync view.
+     */
+    'sync-schema': {
         initialStep: (hasConnections: boolean): DbFlowStep =>
-            hasConnections ? 'db-management' : 'connect-db',
+            hasConnections ? 'sync-schema' : 'connect-db',
         steps: {
             'connect-db': {
                 on: {
-                    connected: 'db-management', // linked a DB → show management
+                    connected: 'sync-schema', // linked a DB → show sync view
                     back: 'close',
-                    closed: 'close',             // X → close everything
+                    closed: 'close',           // X → close everything
                 },
             },
             'create-connection': {
@@ -95,31 +125,10 @@ export const DB_FLOW_CONFIGS = {
                     closed: 'close',       // X → close everything (not back to previous)
                 },
             },
-            'db-management': {
-                on: {
-                    'change-db': 'connect-db',               // swap DB
-                    'open-query-executor': 'query-executor', // open feature → transition to feature step
-                    'open-seed-data': 'seed-data',
-                    'open-sync-schema': 'sync-schema',
-                    closed: 'close',                          // X → close everything
-                },
-            },
-            'query-executor': {
-                on: {
-                    closed: 'db-management', // X → back to management (not close all)
-                    back: 'db-management',
-                },
-            },
-            'seed-data': {
-                on: {
-                    closed: 'db-management',
-                    back: 'db-management',
-                },
-            },
             'sync-schema': {
                 on: {
-                    closed: 'db-management',
-                    back: 'db-management',
+                    'change-db': 'connect-db', // swap DB
+                    closed: 'close',            // X → close everything
                 },
             },
         },

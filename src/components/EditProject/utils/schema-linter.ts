@@ -345,7 +345,110 @@ function lintConceptual(payload: ConceptualLintPayload): LintIssue[] {
         }
     }
 
+    // C012 — Duplicate attribute names within an entity
+    for (const entity of entities) {
+        const seenAttrNames = new Set<string>();
+        for (const attr of entity.attributes ?? []) {
+            const key = attr.name.trim().toLowerCase();
+            if (seenAttrNames.has(key)) {
+                issues.push({
+                    ruleId: "C012",
+                    severity: "error",
+                    message: `Entity "${entity.name}" has duplicate attribute name "${attr.name}".`,
+                    target: entity.name,
+                    targetId: entity.id,
+                });
+            }
+            seenAttrNames.add(key);
+        }
+    }
+
+    // C013 — Generalization references a non-existent parent entity
+    for (const gen of generalizations) {
+        for (const parentId of getGeneralizationParentIds(gen)) {
+            if (!entityIdSet.has(parentId)) {
+                issues.push({
+                    ruleId: "C013",
+                    severity: "error",
+                    message: `Generalization references a parent entity that no longer exists (id: ${parentId}).`,
+                    targetId: parentId,
+                });
+            }
+        }
+    }
+
+    // C014 — Generalization references a non-existent child entity
+    for (const gen of generalizations) {
+        for (const childId of gen.childEntityIds ?? []) {
+            if (!entityIdSet.has(childId)) {
+                issues.push({
+                    ruleId: "C014",
+                    severity: "error",
+                    message: `Generalization references a child entity that no longer exists (id: ${childId}).`,
+                    targetId: childId,
+                });
+            }
+        }
+    }
+
     return issues;
+}
+
+// ─── SHARED HELPERS ───────────────────────────────────────────────────────────
+
+type FKGraphTable = {
+    id: string;
+    columns: Array<{ roles?: { foreignKey?: { refTableId: string } } }>;
+};
+
+/** Detects cycles in the foreign-key reference graph between tables (self-loops excluded). */
+function findForeignKeyCycles(tables: FKGraphTable[]): string[][] {
+    const graph = new Map<string, Set<string>>();
+    for (const t of tables) {
+        const targets = new Set<string>();
+        for (const col of t.columns ?? []) {
+            const refId = col.roles?.foreignKey?.refTableId;
+            if (refId && refId !== t.id) targets.add(refId);
+        }
+        graph.set(t.id, targets);
+    }
+
+    const UNVISITED = 0;
+    const IN_PROGRESS = 1;
+    const DONE = 2;
+    const state = new Map<string, number>(tables.map((t) => [t.id, UNVISITED]));
+    const path: string[] = [];
+    const cycles: string[][] = [];
+    const seenCycleKeys = new Set<string>();
+
+    function visit(nodeId: string) {
+        state.set(nodeId, IN_PROGRESS);
+        path.push(nodeId);
+        for (const next of graph.get(nodeId) ?? []) {
+            if (!graph.has(next)) continue;
+            const nextState = state.get(next);
+            if (nextState === IN_PROGRESS) {
+                const idx = path.indexOf(next);
+                const cycle = path.slice(idx);
+                const minIdx = cycle.reduce((mi, id, i) => (id < cycle[mi] ? i : mi), 0);
+                const rotated = [...cycle.slice(minIdx), ...cycle.slice(0, minIdx)];
+                const key = rotated.join(">");
+                if (!seenCycleKeys.has(key)) {
+                    seenCycleKeys.add(key);
+                    cycles.push(rotated);
+                }
+            } else if (nextState === UNVISITED) {
+                visit(next);
+            }
+        }
+        path.pop();
+        state.set(nodeId, DONE);
+    }
+
+    for (const t of tables) {
+        if (state.get(t.id) === UNVISITED) visit(t.id);
+    }
+    return cycles;
 }
 
 // ─── LOGICAL RULES ────────────────────────────────────────────────────────────
@@ -520,6 +623,49 @@ function lintLogical(payload: LogicalLintPayload): LintIssue[] {
         }
     }
 
+    // L012 — FK column referencing itself
+    for (const table of tables) {
+        for (const col of table.columns ?? []) {
+            const fk = col.roles?.foreignKey;
+            if (fk && fk.refTableId === table.id && fk.refColumnId === col.id) {
+                issues.push({
+                    ruleId: "L012",
+                    severity: "error",
+                    message: `Table "${table.name}", column "${col.name}": a foreign key cannot reference itself.`,
+                    target: table.name,
+                    targetId: table.id,
+                });
+            }
+        }
+    }
+
+    // L013 — Circular foreign key reference between tables
+    for (const cycle of findForeignKeyCycles(tables)) {
+        const chain = [...cycle, cycle[0]].map((id) => tableIdToName.get(id) ?? id).join(" → ");
+        issues.push({
+            ruleId: "L013",
+            severity: "info",
+            message: `Circular foreign key reference detected: ${chain}. This may complicate data insertion and deletion order.`,
+            target: tableIdToName.get(cycle[0]),
+            targetId: cycle[0],
+        });
+    }
+
+    // L014 — Candidate key column not marked unique
+    for (const table of tables) {
+        for (const col of table.columns ?? []) {
+            if (col.roles?.candidateKey && !col.roles?.primaryKey && !col.unique) {
+                issues.push({
+                    ruleId: "L014",
+                    severity: "warning",
+                    message: `Table "${table.name}", column "${col.name}": candidate key should typically also be marked unique.`,
+                    target: table.name,
+                    targetId: table.id,
+                });
+            }
+        }
+    }
+
     return issues;
 }
 
@@ -537,6 +683,17 @@ const TEXT_TYPES = new Set([
 
 const FLOAT_TYPES = new Set([
     "float", "real", "double", "double precision",
+]);
+
+const RESERVED_SQL_KEYWORDS = new Set([
+    "select", "insert", "update", "delete", "from", "where", "join", "inner", "outer",
+    "left", "right", "full", "cross", "on", "using", "group", "order", "by", "having",
+    "limit", "offset", "union", "all", "distinct", "as", "into", "values", "set",
+    "table", "database", "schema", "index", "key", "primary", "foreign", "references",
+    "constraint", "check", "default", "null", "not", "and", "or", "in", "like",
+    "between", "exists", "case", "when", "then", "else", "end", "create", "alter",
+    "drop", "column", "view", "trigger", "procedure", "function", "grant", "revoke",
+    "user", "role", "with", "recursive", "cast", "true", "false", "is", "asc", "desc",
 ]);
 
 function lintPhysical(payload: PhysicalLintPayload): LintIssue[] {
@@ -707,7 +864,7 @@ function lintPhysical(payload: PhysicalLintPayload): LintIssue[] {
         for (const col of table.columns ?? []) {
             const fk = col.roles?.foreignKey;
             if (fk) {
-                if (!fk.onDelete) {
+                if (!fk.onDelete || fk.onDelete.trim().toUpperCase() === "NO ACTION") {
                     issues.push({
                         ruleId: "P011",
                         severity: "info",
@@ -716,7 +873,7 @@ function lintPhysical(payload: PhysicalLintPayload): LintIssue[] {
                         targetId: table.id,
                     });
                 }
-                if (!fk.onUpdate) {
+                if (!fk.onUpdate || fk.onUpdate.trim().toUpperCase() === "NO ACTION") {
                     issues.push({
                         ruleId: "P011",
                         severity: "info",
@@ -901,6 +1058,108 @@ function lintPhysical(payload: PhysicalLintPayload): LintIssue[] {
                         targetId: table.id,
                     });
                 }
+            }
+        }
+    }
+
+    // P021 — FK column data type does not match referenced column's data type
+    for (const table of tables) {
+        for (const col of table.columns ?? []) {
+            const fk = col.roles?.foreignKey;
+            if (fk && col.dataType && tableIdToColumns.has(fk.refTableId)) {
+                const refCols = tableIdToColumns.get(fk.refTableId)!;
+                const refCol = refCols.find((c) => c.id === fk.refColumnId);
+                if (refCol?.dataType && refCol.dataType.trim().toLowerCase() !== col.dataType.trim().toLowerCase()) {
+                    const refTableName = tableIdToName.get(fk.refTableId) ?? fk.refTableId;
+                    issues.push({
+                        ruleId: "P021",
+                        severity: "warning",
+                        message: `Table "${table.name}", column "${col.name}" (${col.dataType}): foreign key type does not match referenced column "${refTableName}.${refCol.name}" (${refCol.dataType}).`,
+                        target: table.name,
+                        targetId: table.id,
+                    });
+                }
+            }
+        }
+    }
+
+    // P022 — More than one AUTO_INCREMENT column in the same table
+    for (const table of tables) {
+        const autoIncCols = (table.columns ?? []).filter((c) => c.autoIncrement);
+        if (autoIncCols.length > 1) {
+            issues.push({
+                ruleId: "P022",
+                severity: "error",
+                message: `Table "${table.name}" has ${autoIncCols.length} AUTO_INCREMENT/SERIAL columns. Most databases allow only one per table.`,
+                target: table.name,
+                targetId: table.id,
+            });
+        }
+    }
+
+    // P023 — Table or column name is a reserved SQL keyword
+    for (const table of tables) {
+        if (RESERVED_SQL_KEYWORDS.has(table.name.trim().toLowerCase())) {
+            issues.push({
+                ruleId: "P023",
+                severity: "warning",
+                message: `Table name "${table.name}" is a reserved SQL keyword and may require quoting in queries.`,
+                target: table.name,
+                targetId: table.id,
+            });
+        }
+        for (const col of table.columns ?? []) {
+            if (RESERVED_SQL_KEYWORDS.has(col.name.trim().toLowerCase())) {
+                issues.push({
+                    ruleId: "P023",
+                    severity: "warning",
+                    message: `Table "${table.name}", column "${col.name}": name is a reserved SQL keyword and may require quoting in queries.`,
+                    target: table.name,
+                    targetId: table.id,
+                });
+            }
+        }
+    }
+
+    // P024 — FK column referencing itself
+    for (const table of tables) {
+        for (const col of table.columns ?? []) {
+            const fk = col.roles?.foreignKey;
+            if (fk && fk.refTableId === table.id && fk.refColumnId === col.id) {
+                issues.push({
+                    ruleId: "P024",
+                    severity: "error",
+                    message: `Table "${table.name}", column "${col.name}": a foreign key cannot reference itself.`,
+                    target: table.name,
+                    targetId: table.id,
+                });
+            }
+        }
+    }
+
+    // P025 — Circular foreign key reference between tables
+    for (const cycle of findForeignKeyCycles(tables)) {
+        const chain = [...cycle, cycle[0]].map((id) => tableIdToName.get(id) ?? id).join(" → ");
+        issues.push({
+            ruleId: "P025",
+            severity: "warning",
+            message: `Circular foreign key reference detected: ${chain}. This can complicate insert order and cascading deletes.`,
+            target: tableIdToName.get(cycle[0]),
+            targetId: cycle[0],
+        });
+    }
+
+    // P026 — Candidate key column not marked unique
+    for (const table of tables) {
+        for (const col of table.columns ?? []) {
+            if (col.roles?.candidateKey && !col.roles?.primaryKey && !col.unique) {
+                issues.push({
+                    ruleId: "P026",
+                    severity: "warning",
+                    message: `Table "${table.name}", column "${col.name}": candidate key should typically also be marked unique.`,
+                    target: table.name,
+                    targetId: table.id,
+                });
             }
         }
     }

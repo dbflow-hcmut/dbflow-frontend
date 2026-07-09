@@ -629,6 +629,31 @@ Với physical edge:
 - FK action `onDelete`/`onUpdate` được chỉnh trong PropertiesPanel và lưu vào `edge.data`.
 - Đổi PK/CK/Unique của column đã nối FK edge không được apply thẳng; UI confirm trước để tránh user vô tình làm sai FK/reference rule. Nếu referenced column mất PK/CK/Unique, edge liên quan bị xoá sau khi user confirm.
 
+### 12.1. Guard: column không được tự trỏ vào chính nó
+
+Mỗi column trên `relation` node có 2 handle (`target` bên trái, `source` bên phải) dùng chung `id = col.name` (xem `src/components/erds-notations/relation-table/index.tsx`). Vì vậy user có thể kéo handle bên phải của một column rồi thả ngược vào handle bên trái của **chính column đó**.
+
+`onConnect` (đầu `EditProject/index.tsx`, trước khi resolve node type) chặn case này:
+
+```ts
+if (connection.source === connection.target && connection.sourceHandle === connection.targetHandle) {
+    notificationProvider.open({ type: "error", message: "A column cannot reference itself." });
+    return;
+}
+```
+
+Điều kiện chặn là **source node === target node VÀ source handle === target handle** (cùng 1 column). Đây là guard sớm nhất trong `onConnect`, chạy trước khi phân loại `isRelationTableEdge`/`isLogicalTableEdge`, nên áp dụng cho cả physical lẫn logical edge.
+
+Lưu ý quan trọng: guard này **không** chặn việc nối 2 column khác nhau trong cùng 1 table (`connection.source === connection.target` nhưng `sourceHandle !== targetHandle`). Đó là self-referencing FK hợp lệ và phổ biến (ví dụ `employees.manager_id -> employees.id` cho cây phân cấp, `categories.parent_id -> categories.id`). Rule chỉ chặn trường hợp column trỏ vào chính nó, không chặn bảng tự tham chiếu chính nó qua 2 column khác nhau.
+
+### 12.2. Modal "Choose foreign key direction"
+
+Khi cả 2 column đều là "normal" (`!sourceColumn.isReferencedKey && !targetColumn.isReferencedKey`), code không tự suy ra chiều FK được vì cả 2 đều có thể trở thành FK hoặc thành referenced column. Lúc này `Modal.confirm` (antd) hiện lên hỏi user chọn.
+
+Modal dùng `content` là custom JSX (không dùng `okText`/`cancelText` mặc định) với 2 nút full-width nằm cùng 1 hàng (`flex flex-row gap-2`, mỗi nút `flex-1 min-w-0` + `truncate` + `title` tooltip để tránh vỡ layout khi tên bảng/column dài) và `footer: null` để ẩn footer OK/Cancel mặc định của antd. Mỗi nút tự gọi `addPhysicalFkEdge(...)` (hoặc `addLogicalFkEdge(...)` ở logical) rồi gọi `modalInstance.destroy()` để đóng modal.
+
+Lý do đổi từ `okText`/`cancelText` sang custom content: `okText`/`cancelText` mặc định của antd size theo nội dung text, nên với label dài như `"categories.description is FK"` hai nút bị lệch kích thước và có thể wrap vỡ layout trong modal hẹp.
+
 FK action options:
 
 - `NO ACTION`.

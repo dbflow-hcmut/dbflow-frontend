@@ -2,6 +2,8 @@
 
 Tài liệu này mô tả thiết kế tính năng Query Executor — cho phép user kết nối đến một DBMS thật, sinh SQL tự động từ physical schema bằng AI, chỉnh sửa và thực thi trực tiếp trong dbflow. Tính năng **chỉ khả dụng ở Physical level**.
 
+**UI implementation**: từ khi thêm tính năng Seed Data (xem `seed-data-generation-implementation-rules.md`), toàn bộ UI (NL input, Generate button, Monaco editor, Run, Result Viewer, Log panel) được factor ra thành component dùng chung `SqlWorkbenchModal` (`src/components/EditProject/features/dbms/shared/SqlWorkbenchModal.tsx`). `QueryExecutorModal.tsx` giờ chỉ là wrapper mỏng truyền `inputIntent="text_to_sql"` + copy riêng vào `SqlWorkbenchModal`. Mọi thay đổi UI/behavior chung (schema picker, Run, Safeguard sau này, Result Viewer) nên sửa ở `SqlWorkbenchModal`, không sửa riêng từng wrapper.
+
 ---
 
 ## 1. Tổng quan tính năng
@@ -17,16 +19,17 @@ Tài liệu này mô tả thiết kế tính năng Query Executor — cho phép 
 
 ---
 
-## 2. Entry point & điều kiện mở
+## 2. Entry point & điều kiện mở (đã đổi — không còn bắt buộc kết nối DBMS)
 
-Query Executor **chỉ mở được khi schema hiện tại là Physical**:
+Query Executor mở từ toolbar button **"AI Data Tools"** (`Header/index.tsx`, icon `Sparkles`) → `DbFlowController flow="ai-tools"` → hub `QuerySeedHubStep` (`src/components/db-flow/steps/QuerySeedHubStep.tsx`) → nút "Generate Query".
 
-```tsx
-// Tương tự pattern của Export DDL
-onOpenQueryExecutor={isPhysicalSchema ? () => setIsQueryExecutorOpen(true) : undefined}
-```
+Nút toolbar **"AI Data Tools" chỉ render khi `schemaType === 'physical'`** (`Header/index.tsx`, điều kiện `{schemaType === 'physical' && (...)}`) — ẩn hoàn toàn (không phải disable) khi đang xem Conceptual/Logical, vì cả Generate Query lẫn Seed Data đều cần physical `schema_model`. Nút **"Sync Schema"** không bị gate theo `schemaType` — luôn hiện, vì nó tạo MỘT physical schema MỚI nên không phụ thuộc schema đang mở.
 
-Nếu schema đang ở Conceptual hoặc Logical, nút Query bị disabled kèm tooltip: *"Query chỉ khả dụng ở Physical schema."*
+Khác với thiết kế cũ: **KHÔNG còn yêu cầu kết nối DBMS để mở, và KHÔNG còn cần connection để Run** — hub `ai-tools` không có bước `connect-db` trong state machine (`db-flow-config.ts`). Nút **Run** giờ luôn thực thi vào **sandbox SQLite riêng của schema** (xem `query-sandbox-implementation-rules.md`) — không còn phụ thuộc DB connection, không còn disable/tooltip "connect a database" nào cả. `connId`/`conn`/schema-picker (chọn schema DB như `public`) đã bị xoá khỏi `SqlWorkbenchModal` — không còn ý nghĩa vì sandbox không có khái niệm "schema" theo nghĩa DBMS.
+
+"Sync Schema" (toolbar button riêng, icon `DatabaseZap` → `DbFlowController flow="sync-schema"`, bắt buộc `connect-db` trước) vẫn tồn tại nhưng **không liên quan gì đến Run nữa** — nó chỉ dùng để pull cấu trúc DB thật vào một physical schema MỚI (import), độc lập hoàn toàn với Query Executor/Seed Data.
+
+Tính năng vẫn **chỉ có ý nghĩa đầy đủ ở Physical level** (AI cần physical `schema_model` để sinh SQL) — nếu chưa có physical schema nào đang mở, nút "Generate" trong `QueryExecutorModal` bị disable kèm tooltip *"Open a physical schema to enable AI SQL generation"*.
 
 ---
 
@@ -34,7 +37,7 @@ Nếu schema đang ở Conceptual hoặc Logical, nút Query bị disabled kèm 
 
 ### 3.1. Vị trí
 
-Connection Manager là một modal/drawer riêng, mở từ trong Query Executor panel.
+Connection Manager **không còn nằm trong Query Executor panel** (đã đổi — xem mục 2), và **`QueryExecutorModal` không còn dùng DB connection cho bất kỳ việc gì** kể từ khi Run chuyển sang chạy vào sandbox (xem `query-sandbox-implementation-rules.md`). Kết nối DB giờ chỉ phục vụ 2 entry point hoàn toàn tách biệt: toolbar "Sync Schema" (`flow="sync-schema"`, import cấu trúc DB thật) và "Apply to Database" (`flow="apply-schema"`, export DDL), cả hai đều dùng chung `ConnectDbStep`/`DBConnectionModal` (`src/components/db-flow/steps/`).
 
 ### 3.2. Data model
 
@@ -73,58 +76,93 @@ interface DBConnection {
 
 ## 4. AI SQL Generator
 
-### 4.1. Flow (đã implement)
+### 4.1. Flow (đã implement — v2, gọi thẳng LangGraph)
 
 ```
 User nhập mô tả ("lấy tất cả order trong tháng này kèm tên khách hàng")
-  → FE gọi POST /db-connections/:connId/text-to-sql
-      body: { nl_query, schema?, project_id? }
-  → BE introspect live DB schema (ưu tiên thực tế hơn model)
-  → BE gọi dbflow-ai POST /api/text-to-sql
-      body: { nl_query, dbms, schema_tables, project_id? }
-  → dbflow-ai format schema → fetch project docs (ChromaDB, nếu có project_id) → Gemini sinh SQL
-  → SQL trả về FE → đặt vào Monaco editor
+  → FE gọi thẳng LangGraph server (streamChatToLangGraph), KHÔNG qua NestJS
+      input: { messages: [{role:"user", content: nl_query}],
+                current_level: "physical",
+                input_model: <physical schema model.json hiện tại>,
+                project_id?,
+                input_intent: "text_to_sql" }
+      thread_id: mới, ephemeral (generateThreadId() mỗi lần bấm Generate — không lưu vào chat history)
+  → dbflow-ai router_node nhận input_intent="text_to_sql" → set user_intent thẳng,
+      BỎ QUA LLM classification, set current_level="physical", suy ra target_dbms từ model.dbms
+  → retriever_node đọc full spec docs/physical/model-schema.md + model.schema.json (để LLM hiểu
+      đúng cấu trúc roles.foreignKey/primaryKey) + fetch project docs (ChromaDB, nếu có project_id)
+  → reranker_node rerank project docs (hybrid BM25 + semantic) — giống schema-gen pipeline
+  → sql_generator_node: build prompt (spec + schema_model JSON đầy đủ + project docs + user_message)
+      → Gemini (temperature=0) → sinh 1 câu SQL trong fenced ```sql block
+  → sql_validator_node: parse SQL bằng sqlglot theo dialect target_dbms, kiểm tra
+      table/column tham chiếu có tồn tại trong schema_model không
+      → nếu có issue: quay lại sql_generator_node tự sửa, tối đa VALIDATION_MAX_RETRIES lần
+      → hết retry vẫn còn issue: trả kèm warning, không chặn
+  → SQL (fenced ```sql block) stream về FE → FE parse bằng extractSqlFromContent() → đặt vào Monaco editor
   → User review, chỉnh sửa nếu cần
   → User bấm Execute (hoặc huỷ)
 ```
 
-### 4.2. Context cho AI (thứ tự ưu tiên)
+Chi tiết pipeline đầy đủ (9 bước, giống cấu trúc schema-gen): xem `dbflow-ai/docs-feature/DOC-text-to-sql-pipeline.md`.
 
-1. **DBMS schema (primary)**: backend introspect live DB → danh sách tables + columns + FK + indexes
-2. **Project document hub (secondary)**: dbflow-ai truy vấn ChromaDB với project_id → top-3 chunks liên quan
-3. `dbms`: loại DBMS (để sinh đúng syntax)
+### 4.2. Context cho AI (thứ tự ưu tiên — ĐÃ ĐỔI so với v1)
 
-Physical schema model từ editor **không** được inject — DBMS introspect là nguồn thực tế hơn.
+1. **Physical schema model.json (primary)**: `schema_model` hiện tại trong LangGraph thread — sync từ `input_model` mà FE gửi (build từ diagram physical đang mở). Đây là nguồn thực tế bây giờ, KHÔNG còn introspect DB sống.
+2. **Spec RAG**: `docs/physical/model-schema.md` + `model.schema.json` — đọc full, không chunk, để LLM hiểu đúng format `roles.primaryKey`/`roles.foreignKey`.
+3. **Project document hub**: ChromaDB `project_docs`, rerank hybrid BM25 + semantic (giống schema-gen), không còn chỉ cosine top-3 như v1.
+4. `target_dbms`: suy ra trực tiếp từ `schema_model.model.dbms` (không cần LLM detect).
+
+**Live DB connection KHÔNG còn là context cho AI, và cũng KHÔNG còn dùng để Execute** (đã đổi thêm 1 lần nữa — xem mục 2 và `query-sandbox-implementation-rules.md`). Đây là điểm đảo ngược so với v1 (trước đây DBMS introspect là nguồn chính, physical schema model không được inject).
 
 AI **không** được cấp quyền execute — chỉ sinh text SQL, đặt vào editor.
 
 ### 4.3. API
 
-**Frontend → Backend:**
+Không còn gọi qua NestJS cho bước generate. Frontend gọi thẳng LangGraph server, giống hệt pattern schema-gen chat:
+
 ```ts
-POST /db-connections/:connId/text-to-sql
+streamChatToLangGraph(
+  DBFLOW_ASSISTANT_ID,
+  generateThreadId(),               // ephemeral, mới mỗi lần Generate
+  [{ role: "user", content: nlInput }],
+  onChunk, onComplete, onError,
+  true,                              // ensureThread
+  undefined,                         // onReasoning — không cần cho UI one-shot
+  undefined,                         // abortSignal
+  "physical",                        // currentLevel
+  model,                             // currentModel -> input_model
+  projectId,
+  "text_to_sql",                     // inputIntent -> input_intent (bỏ qua LLM classify)
+)
+```
+
+Response là SSE stream `messages/*` giống schema-gen; FE dùng `extractSqlFromContent()` (`@/api/ai/client`) để lấy SQL từ fenced ```sql block trong nội dung AI message cuối cùng.
+
+**Route cũ (không còn được gọi, giữ nguyên code không xoá)**:
+```ts
+POST /db-connections/:connId/text-to-sql   // NestJS, dbflow-backend/src/modules/db-connections
 Body: { nl_query: string; schema?: string; project_id?: string }
 Response: { sql: string }
 ```
-
-**Backend → dbflow-ai:**
 ```python
-POST /api/text-to-sql
+POST /api/text-to-sql   # dbflow-ai FastAPI sidecar, src/api/ingest.py
 Body: { nl_query, dbms, schema_tables: IntrospectedTable[], project_id? }
 Response: { sql: string }
 ```
-
-Frontend client: `generateSqlFromNl(connId, nlQuery, { schema?, projectId? })` trong `@/api/db-connections/client`.
+`generateSqlFromNl()` trong `@/api/db-connections/client` vẫn tồn tại trong code nhưng không còn caller nào — dead code, chưa xoá vì nằm ngoài scope của lần đổi này (chạy query/BE là việc làm sau).
 
 ### 4.4. Output
 
-AI trả về SQL text (plain string). Backend stripped markdown fences nếu model include chúng. FE đặt nguyên vào editor.
+AI trả về nội dung dạng: 1 câu mô tả ngắn + fenced ```sql code block. FE parse bằng `extractSqlFromContent()`, chỉ lấy phần SQL bên trong fence, đặt vào Monaco editor.
 
 ### 4.5. Giới hạn
 
-- AI chỉ sinh **một câu query tại một thời điểm** (không batch).
+- AI chỉ sinh **một câu query tại một thời điểm** (không batch) — validator (`sql_validator_node`) cũng chỉ parse 1 statement.
 - Nếu AI sinh ra câu chứa destructive operation (DELETE/DROP/TRUNCATE), Safeguard Layer vẫn chạy bình thường sau đó — không filter ở bước này.
-- `project_id` optional — nếu không có, chỉ dùng DBMS schema (không có project docs).
+- `project_id` optional — nếu không có, chỉ dùng physical schema + spec RAG (không có project docs).
+- Query Executor chỉ mở được khi đang xem physical schema (`isPhysicalSchema`) — nếu `model` là `null`/`undefined`, nút Generate bị disable kèm tooltip.
+- `sql_validator_node` chỉ check table/column tồn tại + syntax hợp lệ theo dialect (qua `sqlglot`) — không check business logic, không check quyền, không phát hiện được mọi lỗi cú pháp cực đoan (sqlglot khá lenient khi parse).
+- Column không qualify bằng table (unqualified) trong query nhiều bảng bị bỏ qua khi validate (tránh false positive) — chỉ check khi có 1 bảng duy nhất hoặc column có prefix table/alias rõ ràng.
 
 ---
 
@@ -155,39 +193,25 @@ Parser chỉ cần detect keywords ở statement-level (không cần full parse)
 
 ---
 
-## 6. Query Execution Flow
+## 6. Query Execution Flow (đã đổi — chạy vào sandbox, không phải DB thật)
+
+Mục này trước đây mô tả một thiết kế PLANNED (chưa từng implement) chạy vào DB thật qua `connection_id`. Thực tế hiện tại: Run luôn chạy vào sandbox SQLite riêng của schema — xem chi tiết đầy đủ ở `docs-v2/query-sandbox-implementation-rules.md`. Tóm tắt:
 
 ```
-User bấm Execute
-  → Safeguard Layer check (xem mục 5)
-  → [nếu pass] FE gọi POST /api/query/execute
-      body: { connection_id, sql, project_id }
-  → BE chạy query trên DB thật
-  → BE trả về QueryResult
-  → FE render kết quả vào Result Viewer
-  → Query được thêm vào Query History
+User bấm Run trong SqlWorkbenchModal
+  → FE gọi executeSandboxQuery(projectId, schemaId, sql, resultLimit)
+      POST /projects/:projectId/schemas/:schemaId/sandbox/execute
+  → BE: đồng bộ sandbox với model.json hiện tại nếu cần (provision/migrate/reset per-table)
+  → BE chạy query vào file SQLite của sandbox (better-sqlite3)
+  → BE trả về { success, rowCount, columns, rows, executionTimeMs, message?, syncReport? }
+  → FE render kết quả vào Result Viewer, log syncReport (nếu có) vào Log panel
 ```
+
+**Safeguard Layer (mục 5) vẫn CHƯA implement** — không đổi so với trước, và ít khẩn cấp hơn vì Run giờ luôn nhắm vào sandbox (dữ liệu thử nghiệm, không phải DB thật của user) thay vì một kết nối sống.
 
 ### 6.1. Request/Response
 
-**Request:**
-```ts
-interface QueryExecuteRequest {
-  connection_id: string;
-  sql: string;
-  project_id: string;
-}
-```
-
-**Response (success):**
-```ts
-interface QueryResult {
-  columns: string[];
-  rows: Record<string, unknown>[];
-  row_count: number;
-  execution_time_ms: number;
-}
-```
+Xem "6. API contract" trong `query-sandbox-implementation-rules.md` — response dùng chung shape `QueryResultDto` với route execute của live-DB connection (`db-connections` module), cộng thêm `syncReport` optional.
 
 **Response (error):**
 ```ts
@@ -280,7 +304,8 @@ interface QueryHistoryItem {
 |---|---|
 | Export DDL (`ddl-generator.ts`) | Query Executor dùng cùng `DBMSType` enum và DBMS config |
 | Physical Schema (`physical-schema-implementation-rules.md`) | `schema_model` từ physical diagram là input cho AI SQL Generator |
-| AI Pipeline (`DOC-schema-gen-pipeline.md`) | AI SQL Generator dùng endpoint riêng `/api/text-to-sql` trong dbflow-ai sidecar (FastAPI), **không** qua LangGraph. Input là DBMS introspect + project docs RAG (ChromaDB). |
+| AI Pipeline (`DOC-schema-gen-pipeline.md`, `DOC-text-to-sql-pipeline.md`) | AI SQL Generator dùng chung LangGraph graph với schema-gen, qua intent `text_to_sql` (FE set cứng qua `input_intent`, không LLM classify). Input chính là physical `schema_model` (model.json) + spec RAG + project docs RAG (ChromaDB, rerank hybrid) — không còn dùng DBMS introspect làm context AI. |
+| Query/Seed Sandbox (`query-sandbox-implementation-rules.md`) | Run thực thi vào sandbox SQLite riêng của schema, không phải DB thật — xem tài liệu này cho thuật toán DDL/migration/persistence đầy đủ. |
 
 ---
 
@@ -288,18 +313,13 @@ interface QueryHistoryItem {
 
 ```
 [Physical diagram active]
-  → User mở Query Executor panel
-  → Chọn / tạo DB Connection
-    → [Test Connection]
+  → User mở "AI Data Tools" (toolbar, chỉ hiện khi schemaType === physical) → "Generate Query"
+    — KHÔNG cần connection để mở, KHÔNG cần connection để Run
   → Viết SQL thủ công HOẶC dùng AI Generator
-    → [AI Generator] User mô tả → AI đọc schema → SQL vào editor
-  → Bấm Execute
-    → Safeguard Layer check
-      → SAFE: execute ngay
-      → WARN: confirmation dialog
-      → DANGER: gõ tên table để xác nhận
-      → Read-only mode ON + non-SELECT: blocked
-    → POST /api/query/execute → BE chạy → trả kết quả
-  → Result Viewer hiển thị rows / error
-  → Query lưu vào History
+    → [AI Generator] User mô tả → AI đọc physical schema_model → SQL vào editor
+  → Bấm Run
+    → executeSandboxQuery(projectId, schemaId, sql) — chạy vào sandbox SQLite riêng của schema
+      (tự provision/migrate sandbox nếu đây là lần đầu hoặc schema vừa đổi — xem query-sandbox-implementation-rules.md)
+  → Result Viewer hiển thị rows / error, Log panel hiển thị syncReport nếu sandbox vừa được đồng bộ
+  → (Riêng biệt) Muốn chạy trên DB thật: dùng "Sync Schema" hoặc "Apply to Database" — không liên quan đến Run ở đây
 ```
