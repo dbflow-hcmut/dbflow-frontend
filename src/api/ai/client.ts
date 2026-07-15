@@ -221,8 +221,7 @@ export function buildChatInputFromAttachments(
   return { message, modelOverride: jsonModel?.modelJson };
 }
 
-// Fixed assistant ID for DBFlow AI
-export const DBFLOW_ASSISTANT_ID = "2fcee93d-4396-4598-97a4-d11d9736f1d7";
+export const DBFLOW_ASSISTANT_ID = process.env.NEXT_PUBLIC_DBFLOW_ASSISTANT_ID || "71ce8f7d-18be-4139-b249-0001da5758b7";
 
 export interface LangGraphStreamRequest {
   assistant_id: string;
