@@ -23,7 +23,7 @@ import ReactFlow, {
     getViewportForBounds,
 } from "reactflow";
 import { toPng, toSvg } from 'html-to-image';
-import { Modal } from "antd";
+import { Modal, Button } from "antd";
 import { notificationProvider } from "@/providers/notification";
 import { apiGet } from "@/lib/clientFetch";
 import { PROXY_PROJECT_DETAIL } from "@/api";
@@ -999,6 +999,14 @@ const EditProject = (props: IPropsEditProject) => {
     const onConnect = useCallback<OnConnect>((connection: Connection) => {
         if (!connection.source || !connection.target) return;
 
+        // A column cannot be a foreign key referencing itself (same node, same handle).
+        // Connecting two different columns within the same table is still valid — that's
+        // a normal self-referencing FK pattern (e.g. employees.manager_id -> employees.id).
+        if (connection.source === connection.target && connection.sourceHandle === connection.targetHandle) {
+            notificationProvider.open({ type: "error", message: "A column cannot reference itself." });
+            return;
+        }
+
         // Check if connection involves relation table nodes or logical table nodes
         const sourceNode = nodes.find(n => n.id === connection.source);
         const targetNode = nodes.find(n => n.id === connection.target);
@@ -1151,16 +1159,43 @@ const EditProject = (props: IPropsEditProject) => {
                 return;
             }
 
-            Modal.confirm({
+            const logicalFkDirectionModal = Modal.confirm({
                 title: "Choose foreign key direction",
-                content: `Both columns are normal. Pick the column that becomes FK. The referenced column will be marked as CK.`,
-                okText: `${sourceColumn.label} is FK`,
-                cancelText: `${targetColumn.label} is FK`,
+                content: (
+                    <div className="mt-2">
+                        <p className="mb-3 text-sm text-gray-600">
+                            Both columns are normal. Pick the column that becomes FK. The referenced column will be marked as CK.
+                        </p>
+                        <div className="flex flex-row gap-2">
+                            <Button
+                                className="flex-1 min-w-0"
+                                title={`${sourceColumn.label} is FK`}
+                                onClick={() => {
+                                    addLogicalFkEdge('source', { markReferencedCandidate: true });
+                                    logicalFkDirectionModal.destroy();
+                                }}
+                            >
+                                <span className="block truncate">{sourceColumn.label} is FK</span>
+                            </Button>
+                            <Button
+                                className="flex-1 min-w-0"
+                                type="primary"
+                                title={`${targetColumn.label} is FK`}
+                                onClick={() => {
+                                    addLogicalFkEdge('target', { markReferencedCandidate: true });
+                                    logicalFkDirectionModal.destroy();
+                                }}
+                            >
+                                <span className="block truncate">{targetColumn.label} is FK</span>
+                            </Button>
+                        </div>
+                    </div>
+                ),
+                footer: null,
                 closable: false,
                 maskClosable: false,
                 keyboard: false,
-                onOk: () => addLogicalFkEdge('source', { markReferencedCandidate: true }),
-                onCancel: () => addLogicalFkEdge('target', { markReferencedCandidate: true }),
+                width: 440,
             });
             return;
         }
@@ -1183,16 +1218,43 @@ const EditProject = (props: IPropsEditProject) => {
                 return;
             }
 
-            Modal.confirm({
+            const physicalFkDirectionModal = Modal.confirm({
                 title: "Choose foreign key direction",
-                content: `Both columns are normal. Pick the column that becomes FK. The referenced column will be marked as Unique.`,
-                okText: `${sourceColumn.label} is FK`,
-                cancelText: `${targetColumn.label} is FK`,
+                content: (
+                    <div className="mt-2">
+                        <p className="mb-3 text-sm text-gray-600">
+                            Both columns are normal. Pick the column that becomes FK. The referenced column will be marked as Unique.
+                        </p>
+                        <div className="flex flex-row gap-2">
+                            <Button
+                                className="flex-1 min-w-0"
+                                title={`${sourceColumn.label} is FK`}
+                                onClick={() => {
+                                    addPhysicalFkEdge('source', { markReferencedUnique: true });
+                                    physicalFkDirectionModal.destroy();
+                                }}
+                            >
+                                <span className="block truncate">{sourceColumn.label} is FK</span>
+                            </Button>
+                            <Button
+                                className="flex-1 min-w-0"
+                                type="primary"
+                                title={`${targetColumn.label} is FK`}
+                                onClick={() => {
+                                    addPhysicalFkEdge('target', { markReferencedUnique: true });
+                                    physicalFkDirectionModal.destroy();
+                                }}
+                            >
+                                <span className="block truncate">{targetColumn.label} is FK</span>
+                            </Button>
+                        </div>
+                    </div>
+                ),
+                footer: null,
                 closable: false,
                 maskClosable: false,
                 keyboard: false,
-                onOk: () => addPhysicalFkEdge('source', { markReferencedUnique: true }),
-                onCancel: () => addPhysicalFkEdge('target', { markReferencedUnique: true }),
+                width: 440,
             });
             return;
         }
@@ -2678,6 +2740,8 @@ const EditProject = (props: IPropsEditProject) => {
                     projectVisibility={projectData?.visibility}
                     normalizationOpen={isNormalizationOpen}
                     onToggleNormalizationPanel={(isLogicalSchema || isPhysicalSchema) ? () => setIsNormalizationOpen((v) => !v) : undefined}
+                    physicalModel={isPhysicalSchema ? _physicalModelData : null}
+                    schemaId={isPhysicalSchema ? selectedSchema?.id : null}
                 />
                 <ShareProject
                     projectId={projectData?.id}

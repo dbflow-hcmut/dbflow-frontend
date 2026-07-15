@@ -7,7 +7,8 @@ import DBConnectionModal from "@/components/DBConnectionModal";
 import SchemaExportModal from "@/components/EditProject/features/dbms/schema-export/SchemaExportModal";
 import type { PhysicalModelPayload } from "@/components/EditProject/utils/physical-model.builder";
 import ConnectDbStep from "./steps/ConnectDbStep";
-import DbManagementStep from "./steps/DbManagementStep";
+import QuerySeedHubStep from "./steps/QuerySeedHubStep";
+import SyncSchemaStep from "./steps/SyncSchemaStep";
 import QueryExecutorModal from "@/components/EditProject/features/dbms/query-executor/QueryExecutorModal";
 import SeedDataModal from "@/components/EditProject/features/dbms/seed-data/SeedDataModal";
 import {
@@ -23,14 +24,15 @@ import { SchemaType } from "@/utils/constants";
 import { revalidateProjectSchemas } from "@/app/projects/actions";
 import { mutate } from "swr";
 
-const FEATURE_STEPS: DbFlowStep[] = ["query-executor", "seed-data"];
-
 interface DbFlowControllerProps {
     flow: DbFlowName;
     open: boolean;
     onClose: () => void;
     projectId: string | null;
-    /** Required only for the 'apply-schema' flow */
+    /** Currently-open schema id — required for 'ai-tools' (Run targets this schema's sandbox). */
+    schemaId?: string | null;
+    /** Physical model payload — required for 'apply-schema' (schema export) and
+     *  optionally provided for 'ai-tools' (grounds AI SQL generation). */
     model?: PhysicalModelPayload | null;
     /** Called after a successful sync-schema with the new schema's ID */
     onNewSchemaCreated?: (schemaId: string) => void;
@@ -45,23 +47,23 @@ export default function DbFlowController({
     open,
     onClose,
     projectId,
+    schemaId,
     model,
     onNewSchemaCreated,
 }: DbFlowControllerProps) {
     const { step, dispatch, goTo } = useDbFlow(flow, open, projectId);
     const [syncingSchema, setSyncingSchema] = useState(false);
-    const [activeSchema, setActiveSchema] = useState("public");
 
     // Reset syncing state whenever the flow closes
     useEffect(() => {
         if (!open) setSyncingSchema(false);
     }, [open]);
 
-    const isFeatureStep = step !== null && FEATURE_STEPS.includes(step);
-
-    // Keep connection data alive while in feature steps + management step
+    // Keep connection data alive only for the sync-schema step — the
+    // ai-tools flow's feature steps (query-executor/seed-data) run against
+    // the schema's sandbox now, not a live connection.
     const { data: projectConns } = useProjectDbConnections(
-        open && (isFeatureStep || step === "db-management") ? projectId : null,
+        open && step === "sync-schema" ? projectId : null,
     );
     const linkedConn = projectConns?.[0];
 
@@ -170,15 +172,23 @@ export default function DbFlowController({
                 />
             )}
 
-            {/* Step: db-management — only relevant in the 'db-management' flow */}
-            <DbManagementStep
-                open={step === "db-management"}
+            {/* Step: ai-tools — only relevant in the 'ai-tools' flow */}
+            <QuerySeedHubStep
+                open={step === "ai-tools"}
+                onClose={() => send("closed")}
+                onOpenQueryExecutor={() => send("open-query-executor")}
+                onOpenSeedData={() => send("open-seed-data")}
+                projectId={projectId}
+                schemaId={schemaId}
+            />
+
+            {/* Step: sync-schema — only relevant in the 'sync-schema' flow */}
+            <SyncSchemaStep
+                open={step === "sync-schema"}
                 projectId={projectId}
                 onChangeDb={() => send("change-db")}
                 onClose={() => send("closed")}
-                onOpenQueryExecutor={(schema) => { setActiveSchema(schema); send("open-query-executor"); }}
-                onOpenSeedData={() => send("open-seed-data")}
-                onOpenSyncSchema={handleSyncSchema}
+                onSync={handleSyncSchema}
                 isSyncing={syncingSchema}
             />
 
@@ -186,15 +196,16 @@ export default function DbFlowController({
             <QueryExecutorModal
                 open={step === "query-executor"}
                 onClose={() => send("closed")}
-                connId={linkedConn?.id ?? ""}
-                conn={linkedConn}
-                schema={activeSchema}
-                projectId={projectId ?? undefined}
+                projectId={projectId ?? ""}
+                schemaId={schemaId ?? ""}
+                model={model}
             />
             <SeedDataModal
                 open={step === "seed-data"}
                 onClose={() => send("closed")}
-                connName={linkedConn?.name}
+                projectId={projectId ?? ""}
+                schemaId={schemaId ?? ""}
+                model={model}
             />
         </>
     );

@@ -4,9 +4,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Modal, Button, Tooltip, Spin, Tag, Select } from "antd";
 import {
     Database,
-    ChevronRight,
-    Sparkles,
-    Layers,
     RefreshCcw,
     ArrowLeftRight,
     PlugZap,
@@ -19,6 +16,7 @@ import {
     CheckCircle2,
     XCircle,
     PencilRuler,
+    ChevronRight,
 } from "lucide-react";
 import {
     useProjectDbConnections,
@@ -70,27 +68,29 @@ const PERM_ITEMS: { key: keyof PermissionMatrix; label: string }[] = [
     { key: "can_create_schema", label: "CREATE SCHEMA" },
 ];
 
-interface DbManagementStepProps {
+interface SyncSchemaStepProps {
     open: boolean;
     projectId: string | null;
     onChangeDb: () => void;
     onClose: () => void;
-    onOpenQueryExecutor: (schema: string) => void;
-    onOpenSeedData: () => void;
-    onOpenSyncSchema: (schema: string) => void;
+    onSync: (schema: string) => void;
     isSyncing?: boolean;
 }
 
-export default function DbManagementStep({
+/**
+ * "Sync Schema" — pulls the live DB structure into a new physical schema.
+ * Only ever rendered once a connection is linked (the 'sync-schema' flow
+ * gates on connect-db first — see db-flow-config.ts), so `linkedConn` is
+ * expected to be present by the time this is open.
+ */
+export default function SyncSchemaStep({
     open,
     projectId,
     onChangeDb,
     onClose,
-    onOpenQueryExecutor,
-    onOpenSeedData,
-    onOpenSyncSchema,
+    onSync,
     isSyncing = false,
-}: DbManagementStepProps) {
+}: SyncSchemaStepProps) {
     const [unlinkingId, setUnlinkingId] = useState<string | null>(null);
 
     const { data: projectConns } = useProjectDbConnections(open ? projectId : null);
@@ -142,7 +142,7 @@ export default function DbManagementStep({
             .then((s) => { setCachedSchemas(id, s); setDbSchemas(s); setSelectedSchema(pickDefaultSchema(s, id)); })
             .catch(() => setDbSchemas([]))
             .finally(() => setSchemasLoading(false));
-    }, [linkedConn]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [linkedConn]);
 
     useEffect(() => {
         if (!open || !linkedConn) { setDbSchemas([]); setSelectedSchema(""); setSchemasLoading(false); return; }
@@ -182,23 +182,8 @@ export default function DbManagementStep({
 
     const handleSyncClick = useCallback((e: React.MouseEvent) => {
         e.preventDefault();
-        if (selectedSchema) onOpenSyncSchema(selectedSchema);
-    }, [selectedSchema, onOpenSyncSchema]);
-
-    const regularActions = [
-        {
-            icon: <Sparkles size={16} />,
-            label: "Generate Query",
-            desc: "AI-powered SQL query executor",
-            onClick: () => onOpenQueryExecutor(selectedSchema),
-        },
-        {
-            icon: <Layers size={16} />,
-            label: "Seed Data",
-            desc: "Generate and insert sample data",
-            onClick: onOpenSeedData,
-        },
-    ];
+        if (selectedSchema) onSync(selectedSchema);
+    }, [selectedSchema, onSync]);
 
     return (
         <Modal
@@ -207,7 +192,7 @@ export default function DbManagementStep({
             footer={null}
             title={
                 <div className="flex items-center gap-2">
-                    <span>Database Management</span>
+                    <span>Sync Schema</span>
                 </div>
             }
             width={680}
@@ -267,6 +252,37 @@ export default function DbManagementStep({
                 </div>
             )}
 
+            {linkedConn && (
+                <div className="flex items-center gap-2 mb-3">
+                    <span className="text-xs text-gray-400">Target Schema:</span>
+                        {schemasLoading ? (
+                            <div className="h-5 w-20 rounded bg-gray-200 animate-pulse" />
+                        ) : dbSchemas.length >= 1 ? (
+                            <div className="[&_.ant-select-selection-item]:!text-xs [&_.ant-select-selector]:!text-xs [&_.ant-select-selector]:!bg-transparent [&_.ant-select-selector]:!border-none [&_.ant-select-selector]:!shadow-none">
+                                <Select
+                                    size="small"
+                                    variant="borderless"
+                                    value={selectedSchema}
+                                    onChange={(s) => { setSelectedSchema(s); if (linkedConn?.id) setCachedSelectedSchema(linkedConn.id, s); }}
+                                    options={dbSchemas.map((s) => ({ label: s, value: s }))}
+                                    style={{ width: 110 }}
+                                />
+                            </div>
+                        ) : selectedSchema ? (
+                            <span className="text-xs text-gray-500 font-mono">{selectedSchema}</span>
+                        ) : null}
+                        <Tooltip title="Reload schemas">
+                            <button
+                                onClick={() => loadSchemas(true)}
+                                disabled={schemasLoading || !linkedConn}
+                                className="cursor-pointer text-gray-400 hover:text-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            >
+                                <RotateCcw size={12} />
+                            </button>
+                        </Tooltip>
+                </div>
+            )}
+
             {/* Permissions */}
             {linkedConn && (
                 <div className="mb-4">
@@ -318,68 +334,7 @@ export default function DbManagementStep({
                 </div>
             )}
 
-            {/* Shared schema picker */}
-            {linkedConn && (
-                <div className="flex items-center gap-2 mb-3">
-                    <div className="flex items-center gap-1.5 text-xs font-medium text-gray-600">
-                        <PencilRuler size={13} />
-                        <span>Available actions</span>
-                    </div>
-                    <span className="text-gray-200 text-xs">·</span>
-                    <span className="text-xs text-gray-400">Schema:</span>
-                    {schemasLoading ? (
-                        <div className="h-5 w-20 rounded bg-gray-200 animate-pulse" />
-                    ) : dbSchemas.length >= 1 ? (
-                        <div className="[&_.ant-select-selection-item]:!text-xs [&_.ant-select-selector]:!text-xs [&_.ant-select-selector]:!bg-transparent [&_.ant-select-selector]:!border-none [&_.ant-select-selector]:!shadow-none">
-                            <Select
-                                size="small"
-                                variant="borderless"
-                                value={selectedSchema}
-                                onChange={(s) => { setSelectedSchema(s); if (linkedConn?.id) setCachedSelectedSchema(linkedConn.id, s); }}
-                                options={dbSchemas.map((s) => ({ label: s, value: s }))}
-                                style={{ width: 110 }}
-                            />
-                        </div>
-                    ) : selectedSchema ? (
-                        <span className="text-xs text-gray-500 font-mono">{selectedSchema}</span>
-                    ) : null}
-                    <Tooltip title="Reload schemas">
-                        <button
-                            onClick={() => loadSchemas(true)}
-                            disabled={schemasLoading || !linkedConn}
-                            className="cursor-pointer text-gray-400 hover:text-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                        >
-                            <RotateCcw size={12} />
-                        </button>
-                    </Tooltip>
-                </div>
-            )}
-            {!linkedConn && (
-                <div className="flex items-center gap-1.5 text-xs font-medium text-gray-600 mb-3">
-                    <PencilRuler size={13} />
-                    <span>Available actions</span>
-                </div>
-            )}
-
             <div className="flex flex-col gap-2 mb-1">
-                {regularActions.map((item) => (
-                    <button
-                        key={item.label}
-                        disabled={!linkedConn}
-                        onClick={item.onClick}
-                        className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2.5 text-left hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                    >
-                        <div className="flex items-center gap-3">
-                            {item.icon}
-                            <div>
-                                <div className="font-medium text-xs leading-none mb-0.5">{item.label}</div>
-                                <div className="text-xs text-gray-400">{item.desc}</div>
-                            </div>
-                        </div>
-                        <ChevronRight size={14} className="text-gray-300" />
-                    </button>
-                ))}
-
                 {/* Sync Schema row — uses shared selectedSchema */}
                 <div
                     className={`flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2.5 ${

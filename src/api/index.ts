@@ -47,6 +47,12 @@ export const PROXY_SCHEMA_COMMENTS = (projectId: string, schemaId: string) => `$
 export const PROXY_SCHEMA_VERSIONS = (projectId: string, schemaId: string) => `${PROXY_BASE}/projects/${projectId}/schemas/${schemaId}/versions`;
 export const PROXY_SCHEMA_VERSION_DETAIL = (projectId: string, schemaId: string, versionId: string) => `${PROXY_SCHEMA_VERSIONS(projectId, schemaId)}/${versionId}`;
 
+// Schema sandbox (Query Generator / Seed Data Run target)
+export const PROXY_SCHEMA_SANDBOX = (projectId: string, schemaId: string) => `${PROXY_BASE}/projects/${projectId}/schemas/${schemaId}/sandbox`;
+export const PROXY_SCHEMA_SANDBOX_EXECUTE = (projectId: string, schemaId: string) => `${PROXY_SCHEMA_SANDBOX(projectId, schemaId)}/execute`;
+export const PROXY_SCHEMA_SANDBOX_RESET = (projectId: string, schemaId: string) => `${PROXY_SCHEMA_SANDBOX(projectId, schemaId)}/reset`;
+export const PROXY_SCHEMA_SANDBOX_STATUS = (projectId: string, schemaId: string) => `${PROXY_SCHEMA_SANDBOX(projectId, schemaId)}/status`;
+
 // Shared docs
 export const PROXY_SHARE_HTML = `${PROXY_BASE}/projects/shared-docs`;
 

@@ -2,10 +2,11 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Avatar, Button, Tooltip, Dropdown, Modal } from "antd";
-import { Download, History, Send, ArrowRightLeft, DatabaseZap, MessageSquareWarning, Layers, RefreshCw, FileCode2, FolderOpen } from "lucide-react";
+import { Download, History, Send, ArrowRightLeft, DatabaseZap, MessageSquareWarning, Layers, RefreshCw, FileCode2, FolderOpen, Sparkles } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { RemoteCollaborator } from "../../hooks/useCollaborationAwareness";
+import type { PhysicalModelPayload } from "@/components/EditProject/utils/physical-model.builder";
 import DbFlowController from "@/components/db-flow/DbFlowController";
 import SQLGenerator from "@/components/SQLGenerator";
 import { introspectDbConnection, useProjectDbConnections } from "@/api/db-connections/client";
@@ -52,6 +53,10 @@ type HeaderProps = {
     onToggleNormalizationPanel?: () => void;
     onApplyToDatabase?: () => void;
     onExportHistory?: () => void;
+    /** Physical schema model.json — passed through to the AI SQL generator. */
+    physicalModel?: PhysicalModelPayload | null;
+    /** Currently-open schema id — grounds the sandbox that Query Generator / Seed Data Run against. */
+    schemaId?: string | null;
 };
 
 type SQLGeneratorTable = {
@@ -95,10 +100,13 @@ const Header: React.FC<HeaderProps> = ({
     onToggleNormalizationPanel,
     onApplyToDatabase,
     onExportHistory,
+    physicalModel,
+    schemaId,
 }) => {
     const inputRef = useRef<HTMLInputElement>(null);
     const router = useRouter();
-    const [isDBConnectionOpen, setIsDBConnectionOpen] = useState(false);
+    const [isAiToolsOpen, setIsAiToolsOpen] = useState(false);
+    const [isSyncSchemaOpen, setIsSyncSchemaOpen] = useState(false);
     const [isSQLGeneratorOpen, setIsSQLGeneratorOpen] = useState(false);
     const [isDocumentsOpen, setIsDocumentsOpen] = useState(false);
     const [sqlGeneratorTables, setSqlGeneratorTables] = useState<SQLGeneratorTable[]>([]);
@@ -106,8 +114,12 @@ const Header: React.FC<HeaderProps> = ({
     const { data: projectConns } = useProjectDbConnections(projectId ?? null);
     const connectedDbId = projectConns?.[0]?.id ?? null;
 
-    const handleDBConnectionClose = useCallback(() => {
-        setIsDBConnectionOpen(false);
+    const handleAiToolsClose = useCallback(() => {
+        setIsAiToolsOpen(false);
+    }, []);
+
+    const handleSyncSchemaClose = useCallback(() => {
+        setIsSyncSchemaOpen(false);
     }, []);
 
     useEffect(() => {
@@ -302,11 +314,22 @@ const Header: React.FC<HeaderProps> = ({
                             <MessageCircleMore size={18} />
                         </Button>
                     </Tooltip> */}
-                    <Tooltip title="Database Management" placement="bottom">
+                    {schemaType === 'physical' && (
+                        <Tooltip title="AI Data Tools" placement="bottom">
+                            <Button
+                                type={'text'}
+                                className="!px-2"
+                                onClick={() => setIsAiToolsOpen(true)}
+                            >
+                                <Sparkles size={18} />
+                            </Button>
+                        </Tooltip>
+                    )}
+                    <Tooltip title="Sync Schema" placement="bottom">
                         <Button
                             type={'text'}
                             className="!px-2"
-                            onClick={() => setIsDBConnectionOpen(true)}
+                            onClick={() => setIsSyncSchemaOpen(true)}
                         >
                             <DatabaseZap size={18} />
                         </Button>
@@ -462,7 +485,7 @@ const Header: React.FC<HeaderProps> = ({
                         tables={sqlGeneratorTables}
                         projectId={projectId ?? ''}
                         connId={connectedDbId}
-                        onDatabaseConfigRequired={() => setIsDBConnectionOpen(true)}
+                        onDatabaseConfigRequired={() => setIsSyncSchemaOpen(true)}
                         isLoading={loadingTables}
                         hasConnection={connectedDbId !== null}
                     />
@@ -473,9 +496,17 @@ const Header: React.FC<HeaderProps> = ({
                 )}
             </Modal>
             <DbFlowController
-                flow="db-management"
-                open={isDBConnectionOpen}
-                onClose={handleDBConnectionClose}
+                flow="ai-tools"
+                open={isAiToolsOpen}
+                onClose={handleAiToolsClose}
+                projectId={projectId ?? null}
+                schemaId={schemaId}
+                model={physicalModel ?? null}
+            />
+            <DbFlowController
+                flow="sync-schema"
+                open={isSyncSchemaOpen}
+                onClose={handleSyncSchemaClose}
                 projectId={projectId ?? null}
                 onNewSchemaCreated={(schemaId) => {
                     if (projectId) router.push(`/projects/${projectId}?schemaId=${schemaId}`);

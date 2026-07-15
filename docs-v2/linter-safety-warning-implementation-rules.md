@@ -264,6 +264,29 @@ Với mỗi generalization:
 
 Ý nghĩa: generalization thường mô tả parent có nhiều subtype; một subtype vẫn có thể hợp lệ nhưng đáng review.
 
+### 5.12. C012 - Duplicate attribute names within an entity
+
+Với mỗi entity:
+
+- Normalize `attr.name.trim().toLowerCase()`.
+- Detect duplicate bằng `Set`.
+- Attribute trùng tên thứ 2 trở đi bị push `error`.
+
+### 5.13. C013 - Generalization references deleted parent entity
+
+Thuật toán:
+
+1. Lấy parent ids qua `getGeneralizationParentIds(gen)`.
+2. Nếu parent id không nằm trong `entityIdSet` (build sẵn ở rule C006).
+3. Push `error`. Issue không có `target`, chỉ có `targetId` (parent entity đã bị xóa nên không còn tên để hiển thị).
+
+### 5.14. C014 - Generalization references deleted child entity
+
+Giống C013 nhưng kiểm tra `gen.childEntityIds`:
+
+- Nếu `childId` không nằm trong `entityIdSet`.
+- Push `error`, không có `target`.
+
 ## 6. Thuật toán Logical Linter
 
 Payload tối thiểu:
@@ -387,6 +410,42 @@ Với mỗi table:
 
 Đây là performance/usability hint, không phải lỗi.
 
+### 6.13. L012 - FK column referencing itself
+
+Với mỗi column có `roles.foreignKey`:
+
+- Nếu `fk.refTableId === table.id` và `fk.refColumnId === col.id` (cột tự trỏ vào chính nó).
+- Push `error`.
+
+### 6.14. L013 - Circular foreign key reference between tables
+
+Dùng helper dùng chung `findForeignKeyCycles(tables)` (khai báo ở section "SHARED HELPERS", trước `lintLogical`).
+
+Thuật toán helper:
+
+1. Build directed graph: mỗi table là node, mỗi FK (khác self-loop) là edge `table -> fk.refTableId`.
+2. Chạy DFS với 3 màu (`UNVISITED`, `IN_PROGRESS`, `DONE`) và một `path` stack.
+3. Khi gặp cạnh trỏ tới node đang `IN_PROGRESS` (còn trong `path`), cắt `path` từ vị trí node đó tới cuối để lấy cycle.
+4. Canonicalize cycle bằng cách rotate cho phần tử nhỏ nhất (so sánh string id) đứng đầu, rồi dùng key nối bằng `>` để dedupe qua `seenCycleKeys`.
+5. Trả về danh sách cycle (mỗi cycle là mảng table id, không lặp lại phần tử đầu ở cuối).
+
+Rule `L013`:
+
+- Với mỗi cycle trả về từ helper.
+- Build chain hiển thị bằng cách nối tên table qua `→`, thêm lại phần tử đầu ở cuối để thể hiện vòng khép kín.
+- Push `info`, `targetId` là table đầu tiên trong cycle (sau khi rotate).
+
+Rule này chỉ dùng cho mục đích cảnh báo thiết kế; circular FK có thể hợp lệ về nghiệp vụ nhưng gây khó khăn khi xác định thứ tự insert/delete.
+
+### 6.15. L014 - Candidate key column not marked unique
+
+Với mỗi column:
+
+- Nếu `roles.candidateKey === true`.
+- Và không phải `roles.primaryKey`.
+- Và `col.unique !== true`.
+- Push `warning`.
+
 ## 7. Thuật toán Physical Linter
 
 Payload tối thiểu:
@@ -407,6 +466,8 @@ FLOAT_TYPES = float, real, double, double precision
 ```
 
 So sánh bằng `col.dataType.trim().toLowerCase()`.
+
+Ngoài ra còn `RESERVED_SQL_KEYWORDS`: danh sách rút gọn các từ khoá SQL phổ biến (`select`, `table`, `order`, `group`, `key`, `user`, `check`, ...) dùng cho rule `P023`. So sánh bằng `name.trim().toLowerCase()`. Đây không phải danh sách đầy đủ theo từng DBMS, chỉ là tập hợp các keyword thường gặp nhất để cảnh báo sớm.
 
 ### 7.2. Lookup map
 
@@ -503,10 +564,12 @@ Với mỗi column:
 
 Với mỗi FK:
 
-- Nếu không có `fk.onDelete`, push một `info`.
-- Nếu không có `fk.onUpdate`, push một `info`.
+- Nếu không có `fk.onDelete`, HOẶC `fk.onDelete.trim().toUpperCase() === "NO ACTION"`, push một `info`.
+- Nếu không có `fk.onUpdate`, HOẶC `fk.onUpdate.trim().toUpperCase() === "NO ACTION"`, push một `info`.
 
 Lưu ý: cùng một FK có thể sinh 2 issue `P011`: một cho missing ON DELETE, một cho missing ON UPDATE.
+
+Lý do check cả giá trị literal `"NO ACTION"`: UI FK action dropdown (`PropertiesPanel/index.tsx`) fallback hiển thị `'NO ACTION'` khi field chưa có giá trị, và khi user chọn tường minh `"NO ACTION"` từ dropdown, `onUpdateFKAction` lưu literal string `"NO ACTION"` vào `edge.data.onDelete`/`onUpdate` (không phải `undefined`). Nếu rule chỉ check `!fk.onDelete`, warning sẽ biến mất vĩnh viễn sau khi user từng chọn `"NO ACTION"` một lần, kể cả khi họ quay lại "NO ACTION" từ một action khác — vì giá trị lúc đó là chuỗi truthy `"NO ACTION"` chứ không phải rỗng/`undefined`.
 
 ### 7.14. P012 - FK references non-existent table
 
@@ -602,6 +665,57 @@ Giống logical `L010`, nhưng chạy trên physical table:
 - Build set lowercase column names.
 - Với mỗi FD, check tất cả refs trong `left` và `right`.
 - Ref không tồn tại thì push `warning`.
+
+### 7.23. P021 - FK column type mismatch với referenced column
+
+Chỉ chạy khi target table và target column tìm được (tương tự P014).
+
+Rule:
+
+- So sánh `col.dataType.trim().toLowerCase()` với `refCol.dataType.trim().toLowerCase()`.
+- Nếu khác nhau, push `warning`.
+
+Lưu ý: rule so sánh chuỗi trực tiếp, không normalize alias (ví dụ `int` vs `integer` vẫn bị coi là khác nhau). Không so sánh `length`/`precision`, chỉ so sánh `dataType`.
+
+### 7.24. P022 - More than one AUTO_INCREMENT column
+
+Với mỗi table:
+
+- Đếm số column có `autoIncrement === true`.
+- Nếu `> 1`, push `error`.
+
+Lý do: hầu hết DBMS chỉ cho phép một cột auto-increment/serial mỗi table.
+
+### 7.25. P023 - Reserved SQL keyword làm tên table/column
+
+Với mỗi table:
+
+- Nếu `table.name.trim().toLowerCase()` nằm trong `RESERVED_SQL_KEYWORDS`, push `warning`.
+- Với mỗi column, nếu `col.name.trim().toLowerCase()` nằm trong `RESERVED_SQL_KEYWORDS`, push `warning`.
+
+Một table có thể sinh nhiều issue `P023` nếu cả tên table và nhiều column đều trùng keyword.
+
+### 7.26. P024 - FK column referencing itself
+
+Giống logical `L012`:
+
+- Nếu `fk.refTableId === table.id` và `fk.refColumnId === col.id`.
+- Push `error`.
+
+### 7.27. P025 - Circular foreign key reference between tables
+
+Dùng chung helper `findForeignKeyCycles(tables)` với logical `L013` (xem mục 6.14 để biết chi tiết thuật toán).
+
+Khác biệt với `L013`:
+
+- Severity là `warning` (không phải `info`) vì ở physical level, circular FK ảnh hưởng trực tiếp tới insert order và cascading delete thực thi trên DBMS.
+
+### 7.28. P026 - Candidate key column not marked unique
+
+Giống logical `L014`:
+
+- Nếu `roles.candidateKey === true`, không phải `roles.primaryKey`, và `col.unique !== true`.
+- Push `warning`.
 
 ## 8. UI LinterPanel
 
@@ -706,6 +820,10 @@ Safety warnings đáng chú ý:
 - `P014`: FK trỏ cột không unique/key.
 - `P016`: VARCHAR quá lớn không có index.
 - `P019`: password column quá ngắn.
+- `P021`: FK type mismatch với referenced column.
+- `P022`: nhiều hơn 1 AUTO_INCREMENT column trong cùng table.
+- `P024`: FK tự trỏ vào chính cột đó.
+- `P025`: circular FK reference giữa nhiều table.
 
 ## 10. Bảng tóm tắt rule
 
@@ -724,6 +842,9 @@ Safety warnings đáng chú ý:
 | C009 | info | Entity không có relationship và không nằm trong generalization |
 | C010 | info | Relationship end thiếu cardinality |
 | C011 | info | Generalization có ít hơn 2 child entities |
+| C012 | error | Duplicate attribute name trong cùng entity |
+| C013 | error | Generalization trỏ parent entity id không tồn tại |
+| C014 | error | Generalization trỏ child entity id không tồn tại |
 
 ### 10.2. Logical
 
@@ -740,6 +861,9 @@ Safety warnings đáng chú ý:
 | L009 | removed | Không còn check ở logical level |
 | L010 | warning | Functional dependency ref column name không tồn tại |
 | L011 | info | Composite PK có hơn 4 columns |
+| L012 | error | FK column tự trỏ vào chính nó |
+| L013 | info | Circular FK reference giữa nhiều table |
+| L014 | warning | Candidate key column không được đánh dấu unique |
 
 ### 10.3. Physical
 
@@ -765,6 +889,12 @@ Safety warnings đáng chú ý:
 | P018 | error | Duplicate index name trong cùng table |
 | P019 | warning | Column `password`/`passwd`/`pwd` là varchar length < 60 |
 | P020 | warning | Functional dependency ref column name không tồn tại |
+| P021 | warning | FK column type không khớp referenced column type |
+| P022 | error | Nhiều hơn 1 AUTO_INCREMENT column trong table |
+| P023 | warning | Tên table/column trùng reserved SQL keyword |
+| P024 | error | FK column tự trỏ vào chính nó |
+| P025 | warning | Circular FK reference giữa nhiều table |
+| P026 | warning | Candidate key column không được đánh dấu unique |
 
 ## 11. Cách thêm rule mới
 
@@ -806,3 +936,5 @@ for (const table of tables) {
 8. Click issue chỉ focus được nếu `targetId` khớp ReactFlow node id.
 9. Multiple issues có thể cùng ruleId trên cùng element, ví dụ `P011` có thể sinh 2 issue cho cùng FK.
 10. Linter không tự sửa model; mọi rule chỉ là cảnh báo/diagnostic.
+11. `findForeignKeyCycles` (khai báo ở section "SHARED HELPERS", trước `lintLogical`) dùng chung cho `L013` và `P025`. Đây là DFS đơn giản, dedupe theo canonical rotation; không đảm bảo liệt kê hết mọi elementary cycle trong đồ thị phức tạp nhưng đủ cho mục đích cảnh báo.
+12. `RESERVED_SQL_KEYWORDS` (`P023`) chỉ là danh sách rút gọn, không phân biệt theo từng DBMS cụ thể (MySQL/Postgres/SQL Server có keyword list khác nhau).
