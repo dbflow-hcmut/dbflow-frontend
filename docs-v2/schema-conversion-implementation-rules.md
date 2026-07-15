@@ -153,7 +153,9 @@ convertLogicalToPhysical(logicalModel, opts):
                 nullable: isPK ? false : column.nullable ?? true,
                 unique: column.unique ?? false,
                 autoIncrement: isAutoIncrement,
-                roles: keep PK/candidateKey/FK but remap FK.refColumnId
+                roles: keep PK/candidateKey/FK but remap FK.refColumnId,
+                       FK adds onDelete: "NO ACTION", onUpdate: "NO ACTION",
+                notes: column.notes
             }
 
         physicalTable = {
@@ -162,6 +164,7 @@ convertLogicalToPhysical(logicalModel, opts):
             notes: table.notes,
             columns,
             indexes: [],
+            showFunctionalDependencies: table.showFunctionalDependencies,
             functionalDependencies: table.functionalDependencies
         }
 ```
@@ -213,14 +216,24 @@ Sau khi có generic type, nếu `dbms` tồn tại thì map qua `DBMS_TYPE_MAP`.
 
 Vì type PostgreSQL cho key là `integer`, MySQL/SQL Server là `int`, rule này hoạt động với DBMS đã chọn hoặc generic.
 
-### 6.4. Field được giữ/bỏ
+### 6.4. Rule FK onDelete / onUpdate
+
+Logical FK không có `onDelete`/`onUpdate`, nên khi convert sang Physical sẽ set default theo SQL standard:
+
+- `onDelete: "NO ACTION"`.
+- `onUpdate: "NO ACTION"`.
+
+Giá trị này cho phép user chỉnh sửa sau trong physical editor. Các giá trị hợp lệ: `NO ACTION`, `CASCADE`, `SET NULL`, `SET DEFAULT`, `RESTRICT`.
+
+### 6.5. Field được giữ/bỏ
 
 Giữ:
 
 - Table `id`, `name`, `notes`.
-- Column `name`, `nullable`, `unique`.
-- `roles.primaryKey`, `roles.candidateKey`, `roles.foreignKey`.
+- Column `name`, `nullable`, `unique`, `notes`.
+- `roles.primaryKey`, `roles.candidateKey`, `roles.foreignKey` (có thêm `onDelete`/`onUpdate` default).
 - `functionalDependencies`.
+- `showFunctionalDependencies`.
 
 Thêm:
 
@@ -260,8 +273,10 @@ convertPhysicalToLogical(physicalModel, opts):
                 nullable: col.nullable ?? true,
                 unique: col.unique ?? false,
                 roles: keep PK/candidateKey/FK but remap FK.refColumnId,
+                       FK drops onDelete/onUpdate (logical is action-agnostic),
                 notes: col.comment || col.notes
             })),
+            showFunctionalDependencies: table.showFunctionalDependencies,
             functionalDependencies: table.functionalDependencies
         }
 ```
@@ -277,6 +292,16 @@ Các physical-only field không đưa sang logical:
 - `indexes`.
 - `model.dbms`.
 - `model.description`.
+- FK `onDelete`, `onUpdate` (logical layer là implementation-agnostic).
+
+Field được giữ:
+
+- Table `id`, `name`.
+- Column `name`, `nullable`, `unique`.
+- `roles.primaryKey`, `roles.candidateKey`, `roles.foreignKey` (chỉ `refTableId`, `refColumnId`).
+- `notes` (ưu tiên `comment`, fallback `notes`).
+- `functionalDependencies`.
+- `showFunctionalDependencies`.
 
 ### 7.3. Rule notes/comment
 
