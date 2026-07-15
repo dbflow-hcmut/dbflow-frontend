@@ -13,6 +13,13 @@ export interface SandboxSyncReportEntry {
 
 export interface SandboxQueryResultDto extends QueryResultDto {
     syncReport?: SandboxSyncReportEntry[];
+    /** Present only when a multi-statement batch (seed data or an ad-hoc
+     * multi-statement query) failed partway through. */
+    statementProgress?: {
+        total: number;
+        succeeded: number;
+        failedStatement: string;
+    };
 }
 
 /**

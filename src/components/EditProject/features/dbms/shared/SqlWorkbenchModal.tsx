@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { Modal, Button, Input, Tooltip, Tag } from "antd";
-import { Play, Clock, Rows3, Sparkles, RotateCcw, CheckCircle, XCircle, Info, GripHorizontal, Wand2 } from "lucide-react";
+import { Play, Clock, Rows3, Sparkles, RotateCcw, CheckCircle, XCircle, Info, AlertTriangle, GripHorizontal, Wand2 } from "lucide-react";
 import Editor from "@monaco-editor/react";
 import type { QueryResultDto } from "@/api/db-connections/client";
 import { executeSandboxQuery, resetSandbox, type SandboxSyncReportEntry } from "@/api/sandbox/client";
@@ -32,7 +32,7 @@ interface SqlWorkbenchModalProps {
 
 interface LogEntry {
     time: string;
-    type: "info" | "success" | "error";
+    type: "info" | "success" | "error" | "warning";
     msg: string;
 }
 
@@ -185,8 +185,18 @@ export default function SqlWorkbenchModal({
             );
             if (streamError) throw streamError;
             const extracted = extractSqlFromContent(finalContent);
-            if (!extracted.sql) throw new Error("Could not parse SQL from the AI response.");
+            if (!extracted.sql) {
+                const preview = finalContent.trim().slice(0, 500) || "(empty response)";
+                throw new Error(`Could not parse SQL from the AI response. Raw response: ${preview}`);
+            }
             setSql(extracted.sql);
+            // Surface schema-level warnings the backend attaches around the SQL
+            // fence (e.g. an unresolvable circular FK dependency) — everything
+            // else in textDescription is just the AI's routine one-liner, which
+            // would only add noise here.
+            if (extracted.textDescription.includes("⚠️")) {
+                addLog("warning", extracted.textDescription);
+            }
             addLog("success", "Generated successfully.");
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -211,8 +221,12 @@ export default function SqlWorkbenchModal({
                 setResult(res);
                 addLog("success", `Query completed: ${res.rowCount} row${res.rowCount !== 1 ? "s" : ""} in ${res.executionTimeMs}ms.`);
             } else {
-                setError(res.message ?? "Query failed.");
-                addLog("error", res.message ?? "Query failed.");
+                const progress = res.statementProgress;
+                const detail = progress
+                    ? `${res.message ?? "Query failed."}\n\nFailing statement:\n${progress.failedStatement}\n\n(${progress.succeeded}/${progress.total} statements succeeded before this, then rolled back — nothing was persisted.)`
+                    : res.message ?? "Query failed.";
+                setError(detail);
+                addLog("error", detail);
             }
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -481,9 +495,11 @@ export default function SqlWorkbenchModal({
                                 {entry.type === "success" && <CheckCircle size={11} className="text-green-400 shrink-0 mt-0.5" />}
                                 {entry.type === "error" && <XCircle size={11} className="text-red-400 shrink-0 mt-0.5" />}
                                 {entry.type === "info" && <Info size={11} className="text-blue-400 shrink-0 mt-0.5" />}
+                                {entry.type === "warning" && <AlertTriangle size={11} className="text-amber-400 shrink-0 mt-0.5" />}
                                 <span className={`text-[11px] leading-4 break-all ${
                                     entry.type === "success" ? "text-green-600" :
                                     entry.type === "error" ? "text-red-500" :
+                                    entry.type === "warning" ? "text-amber-500" :
                                     "text-gray-500"
                                 }`}>
                                     {entry.msg}
