@@ -58,9 +58,9 @@
 
 ## generalization (Tổng quát hóa)
 
-* `id*`: ID (prefix `cid_`).
-* `parentEntityIds*`: Tập các ID của thực thể cha (prefix `cid_`). Edge không có móc/bracket được hiểu là cha.
-* `childEntityIds*`: Tập các ID của thực thể con. Edge có móc/bracket được hiểu là con.
+* `id*`: ID (prefix `cid_`). Với direct entity → entity identifying/bracket edge, ID generalization bằng chính ID của edge.
+* `parentEntityIds*`: Tập các ID của thực thể cha (prefix `cid_`). Edge không có móc/bracket được hiểu là cha. Với direct entity → entity edge, đầu có bracket là parent.
+* `childEntityIds*`: Tập các ID của thực thể con. Edge có móc/bracket được hiểu là con. Với direct entity → entity edge, đầu không có bracket là child.
 * `categoryBy`: Tiêu chí phân loại thực thể (nếu có).
 * `constraints*`: Các ràng buộc cha-con.
   * `disjointness*`: `disjoint` hoặc `overlap`.

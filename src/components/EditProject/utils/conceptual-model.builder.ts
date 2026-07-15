@@ -473,6 +473,31 @@ const buildGeneralizations = (
         });
     });
 
+    storedEdges.forEach((edge) => {
+        if (edge.type !== "isaChild") return;
+
+        const fromNode = storedNodeMap.get(edge.from.nodeId);
+        const toNode = storedNodeMap.get(edge.to.nodeId);
+        if (fromNode?.type !== "entity" || toNode?.type !== "entity") return;
+
+        const generalizationId = edge.generalizationId ?? edge.id;
+        if (generalizations.some((gen) => gen.id === generalizationId)) return;
+
+        const hasToBracket = Boolean(edge.endStyle?.to?.bracket);
+        const parentNode = hasToBracket ? toNode : fromNode;
+        const childNode = hasToBracket ? fromNode : toNode;
+
+        generalizations.push({
+            id: generalizationId,
+            parentEntityIds: [getEntityId(parentNode)],
+            childEntityIds: [getEntityId(childNode)],
+            constraints: {
+                disjointness: "disjoint",
+                completeness: "partial",
+            },
+        });
+    });
+
     return generalizations;
 };
 

@@ -105,9 +105,12 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     const selectedEdgeIsRelationshipEntity =
         (selectedEdgeSourceType === "relationship" && selectedEdgeTargetType === "entity") ||
         (selectedEdgeSourceType === "entity" && selectedEdgeTargetType === "relationship");
-    const selectedEdgeCanUseBracket = selectedEdgeHasConstraint || selectedEdgeIsRelationshipEntity;
+    const selectedEdgeIsEntityEntity =
+        selectedEdgeSourceType === "entity" && selectedEdgeTargetType === "entity";
+    const selectedEdgeCanUseBracket =
+        selectedEdgeHasConstraint || selectedEdgeIsRelationshipEntity || selectedEdgeIsEntityEntity;
     const selectedEdgeCanChooseBracketDirection =
-        selectedEdge?.data?.lineStyle === "bracket" && selectedEdgeIsRelationshipEntity;
+        selectedEdge?.data?.lineStyle === "bracket" && (selectedEdgeIsRelationshipEntity || selectedEdgeIsEntityEntity);
 
     const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
     const connectedEnds = useMemo(() => {
@@ -971,23 +974,27 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                 <div>
                                     <label className="block text-sm font-medium mb-2">Edge Type</label>
                                     <Select
-                                        value={selectedEdge.data?.lineStyle || 'single'}
+                                        value={selectedEdgeIsEntityEntity ? 'bracket' : selectedEdge.data?.lineStyle || 'single'}
                                         onChange={(value) => onUpdateEdgeLineStyle(value)}
                                         className="w-full"
-                                        options={[
-                                            { label: 'Single line', value: 'single' },
-                                            { label: 'Double line', value: 'double' },
-                                            ...(selectedEdgeCanUseBracket
+                                        options={
+                                            selectedEdgeIsEntityEntity
                                                 ? [{ label: 'Identifying', value: 'bracket' as const }]
-                                                : []),
-                                        ]}
+                                                : [
+                                                    { label: 'Single line', value: 'single' },
+                                                    { label: 'Double line', value: 'double' },
+                                                    ...(selectedEdgeCanUseBracket
+                                                        ? [{ label: 'Identifying', value: 'bracket' as const }]
+                                                        : []),
+                                                ]
+                                        }
                                     />
                                 </div>
                                 {selectedEdgeCanChooseBracketDirection && (
                                     <div>
                                         <label className="block text-sm font-medium mb-2">Identifying Direction</label>
                                         <Select
-                                            value={selectedEdge.data?.bracketDirection || 'to'}
+                                            value={selectedEdge.data?.bracketDirection || (selectedEdgeIsEntityEntity ? 'from' : 'to')}
                                             onChange={(value) => onUpdateEdgeBracketDirection(value)}
                                             className="w-full"
                                             options={[
