@@ -190,12 +190,14 @@ export interface ConvertLogicalToPhysicalOptions {
  *  - Table IDs are preserved so FK references remain consistent.
  *  - Column IDs are remapped from `lid_` prefix to `pid_` prefix.
  *  - FK `refColumnId` is remapped accordingly.
+ *  - FK `onDelete` / `onUpdate` default to `"NO ACTION"` (SQL standard).
  *  - A `dataType` (+ optional `length`) is inferred for every column from its
  *    role and name; when `dbms` is provided, types are DBMS-native.
  *  - Single-column integer PKs (that are not FK) get `autoIncrement: true`.
  *  - `nullable` and `unique` are carried over unchanged.
+ *  - Column `notes` are preserved.
  *  - Indexes are initialised as empty (no indexes in logical model).
- *  - Functional dependencies are carried over.
+ *  - `showFunctionalDependencies` flag and functional dependencies are carried over.
  */
 export const convertLogicalToPhysical = (
     logicalModel: LogicalModelPayload,
@@ -257,13 +259,17 @@ export const convertLogicalToPhysical = (
                                             refColumnId: remapColId(
                                                 col.roles.foreignKey.refColumnId,
                                             ),
+                                            onDelete: "NO ACTION" as const,
+                                            onUpdate: "NO ACTION" as const,
                                         }
                                       : undefined,
                               }
                             : undefined,
+                        notes: col.notes,
                     };
                 }),
                 indexes: [],
+                showFunctionalDependencies: table.showFunctionalDependencies,
                 functionalDependencies: (table.functionalDependencies ?? []).map(fd => ({
                     ...fd,
                     left: fd.left.map(remapColId),
@@ -290,11 +296,12 @@ export interface ConvertPhysicalToLogicalOptions {
  *  - Table IDs are preserved so FK references remain consistent.
  *  - Column IDs are remapped from `pid_` prefix to `lid_` prefix.
  *  - FK `refColumnId` is remapped accordingly.
+ *  - FK `onDelete` / `onUpdate` are dropped (logical layer is action-agnostic).
  *  - Physical-only fields (`dataType`, `length`, `autoIncrement`, `defaultValue`,
- *    `indexes`) are dropped; the logical layer is implementation-agnostic.
+ *    `indexes`, `dbms`) are dropped; the logical layer is implementation-agnostic.
  *  - `nullable`, `unique`, and `roles` (PK, FK, candidateKey) are kept.
  *  - `comment` fields are merged into `notes` (comment takes priority).
- *  - `functionalDependencies` are carried over.
+ *  - `showFunctionalDependencies` flag and functional dependencies are carried over.
  */
 export const convertPhysicalToLogical = (
     physicalModel: PhysicalModelPayload,
@@ -341,6 +348,7 @@ export const convertPhysicalToLogical = (
                     : undefined,
                 notes: col.comment || col.notes,
             })),
+            showFunctionalDependencies: table.showFunctionalDependencies,
             functionalDependencies: (table.functionalDependencies ?? []).map(fd => ({
                 ...fd,
                 left: fd.left.map(remapColIdToLogical),
