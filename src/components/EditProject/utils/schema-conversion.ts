@@ -793,7 +793,7 @@ export interface ConvertConceptualToLogicalOptions {
  *
  *  Relationships:
  *   - N:1 / 1:N  -> FK column on the N side.
- *   - 1:1        -> FK column on the optional side (first end used as tiebreaker).
+ *   - 1:1        -> FK column on the mandatory side (first end used as tiebreaker).
  *   - N:M        -> junction table with two composite PK+FK columns.
  *   - N-ary (3+) -> junction table with one PK+FK column per participant.
  *   - Relationship attributes -> columns on the FK table (1:N/1:1) or
@@ -1078,11 +1078,11 @@ export const convertConceptualToLogical = (
                 fkEnd = endB;
                 refEnd = endA;
             } else {
-                // 1:1 -- prefer the optional side; fall back to endA
+                // 1:1 -- prefer the mandatory side (optional === false); fall back to endA
                 fkEnd =
-                    endA.optional !== false
+                    endA.optional === false
                         ? endA
-                        : endB.optional !== false
+                        : endB.optional === false
                           ? endB
                           : endA;
                 refEnd = fkEnd === endA ? endB : endA;
