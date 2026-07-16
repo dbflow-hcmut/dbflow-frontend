@@ -3,6 +3,7 @@ import {
   PROXY_PROJECT_DOCUMENT_DETAIL,
   PROXY_PROJECT_DOCUMENT_DOWNLOAD_URL,
   PROXY_PROJECT_DOCUMENT_PRESIGNED_UPLOAD,
+  PROXY_PROJECT_DOCUMENT_RETRY_INGEST,
   PROXY_PROJECT_DOCUMENTS,
 } from "@/api";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/clientFetch";
@@ -116,6 +117,13 @@ export async function updateProjectDocument(
 
 export async function deleteProjectDocument(projectId: string, documentId: string) {
   return apiDelete<{ success: boolean }>(PROXY_PROJECT_DOCUMENT_DETAIL(projectId, documentId));
+}
+
+export async function retryIngestDocument(projectId: string, documentId: string) {
+  return apiPost<ProjectDocument, Record<string, never>>(
+    PROXY_PROJECT_DOCUMENT_RETRY_INGEST(projectId, documentId),
+    {},
+  );
 }
 
 export async function getProjectDocumentDownloadUrl(projectId: string, documentId: string) {

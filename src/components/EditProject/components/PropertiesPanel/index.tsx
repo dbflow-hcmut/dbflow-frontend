@@ -54,6 +54,7 @@ type PropertiesPanelProps = {
     onRemovePhysicalFD?: (fdId: string) => void;
     onUpdatePhysicalFD?: (fdId: string, updates: Partial<PhysicalFD>) => void;
     onTogglePhysicalFDDisplay?: () => void;
+    indexTypeOptions?: string[];
 };
 
 const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
@@ -94,6 +95,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     onRemovePhysicalFD,
     onUpdatePhysicalFD,
     onTogglePhysicalFDDisplay,
+    indexTypeOptions,
 }) => {
     const getNodeType = (nodeId?: string) => nodes.find((node) => node.id === nodeId)?.type;
     const selectedEdgeSourceType = getNodeType(selectedEdge?.source);
@@ -611,13 +613,9 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                                                 }
                                                                 size="small"
                                                                 style={{ width: 90 }}
-                                                                options={[
-                                                                    { label: 'BTREE', value: 'BTREE' },
-                                                                    { label: 'HASH', value: 'HASH' },
-                                                                    { label: 'GIN', value: 'GIN' },
-                                                                    { label: 'GIST', value: 'GIST' },
-                                                                    { label: 'BRIN', value: 'BRIN' },
-                                                                ]}
+                                                                options={(indexTypeOptions ?? ['BTREE', 'HASH', 'GIN', 'GIST', 'BRIN']).map(
+                                                                    (t) => ({ label: t, value: t })
+                                                                )}
                                                             />
                                                             <Checkbox
                                                                 checked={index.isUnique}

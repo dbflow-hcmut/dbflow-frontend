@@ -32,13 +32,28 @@ async function forward(req: NextRequest) {
     ...(requestBody && { body: requestBody }),
   };
 
-  const beRes = await fetch(url, init);
+  function clearAuthAndRedirect() {
+    const res = NextResponse.redirect(new URL(`/auth/signin`, req.nextUrl.origin));
+    const cookieOpts = { maxAge: 0, path: "/" } as const;
+    res.cookies.set("access_token", "", cookieOpts);
+    res.cookies.set("authjs.session-token", "", {
+      ...cookieOpts,
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+    });
+    return res;
+  }
+
+  let beRes: Response;
+  try {
+    beRes = await fetch(url, init);
+  } catch {
+    return clearAuthAndRedirect();
+  }
 
   if (beRes.status === 401) {
-    const res = NextResponse.redirect(new URL(`/auth/signin`, req.nextUrl.origin));
-    res.cookies.delete("access_token");
-    res.cookies.delete("authjs.session-token");
-    return res;
+    return clearAuthAndRedirect();
   }
 
   if (beRes.status === 404) {

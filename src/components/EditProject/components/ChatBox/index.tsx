@@ -38,6 +38,7 @@ interface ChatBoxProps {
     onModelGenerated?: (
         modelJson: Record<string, unknown>,
         detectedLevel?: string,
+        intent?: string,
     ) => Promise<{ projectId: string; schemaId: string; label?: string } | void> | { projectId: string; schemaId: string; label?: string } | void;
 }
 
@@ -355,9 +356,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
 
                 const isDiagramIntent =
                     currentIntentRef.current === "create" ||
-                    currentIntentRef.current === "edit" ||
-                    currentIntentRef.current === "forward_engineer" ||
-                    currentIntentRef.current === "reverse_engineer";
+                    currentIntentRef.current === "edit";
 
                 if (isDiagramIntent) {
                     // For diagram responses, show text description only (hide JSON block)
@@ -404,9 +403,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                 // Final update for diagram responses
                 const isDiagramIntentFinal =
                     currentIntentRef.current === "create" ||
-                    currentIntentRef.current === "edit" ||
-                    currentIntentRef.current === "forward_engineer" ||
-                    currentIntentRef.current === "reverse_engineer";
+                    currentIntentRef.current === "edit";
 
                 if (isDiagramIntentFinal) {
                     const extracted = extractModelJsonFromContent(finalContent);
@@ -420,13 +417,8 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                     // During streaming, we intentionally don't apply to avoid creating
                     // schema that the validator will reject and retry.
                     if (extracted.modelJson && onModelGenerated && !modelAlreadyApplied) {
-                        const effectiveTargetLevel = detectedLevelRef.current
-                            ?? (currentIntentRef.current === "forward_engineer"
-                                ? (schemaLevel === "conceptual" ? "logical" : schemaLevel === "logical" ? "physical" : undefined)
-                                : currentIntentRef.current === "reverse_engineer"
-                                    ? (schemaLevel === "physical" ? "logical" : schemaLevel === "logical" ? "conceptual" : undefined)
-                                    : undefined);
-                        const openLink = await onModelGenerated(extracted.modelJson, effectiveTargetLevel);
+                        const effectiveTargetLevel = detectedLevelRef.current ?? undefined;
+                        const openLink = await onModelGenerated(extracted.modelJson, effectiveTargetLevel, currentIntentRef.current ?? undefined);
                         if (openLink) {
                             const linkMarkdown = buildOpenSchemaLink(openLink);
                             finalDisplayText = `${finalDisplayText}\n\n${linkMarkdown}`;
@@ -508,6 +500,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
             abortController.signal,
             schemaLevel,
             effectiveModel,
+            projectId ?? undefined,
         );
         if (returnedRunId) runIdRef.current = returnedRunId;
         abortControllerRef.current = null;

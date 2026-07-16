@@ -221,14 +221,16 @@ export function buildChatInputFromAttachments(
   return { message, modelOverride: jsonModel?.modelJson };
 }
 
-// Fixed assistant ID for DBFlow AI
-export const DBFLOW_ASSISTANT_ID = "71ce8f7d-18be-4139-b249-0001da5758b7";
+export const DBFLOW_ASSISTANT_ID = process.env.NEXT_PUBLIC_DBFLOW_ASSISTANT_ID || "71ce8f7d-18be-4139-b249-0001da5758b7";
 
 export interface LangGraphStreamRequest {
   assistant_id: string;
   input: {
     messages: ChatMessage[];
     current_level?: string;
+    input_model?: Record<string, unknown> | null;
+    project_id?: string;
+    input_intent?: string;
   };
   config?: {
     configurable?: {
@@ -377,6 +379,54 @@ export function extractModelJsonFromContent(content: string): {
 }
 
 /**
+ * Extract a SQL query from a fenced ```sql code block in streamed AI content.
+ * Used by the text_to_sql intent — no partial-JSON repair needed since SQL
+ * is only consumed once the block is complete.
+ */
+export function extractSqlFromContent(content: string): {
+  hasSql: boolean;
+  textDescription: string;
+  sql: string | null;
+  isSqlComplete: boolean;
+} {
+  const completePattern = /```sql\s*\n([\s\S]*?)```/i;
+  const completeMatch = content.match(completePattern);
+
+  if (completeMatch) {
+    const codeBlockStart = content.search(/```sql/i);
+    const codeBlockEnd = content.indexOf("```", codeBlockStart + 3) + 3;
+    const textBefore = content.substring(0, codeBlockStart).trim();
+    const textAfter = content.substring(codeBlockEnd).trim();
+    return {
+      hasSql: true,
+      textDescription: [textBefore, textAfter].filter(Boolean).join("\n\n"),
+      sql: completeMatch[1].trim(),
+      isSqlComplete: true,
+    };
+  }
+
+  const partialPattern = /```sql\s*\n([\s\S]*)$/i;
+  const partialMatch = content.match(partialPattern);
+  if (partialMatch) {
+    const codeBlockStart = content.search(/```sql/i);
+    const textBefore = content.substring(0, codeBlockStart).trim();
+    return {
+      hasSql: true,
+      textDescription: textBefore,
+      sql: partialMatch[1].trim(),
+      isSqlComplete: false,
+    };
+  }
+
+  return {
+    hasSql: false,
+    textDescription: content,
+    sql: null,
+    isSqlComplete: false,
+  };
+}
+
+/**
  * Try to parse partial/incomplete JSON by adding closing brackets.
  * Used for progressive diagram rendering while streaming.
  */
@@ -458,6 +508,7 @@ export async function cancelRun(threadId: string, runId: string): Promise<void> 
  * @param abortSignal - Optional AbortSignal to cancel the stream
  * @param currentLevel - Optional current schema level hint
  * @param currentModel - Optional current schema model (for forward/reverse engineering)
+ * @param inputIntent - Optional explicit intent override (e.g. "text_to_sql"), skips LLM classification
  * @returns The run_id if captured from metadata event, or null
  */
 export async function streamChatToLangGraph(
@@ -472,6 +523,8 @@ export async function streamChatToLangGraph(
   abortSignal?: AbortSignal,
   currentLevel?: string,
   currentModel?: Record<string, unknown> | null,
+  projectId?: string,
+  inputIntent?: string,
 ): Promise<string | null> {
   let runId: string | null = null;
   try {
@@ -496,6 +549,8 @@ export async function streamChatToLangGraph(
         messages: messages,
         ...(currentLevel ? { current_level: currentLevel } : {}),
         ...(currentModel ? { input_model: currentModel } : {}),
+        ...(projectId ? { project_id: projectId } : {}),
+        ...(inputIntent ? { input_intent: inputIntent } : {}),
       },
       config: {
         configurable: {

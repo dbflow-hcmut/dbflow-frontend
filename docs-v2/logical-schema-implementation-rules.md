@@ -669,6 +669,23 @@ Với logical edge:
 - FK direction được quyết định lúc kéo edge theo rule PK/CK/Normal. Properties panel không còn selector đổi cardinality/direction.
 - Đổi PK/CK của column đã nối FK edge không được apply thẳng; UI confirm trước để tránh user vô tình làm sai FK/reference rule. Nếu referenced column mất PK/CK, edge liên quan bị xoá sau khi user confirm.
 
+### 14.1. Guard: column không được tự trỏ vào chính nó
+
+Mỗi column trên `logical-table` node dùng chung 1 handle id cho cả 2 chiều target/source (giống physical, xem section 12.1 trong `docs-v2/physical-schema-implementation-rules.md`). `onConnect` chặn sớm case source node và target node giống nhau VÀ source handle === target handle:
+
+```ts
+if (connection.source === connection.target && connection.sourceHandle === connection.targetHandle) {
+    notificationProvider.open({ type: "error", message: "A column cannot reference itself." });
+    return;
+}
+```
+
+Guard này chạy trước khi phân loại `isLogicalTableEdge`, dùng chung cho cả logical và physical. Nối 2 column khác nhau trong cùng 1 table (self-referencing FK, ví dụ cây phân cấp) vẫn hợp lệ và không bị chặn — chỉ chặn khi column trỏ vào chính nó.
+
+### 14.2. Modal "Choose foreign key direction"
+
+Khi cả 2 column đều "normal" (không phải key), `Modal.confirm` (antd) hiện lên hỏi user chọn column nào thành FK. Modal dùng custom `content` JSX với 2 nút cùng 1 hàng (`flex flex-row gap-2`, mỗi nút `flex-1 min-w-0` + `truncate`) thay vì `okText`/`cancelText` mặc định — tránh vỡ layout khi tên bảng/column dài. Chi tiết đầy đủ ở section 12.2 trong `docs-v2/physical-schema-implementation-rules.md` (logic giống hệt, chỉ khác `addLogicalFkEdge` thay vì `addPhysicalFkEdge` và label "CK" thay vì "Unique").
+
 ## 15. Collaboration và hybrid model/diagram
 
 Hook `useLogicalCollaboration` quản lý:

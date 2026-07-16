@@ -140,6 +140,9 @@ Docs mới nên có tối thiểu:
 | Migration SQL / version diff migration | `docs-v2/migration-sql-implementation-rules.md` |
 | Linter / safety warning | `docs-v2/linter-safety-warning-implementation-rules.md` |
 | Normalization / decomposition / FD analysis | `docs-v2/schema-normalization-implementation-rules.md` |
+| Query Executor / AI SQL Generator (text_to_sql) | `docs-v2/query-executor-implementation-rules.md` |
+| Seed Data generation (seed_data) | `docs-v2/seed-data-generation-implementation-rules.md` |
+| Query/Seed sandbox (SQLite per schema, Run target) | `docs-v2/query-sandbox-implementation-rules.md` |
 
 Nếu thay đổi chạm nhiều tính năng, cập nhật tất cả docs liên quan.
 

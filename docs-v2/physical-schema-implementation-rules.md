@@ -305,7 +305,7 @@ Rule:
 3. `model.version = 1`.
 4. Nếu không có stored node thì trả về empty physical model.
 
-`buildPhysicalModel` không tự khôi phục `model.dbms`, `description`, `notes`. Khi mutate model, `usePhysicalCollaboration` có logic preserve metadata cũ.
+`buildPhysicalModel` nhận `dbms` param và set `model.dbms` khi có. Khi mutate model, `usePhysicalCollaboration` có logic preserve metadata cũ bao gồm `dbms`, `description`, `notes`.
 
 ### 8.2. Step 2: lọc table nodes
 
@@ -629,6 +629,31 @@ Với physical edge:
 - FK action `onDelete`/`onUpdate` được chỉnh trong PropertiesPanel và lưu vào `edge.data`.
 - Đổi PK/CK/Unique của column đã nối FK edge không được apply thẳng; UI confirm trước để tránh user vô tình làm sai FK/reference rule. Nếu referenced column mất PK/CK/Unique, edge liên quan bị xoá sau khi user confirm.
 
+### 12.1. Guard: column không được tự trỏ vào chính nó
+
+Mỗi column trên `relation` node có 2 handle (`target` bên trái, `source` bên phải) dùng chung `id = col.name` (xem `src/components/erds-notations/relation-table/index.tsx`). Vì vậy user có thể kéo handle bên phải của một column rồi thả ngược vào handle bên trái của **chính column đó**.
+
+`onConnect` (đầu `EditProject/index.tsx`, trước khi resolve node type) chặn case này:
+
+```ts
+if (connection.source === connection.target && connection.sourceHandle === connection.targetHandle) {
+    notificationProvider.open({ type: "error", message: "A column cannot reference itself." });
+    return;
+}
+```
+
+Điều kiện chặn là **source node === target node VÀ source handle === target handle** (cùng 1 column). Đây là guard sớm nhất trong `onConnect`, chạy trước khi phân loại `isRelationTableEdge`/`isLogicalTableEdge`, nên áp dụng cho cả physical lẫn logical edge.
+
+Lưu ý quan trọng: guard này **không** chặn việc nối 2 column khác nhau trong cùng 1 table (`connection.source === connection.target` nhưng `sourceHandle !== targetHandle`). Đó là self-referencing FK hợp lệ và phổ biến (ví dụ `employees.manager_id -> employees.id` cho cây phân cấp, `categories.parent_id -> categories.id`). Rule chỉ chặn trường hợp column trỏ vào chính nó, không chặn bảng tự tham chiếu chính nó qua 2 column khác nhau.
+
+### 12.2. Modal "Choose foreign key direction"
+
+Khi cả 2 column đều là "normal" (`!sourceColumn.isReferencedKey && !targetColumn.isReferencedKey`), code không tự suy ra chiều FK được vì cả 2 đều có thể trở thành FK hoặc thành referenced column. Lúc này `Modal.confirm` (antd) hiện lên hỏi user chọn.
+
+Modal dùng `content` là custom JSX (không dùng `okText`/`cancelText` mặc định) với 2 nút full-width nằm cùng 1 hàng (`flex flex-row gap-2`, mỗi nút `flex-1 min-w-0` + `truncate` + `title` tooltip để tránh vỡ layout khi tên bảng/column dài) và `footer: null` để ẩn footer OK/Cancel mặc định của antd. Mỗi nút tự gọi `addPhysicalFkEdge(...)` (hoặc `addLogicalFkEdge(...)` ở logical) rồi gọi `modalInstance.destroy()` để đóng modal.
+
+Lý do đổi từ `okText`/`cancelText` sang custom content: `okText`/`cancelText` mặc định của antd size theo nội dung text, nên với label dài như `"categories.description is FK"` hai nút bị lệch kích thước và có thể wrap vỡ layout trong modal hẹp.
+
 FK action options:
 
 - `NO ACTION`.
@@ -742,7 +767,7 @@ Các tính năng trên không đọc trực tiếp ReactFlow nodes khi đã có 
 7. Reorder/delete column có thể ảnh hưởng FK vì stored edge dùng `foreignKeyIndex`; physical reorder giữ edge theo column name và stored `foreignKeyIndex` được tính lại khi serialize diagram.
 8. Index và FD lưu bằng tên column, không bằng column id.
 9. `autoIncrement` được lưu trong model nhưng DDL generator hiện chỉ render auto increment chắc chắn khi data type là serial-like, không render trực tiếp từ boolean này.
-10. Physical model `model.dbms` là optional. Physical schema tạo thủ công có thể không có DBMS.
+10. Physical model `model.dbms` required khi tạo mới (backend bắt buộc chọn DBMS khi tạo physical schema). Schema cũ không có DBMS vẫn load được, default PostgreSQL. DBMS quyết định data type dropdown, index type dropdown, DDL syntax. Giá trị hợp lệ: `postgresql`, `mysql`, `sqlserver`.
 11. `showFDs` là UI state, được preserve khi build diagram từ model nhưng không thuộc semantic model chính.
 12. Cardinality override trên physical edge là visual metadata, không quyết định FK trong model.
 13. Stored node cần `data` đầy đủ; nếu chỉ còn stored `columns` rút gọn thì mất nhiều thông tin physical.
@@ -761,3 +786,36 @@ Các tính năng trên không đọc trực tiếp ReactFlow nodes khi đã có 
 | `buildDiagramFromPhysicalModel` | `PhysicalModelPayload` | Stored diagram | Preserve position/size, auto-layout table mới, tạo FK edge từ column roles |
 | `applyModelPayload` | Full model mới | ReactFlow + Yjs model | Replace model, regenerate diagram |
 | `mutateModel` | Mutator function | Model mới + diagram mới | Rebuild model từ diagram trước, preserve metadata, mutate, regenerate |
+
+## 17. DBMS Integration
+
+Physical schema bắt buộc có DBMS (`postgresql`, `mysql`, `sqlserver`) khi tạo mới.
+
+### 17.1. Nơi lưu DBMS
+
+| Nơi | Field | Mục đích |
+|---|---|---|
+| DB `schemas` table | `dbms varchar(20)` column | Query/filter, backward compat (nullable) |
+| S3 `model.schema.json` | `model.dbms` | Source of truth cho canvas, DDL, AI |
+| Frontend `selectedSchema` | `ProjectSchemasResponse.dbms` | UI state từ API |
+
+### 17.2. Flow tạo physical schema
+
+1. `AddPage` modal hiện DBMS selector (Segmented: PostgreSQL/MySQL/SQL Server) khi type = physical.
+2. Frontend gửi `{ name, type: "physical", dbms: "postgresql" }` lên API.
+3. Backend lưu `dbms` vào DB column và set `model.dbms` trong S3 JSON template.
+4. Canvas đọc `model.dbms` từ Yjs model để quyết định data types và index types.
+
+### 17.3. DBMS-specific UI behavior
+
+- **Data type dropdown**: `PropertiesPanel` nhận `dataTypeOptions` prop từ `EditProject`. Nếu DBMS có, dùng `getDBMSConfig(dbms).dataTypes`. Nếu không có, fallback `GENERIC_DATA_TYPES`.
+- **Index type dropdown**: `PropertiesPanel` nhận `indexTypeOptions` prop. Nếu DBMS có, dùng `getDBMSConfig(dbms).indexTypes`. Mặc định fallback tất cả 5 types.
+- **DBMS badge**: Header hiển thị badge (vd: "PostgreSQL") khi physical schema active.
+
+### 17.4. Backward compatibility
+
+Schema cũ không có `model.dbms`:
+- Load bình thường, không có DBMS badge.
+- Data types fallback generic.
+- DDL export dùng PostgreSQL syntax mặc định.
+- `getDBMSConfig(undefined)` trả về PostgreSQL config.

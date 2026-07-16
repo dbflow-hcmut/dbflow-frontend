@@ -1,11 +1,12 @@
 "use client";
 
-import React from "react";
+import React, { useMemo } from "react";
 import {
     EdgeLabelRenderer,
     EdgeProps,
     getSmoothStepPath,
     useReactFlow,
+    useStore,
     Position,
 } from "reactflow";
 
@@ -29,6 +30,50 @@ const positionToDir = (pos: Position): { dx: number; dy: number } => {
 };
 
 const perpCW = (d: { dx: number; dy: number }) => ({ dx: -d.dy, dy: d.dx });
+
+const SELF_LOOP_MARGIN = 28;
+const SELF_LOOP_RADIUS = 8;
+
+const roundedOrthogonalPath = (points: Array<{ x: number; y: number }>, radius: number): string => {
+    let d = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 1; i < points.length - 1; i++) {
+        const prev = points[i - 1];
+        const curr = points[i];
+        const next = points[i + 1];
+        const distPrev = Math.hypot(curr.x - prev.x, curr.y - prev.y);
+        const distNext = Math.hypot(next.x - curr.x, next.y - curr.y);
+        const r = Math.min(radius, distPrev / 2, distNext / 2);
+        const p1x = curr.x - ((curr.x - prev.x) / distPrev) * r;
+        const p1y = curr.y - ((curr.y - prev.y) / distPrev) * r;
+        const p2x = curr.x + ((next.x - curr.x) / distNext) * r;
+        const p2y = curr.y + ((next.y - curr.y) / distNext) * r;
+        d += ` L ${p1x} ${p1y} Q ${curr.x} ${curr.y} ${p2x} ${p2y}`;
+    }
+    const last = points[points.length - 1];
+    d += ` L ${last.x} ${last.y}`;
+    return d;
+};
+
+const buildSelfLoopPath = (
+    node: { x: number; y: number; width: number; height: number },
+    sourceX: number, sourceY: number,
+    targetX: number, targetY: number,
+): { path: string; labelX: number; labelY: number } => {
+    const loopX = Math.max(sourceX, node.x + node.width) + SELF_LOOP_MARGIN;
+    const approachX = Math.min(targetX, node.x) - SELF_LOOP_MARGIN;
+    const goAbove = (sourceY + targetY) / 2 <= node.y + node.height / 2;
+    const loopY = goAbove ? node.y - SELF_LOOP_MARGIN : node.y + node.height + SELF_LOOP_MARGIN;
+
+    const points = [
+        { x: sourceX, y: sourceY },
+        { x: loopX, y: sourceY },
+        { x: loopX, y: loopY },
+        { x: approachX, y: loopY },
+        { x: approachX, y: targetY },
+        { x: targetX, y: targetY },
+    ];
+    return { path: roundedOrthogonalPath(points, SELF_LOOP_RADIUS), labelX: (loopX + approachX) / 2, labelY: loopY };
+};
 
 // ── Crow's foot (many / N) ──────────────────────────────────────────────
 
@@ -87,7 +132,7 @@ const RelationTableEdge: React.FC<EdgeProps<RelationTableEdgeData>> = (props) =>
 
     const { setEdges, setNodes } = useReactFlow();
 
-    const [edgePath, labelX, labelY] = getSmoothStepPath({
+    const [smoothPath, smoothLabelX, smoothLabelY] = getSmoothStepPath({
         sourceX,
         sourceY,
         sourcePosition,
@@ -96,6 +141,28 @@ const RelationTableEdge: React.FC<EdgeProps<RelationTableEdgeData>> = (props) =>
         targetPosition,
         borderRadius: 6,
     });
+
+    const sourceNodeGeometry = useStore(
+        (s) => {
+            const node = s.nodeInternals.get(source);
+            if (!node) return null;
+            const pos = node.positionAbsolute ?? node.position;
+            return { x: pos.x, y: pos.y, width: node.width ?? 0, height: node.height ?? 0 };
+        },
+        (a, b) => a?.x === b?.x && a?.y === b?.y && a?.width === b?.width && a?.height === b?.height,
+    );
+
+    const selfLoop = useMemo(() => {
+        if (source !== target || sourcePosition !== Position.Right || targetPosition !== Position.Left) {
+            return null;
+        }
+        if (!sourceNodeGeometry?.width || !sourceNodeGeometry?.height) return null;
+        return buildSelfLoopPath(sourceNodeGeometry, sourceX, sourceY, targetX, targetY);
+    }, [source, target, sourcePosition, targetPosition, sourceX, sourceY, targetX, targetY, sourceNodeGeometry]);
+
+    const edgePath = selfLoop?.path ?? smoothPath;
+    const labelX = selfLoop?.labelX ?? smoothLabelX;
+    const labelY = selfLoop?.labelY ?? smoothLabelY;
 
     const handleEdgeClick = (event: React.MouseEvent) => {
         event.stopPropagation();

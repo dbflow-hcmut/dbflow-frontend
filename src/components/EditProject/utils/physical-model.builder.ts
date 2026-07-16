@@ -86,15 +86,17 @@ type BuildPhysicalModelParams = {
     schemaId?: string;
     schemaName?: string;
     diagramName?: string;
+    dbms?: DBMSType;
 };
 
 const FALLBACK_MODEL_NAME = "Untitled physical model";
 
-export const createEmptyPhysicalModel = (modelId?: string, modelName?: string): PhysicalModelPayload => ({
+export const createEmptyPhysicalModel = (modelId?: string, modelName?: string, dbms?: DBMSType): PhysicalModelPayload => ({
     model: {
         id: modelId ?? generatePid(),
         name: modelName ?? FALLBACK_MODEL_NAME,
         version: 1,
+        ...(dbms ? { dbms } : {}),
     },
     tables: [],
 });
@@ -106,12 +108,13 @@ const buildPhysicalModel = ({
     schemaId,
     schemaName,
     diagramName,
+    dbms,
 }: BuildPhysicalModelParams): PhysicalModelPayload => {
     const modelId = schemaId ?? generatePid();
     const modelName = schemaName ?? diagramName ?? FALLBACK_MODEL_NAME;
 
     if (!storedNodes.length) {
-        return createEmptyPhysicalModel(modelId, modelName);
+        return createEmptyPhysicalModel(modelId, modelName, dbms);
     }
 
     // Filter only table nodes
@@ -297,6 +300,7 @@ const buildPhysicalModel = ({
             id: modelId,
             name: modelName,
             version: 1,
+            ...(dbms ? { dbms } : {}),
         },
         tables,
     };

@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import classNames from 'classnames';
-import { Form, Input, Skeleton } from 'antd';
+import { Form, Input, Skeleton, Avatar, Spin } from 'antd';
 import InputAnt from '@/components/InputAnt';
 import ButtonAnt from '@/components/ButtonAnt';
-import { ShieldCheck, User } from 'lucide-react';
-import { getUserMe, updateUserProfile, changeUserPassword } from '@/api/users/client';
+import { ShieldCheck, User, Camera } from 'lucide-react';
+import { getUserMe, updateUserProfile, changeUserPassword, uploadUserAvatar } from '@/api/users/client';
 import { UserResponse } from '@/types/user.type';
 import { notificationProvider } from '@/providers/notification';
 
@@ -92,6 +92,20 @@ export default function SettingsPage() {
         message: error instanceof Error ? error.message : 'Failed to update profile'
       });
     }
+  };
+
+  const handleAvatarChange = async (avatarKey: string) => {
+    if (!userData) return;
+    const updatedUser = await updateUserProfile({
+      firstName: userData.firstName,
+      lastName: userData.lastName,
+      phone: userData.phone,
+      bio: userData.bio,
+      avatarKey,
+    });
+    setUserData(updatedUser);
+    localStorage.setItem('user_data', JSON.stringify(updatedUser));
+    notificationProvider.open({ type: 'success', message: 'Avatar updated successfully' });
   };
 
   const handleSaveSecurity = async (values: SecurityFormValues) => {
@@ -219,7 +233,7 @@ export default function SettingsPage() {
           {/* Content Area - Desktop: Right Column, Mobile: Bottom */}
           <div className="flex-1">
             <div>
-              {activeTab === 'profile' && <ProfileTab userData={userData} onSave={handleSaveProfile} />}
+              {activeTab === 'profile' && <ProfileTab userData={userData} onSave={handleSaveProfile} onAvatarChange={handleAvatarChange} />}
               {activeTab === 'security' && <SecurityTab onSave={handleSaveSecurity} />}
             </div>
           </div>
@@ -230,8 +244,19 @@ export default function SettingsPage() {
 }
 
 // Profile Tab Component
-function ProfileTab({ userData, onSave }: { userData: UserResponse | null; onSave: (values: ProfileFormValues) => void }) {
+function ProfileTab({
+  userData,
+  onSave,
+  onAvatarChange,
+}: {
+  userData: UserResponse | null;
+  onSave: (values: ProfileFormValues) => void;
+  onAvatarChange: (avatarKey: string) => Promise<void>;
+}) {
   const [form] = Form.useForm();
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (userData) {
@@ -243,12 +268,78 @@ function ProfileTab({ userData, onSave }: { userData: UserResponse | null; onSav
         bio: userData.bio || '',
       });
     }
+    setPreviewUrl(null);
   }, [userData, form]);
+
+  const handleAvatarClick = () => {
+    if (!avatarUploading) fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    const localUrl = URL.createObjectURL(file);
+    setPreviewUrl(localUrl);
+    setAvatarUploading(true);
+
+    try {
+      const key = await uploadUserAvatar(file);
+      await onAvatarChange(key);
+    } catch (error) {
+      setPreviewUrl(null);
+      notificationProvider.open({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Failed to upload avatar',
+      });
+    } finally {
+      setAvatarUploading(false);
+      URL.revokeObjectURL(localUrl);
+    }
+  };
+
+  const currentAvatar = previewUrl || userData?.avatar;
 
   return (
     <div>
       <h2 className="text-2xl font-bold text-gray-900 mb-2">Profile Information</h2>
       <p className="text-gray-600 mb-6 text-sm">Update your personal information and profile details</p>
+
+      {/* Avatar upload */}
+      <div className="flex items-center gap-4 mb-6">
+        <div
+          className="relative cursor-pointer group"
+          onClick={handleAvatarClick}
+        >
+          <Avatar
+            src={currentAvatar}
+            size={80}
+            icon={<User size={40} />}
+            className="border-2 border-gray-200"
+          />
+          <div className={classNames(
+            'absolute inset-0 rounded-full flex items-center justify-center bg-black/40 transition-opacity',
+            avatarUploading ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+          )}>
+            {avatarUploading
+              ? <Spin size="small" />
+              : <Camera size={20} className="text-white" />
+            }
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+        </div>
+        <div>
+          <p className="text-sm font-medium text-gray-700">Profile Photo</p>
+          <p className="text-xs text-gray-500">Click to upload · JPG, PNG, WEBP, GIF · Max 5MB</p>
+        </div>
+      </div>
 
       <Form
         form={form}
@@ -298,8 +389,8 @@ function ProfileTab({ userData, onSave }: { userData: UserResponse | null; onSav
           label={<span className="text-gray-700 font-medium">Bio</span>}
           name="bio"
         >
-          <TextArea 
-            placeholder="Tell us about yourself" 
+          <TextArea
+            placeholder="Tell us about yourself"
             rows={4}
             className="!py-3 !font-medium !text-gray-700"
           />

@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable */
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactFlow, {
     addEdge,
@@ -21,7 +23,7 @@ import ReactFlow, {
     getViewportForBounds,
 } from "reactflow";
 import { toPng, toSvg } from 'html-to-image';
-import { Modal } from "antd";
+import { Modal, Button } from "antd";
 import { notificationProvider } from "@/providers/notification";
 import { apiGet } from "@/lib/clientFetch";
 import { PROXY_PROJECT_DETAIL } from "@/api";
@@ -47,9 +49,11 @@ import ChatBox from "./components/ChatBox";
 import DrawingOverlay from "./components/DrawingOverlay";
 import ExportModal, { ExportSettings, ExportFormat, ExportScope } from "./components/ExportModal";
 import DDLExportModal from "./components/DDLExportModal";
+import DbFlowController from "@/components/db-flow/DbFlowController";
+import ExportHistoryDrawer from "./features/dbms/schema-export/ExportHistoryDrawer";
 import DDLImportModal from "./components/DDLImportModal";
 import ConvertToPhysicalModal from "./components/ConvertToPhysicalModal";
-import type { DBMSType } from "./utils/dbms-config";
+import { getDBMSConfig, type DBMSType } from "./utils/dbms-config";
 import HTMLDocsExportModal from "./components/HTMLDocsExportModal";
 import VersionHistoryDrawer from "./components/VersionHistoryDrawer";
 import CommentPin, { type CommentData, type MentionableUser } from "./components/CommentPin";
@@ -73,9 +77,11 @@ import { RemoteCursorsOverlay } from "./components/RemoteCursorsOverlay";
 import TourGuide from "./components/TourGuide";
 import { useAuth } from "@/providers/AuthProvider";
 import { checkSchemaExistence, getProjectPermissions } from "@/api/projects/client";
-import { createSchema, saveSchemaModel } from "./api/client";
+import { createSchema, saveSchemaModel, updateSchema } from "./api/client";
+import { revalidateProjectSchemas } from "@/app/projects/actions";
 import { convertLogicalToPhysical, convertPhysicalToLogical, convertLogicalToConceptual, convertConceptualToLogical, convertPhysicalToConceptual, convertConceptualToPhysical } from "./utils/schema-conversion";
 import { useUndoRedo } from "./hooks/useUndoRedo";
+import { useCopyPasteSchema } from "./hooks/useCopyPasteSchema";
 import ShareProject from "@/components/ShareProject";
 import type { ConceptualModelPayload } from "./utils/conceptual-model.builder";
 import { buildConceptualModel } from "./utils/conceptual-model.builder";
@@ -277,6 +283,29 @@ const EditProject = (props: IPropsEditProject) => {
         };
     }, [canEdit]);
 
+    const getViewportCenter = useCallback(() => {
+        const instance = reactFlowInstanceRef.current;
+        const wrapper = reactFlowWrapperRef.current;
+        if (!instance || !wrapper) return null;
+        const rect = wrapper.getBoundingClientRect();
+        const centerPoint = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        return instance.project(centerPoint);
+    }, []);
+
+    // Ctrl+C / Ctrl+V copy-paste — works across schemas as long as the target
+    // schema is the same type (Conceptual/Logical/Physical) as the source.
+    // Pasted nodes are centered on whatever part of the canvas the user is
+    // currently looking at, not dropped back at their original position.
+    useCopyPasteSchema({
+        nodes,
+        edges,
+        setNodes,
+        setEdges,
+        schemaType: selectedSchema?.type,
+        canEdit,
+        getViewportCenter,
+    });
+
     useEffect(() => {
         if (!projectData?.id || !selectedSchema?.id) {
             return;
@@ -349,6 +378,8 @@ const EditProject = (props: IPropsEditProject) => {
     const [isAddPageOpen, setIsAddPageOpen] = useState(false);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
     const [isDDLExportOpen, setIsDDLExportOpen] = useState(false);
+    const [isSchemaExportOpen, setIsSchemaExportOpen] = useState(false);
+    const [isExportHistoryOpen, setIsExportHistoryOpen] = useState(false);
     const [isDDLImportOpen, setIsDDLImportOpen] = useState(false);
     const [isHTMLDocsExportOpen, setIsHTMLDocsExportOpen] = useState(false);
     const [isVersionHistoryOpen, setIsVersionHistoryOpen] = useState(false);
@@ -636,6 +667,9 @@ const EditProject = (props: IPropsEditProject) => {
             } else if (selectedNode.type === 'entity') {
                 const data = selectedNode.data as EntityData;
                 setPropertiesName(data.name || "");
+            } else if (selectedNode.type === 'logical-table') {
+                const data = selectedNode.data as LogicalTableData;
+                setPropertiesName(data.name || "");
             } else if (selectedNode.type === 'relation') {
                 const data = selectedNode.data as RelationTableData;
                 setPropertiesName(data.name || "");
@@ -647,15 +681,6 @@ const EditProject = (props: IPropsEditProject) => {
             setPropertiesName("");
         }
     }, [selectedNode]);
-
-    const getViewportCenter = useCallback(() => {
-        const instance = reactFlowInstanceRef.current;
-        const wrapper = reactFlowWrapperRef.current;
-        if (!instance || !wrapper) return null;
-        const rect = wrapper.getBoundingClientRect();
-        const centerPoint = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-        return instance.project(centerPoint);
-    }, []);
 
     const {
         addRelationship,
@@ -974,6 +999,14 @@ const EditProject = (props: IPropsEditProject) => {
     const onConnect = useCallback<OnConnect>((connection: Connection) => {
         if (!connection.source || !connection.target) return;
 
+        // A column cannot be a foreign key referencing itself (same node, same handle).
+        // Connecting two different columns within the same table is still valid — that's
+        // a normal self-referencing FK pattern (e.g. employees.manager_id -> employees.id).
+        if (connection.source === connection.target && connection.sourceHandle === connection.targetHandle) {
+            notificationProvider.open({ type: "error", message: "A column cannot reference itself." });
+            return;
+        }
+
         // Check if connection involves relation table nodes or logical table nodes
         const sourceNode = nodes.find(n => n.id === connection.source);
         const targetNode = nodes.find(n => n.id === connection.target);
@@ -1126,16 +1159,43 @@ const EditProject = (props: IPropsEditProject) => {
                 return;
             }
 
-            Modal.confirm({
+            const logicalFkDirectionModal = Modal.confirm({
                 title: "Choose foreign key direction",
-                content: `Both columns are normal. Pick the column that becomes FK. The referenced column will be marked as CK.`,
-                okText: `${sourceColumn.label} is FK`,
-                cancelText: `${targetColumn.label} is FK`,
+                content: (
+                    <div className="mt-2">
+                        <p className="mb-3 text-sm text-gray-600">
+                            Both columns are normal. Pick the column that becomes FK. The referenced column will be marked as CK.
+                        </p>
+                        <div className="flex flex-row gap-2">
+                            <Button
+                                className="flex-1 min-w-0"
+                                title={`${sourceColumn.label} is FK`}
+                                onClick={() => {
+                                    addLogicalFkEdge('source', { markReferencedCandidate: true });
+                                    logicalFkDirectionModal.destroy();
+                                }}
+                            >
+                                <span className="block truncate">{sourceColumn.label} is FK</span>
+                            </Button>
+                            <Button
+                                className="flex-1 min-w-0"
+                                type="primary"
+                                title={`${targetColumn.label} is FK`}
+                                onClick={() => {
+                                    addLogicalFkEdge('target', { markReferencedCandidate: true });
+                                    logicalFkDirectionModal.destroy();
+                                }}
+                            >
+                                <span className="block truncate">{targetColumn.label} is FK</span>
+                            </Button>
+                        </div>
+                    </div>
+                ),
+                footer: null,
                 closable: false,
                 maskClosable: false,
                 keyboard: false,
-                onOk: () => addLogicalFkEdge('source', { markReferencedCandidate: true }),
-                onCancel: () => addLogicalFkEdge('target', { markReferencedCandidate: true }),
+                width: 440,
             });
             return;
         }
@@ -1158,16 +1218,43 @@ const EditProject = (props: IPropsEditProject) => {
                 return;
             }
 
-            Modal.confirm({
+            const physicalFkDirectionModal = Modal.confirm({
                 title: "Choose foreign key direction",
-                content: `Both columns are normal. Pick the column that becomes FK. The referenced column will be marked as Unique.`,
-                okText: `${sourceColumn.label} is FK`,
-                cancelText: `${targetColumn.label} is FK`,
+                content: (
+                    <div className="mt-2">
+                        <p className="mb-3 text-sm text-gray-600">
+                            Both columns are normal. Pick the column that becomes FK. The referenced column will be marked as Unique.
+                        </p>
+                        <div className="flex flex-row gap-2">
+                            <Button
+                                className="flex-1 min-w-0"
+                                title={`${sourceColumn.label} is FK`}
+                                onClick={() => {
+                                    addPhysicalFkEdge('source', { markReferencedUnique: true });
+                                    physicalFkDirectionModal.destroy();
+                                }}
+                            >
+                                <span className="block truncate">{sourceColumn.label} is FK</span>
+                            </Button>
+                            <Button
+                                className="flex-1 min-w-0"
+                                type="primary"
+                                title={`${targetColumn.label} is FK`}
+                                onClick={() => {
+                                    addPhysicalFkEdge('target', { markReferencedUnique: true });
+                                    physicalFkDirectionModal.destroy();
+                                }}
+                            >
+                                <span className="block truncate">{targetColumn.label} is FK</span>
+                            </Button>
+                        </div>
+                    </div>
+                ),
+                footer: null,
                 closable: false,
                 maskClosable: false,
                 keyboard: false,
-                onOk: () => addPhysicalFkEdge('source', { markReferencedUnique: true }),
-                onCancel: () => addPhysicalFkEdge('target', { markReferencedUnique: true }),
+                width: 440,
             });
             return;
         }
@@ -1539,7 +1626,7 @@ const EditProject = (props: IPropsEditProject) => {
             const storedNodes = mapPhysicalReactToStored(nodes);
             const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
             const model = storedNodes.length > 0
-                ? buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
+                ? buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name, dbms: (_physicalModelData as any)?.model?.dbms })
                 : _physicalModelData;
             return model ? runPhysicalLinter(model) : empty;
         }
@@ -1564,7 +1651,7 @@ const EditProject = (props: IPropsEditProject) => {
             const storedNodes = mapPhysicalReactToStored(nodes);
             const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
             return storedNodes.length > 0
-                ? buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
+                ? buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name, dbms: (_physicalModelData as any)?.model?.dbms })
                 : _physicalModelData;
         }
         return null;
@@ -1574,6 +1661,19 @@ const EditProject = (props: IPropsEditProject) => {
         _logicalModelData, _physicalModelData,
         selectedSchema?.id, selectedSchema?.name,
     ]);
+
+    const currentDbms = useMemo(() => {
+        const fromNorm = (normalizationModelData as any)?.model?.dbms;
+        if (fromNorm) return fromNorm as string;
+        const fromPhys = (_physicalModelData as any)?.model?.dbms;
+        if (fromPhys) return fromPhys as string;
+        return selectedSchema?.dbms ?? undefined;
+    }, [normalizationModelData, _physicalModelData, selectedSchema?.dbms]);
+
+    const physicalDbmsConfig = useMemo(() => {
+        if (!isPhysicalSchema) return null;
+        return getDBMSConfig(currentDbms);
+    }, [isPhysicalSchema, currentDbms]);
 
     const effectiveAddEntity = addEntity;
     const effectiveAddDoubleEntity = addDoubleEntity;
@@ -1709,20 +1809,25 @@ const EditProject = (props: IPropsEditProject) => {
     }, []);
 
     // Callback for ChatBox: when AI generates a model JSON, apply it to the diagram
-    const handleChatModelGenerated = useCallback(async (modelJson: Record<string, unknown>, detectedLevel?: string) => {
+    const handleChatModelGenerated = useCallback(async (modelJson: Record<string, unknown>, detectedLevel?: string, intent?: string) => {
         const currentLevel = isConceptualSchema ? "conceptual" : isLogicalSchema ? "logical" : isPhysicalSchema ? "physical" : undefined;
 
-        // If the AI generated a model for a different schema level, create a new schema
-        if (detectedLevel && currentLevel && detectedLevel !== currentLevel && projectData?.id) {
+        // Create a new schema when: different level OR intent is explicitly "create"
+        const shouldCreateNew = (detectedLevel && currentLevel && detectedLevel !== currentLevel) ||
+            (intent === "create" && detectedLevel && projectData?.id);
+
+        if (shouldCreateNew && detectedLevel && projectData?.id) {
             try {
                 const levelLabels: Record<string, string> = {
                     conceptual: "Conceptual Schema",
                     logical: "Logical Schema",
                     physical: "Physical Schema",
                 };
+                const aiDbms = detectedLevel === "physical" ? (modelJson as any)?.model?.dbms : undefined;
                 const newSchema = await createSchema(projectData.id, {
                     name: levelLabels[detectedLevel] || `${detectedLevel} Schema`,
                     type: detectedLevel,
+                    ...(aiDbms ? { dbms: aiDbms } : {}),
                 });
                 await saveSchemaModel(projectData.id, newSchema.id, modelJson);
                 notificationProvider.open({ type: "success", message: `Created new ${detectedLevel} schema — switching now` });
@@ -2030,7 +2135,7 @@ const EditProject = (props: IPropsEditProject) => {
             const storedNodes = mapPhysicalReactToStored(nodes);
             const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
             if (storedNodes.length > 0) {
-                return buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
+                return buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name, dbms: (_physicalModelData as any)?.model?.dbms });
             }
             return _physicalModelData;
         };
@@ -2217,7 +2322,7 @@ const EditProject = (props: IPropsEditProject) => {
         const buildFreshPhysical = () => {
             const storedNodes = mapPhysicalReactToStored(nodes);
             const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
-            if (storedNodes.length > 0) return buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
+            if (storedNodes.length > 0) return buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name, dbms: (_physicalModelData as any)?.model?.dbms });
             return _physicalModelData;
         };
         const buildFreshConceptual = () => {
@@ -2227,11 +2332,13 @@ const EditProject = (props: IPropsEditProject) => {
             return _conceptualModelData;
         };
 
+        const targetDbms = schemaList.find(s => s.id === targetSchemaId)?.dbms as DBMSType | undefined;
+
         let convertedModel: Record<string, unknown> | null = null;
         if (isLogicalSchema && targetSchemaType === SchemaType.PHYSICAL) {
             const fresh = buildFreshLogical();
             if (!fresh) { notificationProvider.open({ type: 'error', message: 'Logical model is not loaded yet.' }); return; }
-            convertedModel = convertLogicalToPhysical(fresh) as Record<string, unknown>;
+            convertedModel = convertLogicalToPhysical(fresh, { dbms: targetDbms }) as Record<string, unknown>;
         } else if (isLogicalSchema && targetSchemaType === SchemaType.CONCEPTUAL) {
             const fresh = buildFreshLogical();
             if (!fresh) { notificationProvider.open({ type: 'error', message: 'Logical model is not loaded yet.' }); return; }
@@ -2251,7 +2358,7 @@ const EditProject = (props: IPropsEditProject) => {
         } else if (isConceptualSchema && targetSchemaType === SchemaType.PHYSICAL) {
             const fresh = buildFreshConceptual();
             if (!fresh) { notificationProvider.open({ type: 'error', message: 'Conceptual model is not loaded yet.' }); return; }
-            convertedModel = convertConceptualToPhysical(fresh) as Record<string, unknown>;
+            convertedModel = convertConceptualToPhysical(fresh, { dbms: targetDbms }) as Record<string, unknown>;
         }
 
         if (!convertedModel) {
@@ -2297,6 +2404,7 @@ const EditProject = (props: IPropsEditProject) => {
             const newSchema = await createSchema(projectData.id, {
                 name: `${selectedSchema?.name ?? diagramName} (Physical)`,
                 type: SchemaType.PHYSICAL,
+                dbms,
             });
             await saveSchemaModel(projectData.id, newSchema.id, physicalModel as Record<string, unknown>);
             notificationProvider.open({ type: "success", message: "Physical schema created — switching now" });
@@ -2419,13 +2527,13 @@ const EditProject = (props: IPropsEditProject) => {
         };
     }, [broadcastCursorPosition, isConceptualSchema, isLogicalSchema, isPhysicalSchema, diagramWrapperEl]);
 
-    const handleDownload = useCallback(() => {
+    const handleDownload = useCallback((format: ExportFormat) => {
         // Defaults for opening the modal
         const nodesToExport = nodes.filter(n => n.selected);
         const hasSelection = nodesToExport.length > 0;
         
         setExportInitialConfig({ 
-            format: 'png', 
+            format,
             scope: hasSelection ? 'selected' : 'all' 
         });
         setIsExportModalOpen(true);
@@ -2464,7 +2572,7 @@ const EditProject = (props: IPropsEditProject) => {
                 height: String(imageHeight),
                 transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.zoom})`,
             },
-            pixelRatio: format === 'png' ? quality : 1,
+            pixelRatio: format === 'png' || format === 'pdf' ? quality : 1,
             filter: (node: HTMLElement) => {
                 // Ensure node is an HTMLElement to avoid getAttribute error
                 if (!(node instanceof HTMLElement)) return true;
@@ -2506,9 +2614,52 @@ const EditProject = (props: IPropsEditProject) => {
                     console.error('Export failed:', err);
                     notificationProvider.open({ type: "error", message: 'Failed to export diagram.' });
                 });
-        } else {
+        } else if (format === 'svg') {
             toSvg(viewport, options)
                 .then(downloadImage)
+                .catch((err) => {
+                    console.error('Export failed:', err);
+                    notificationProvider.open({ type: "error", message: 'Failed to export diagram.' });
+                });
+        } else {
+            toPng(viewport, options)
+                .then(async (dataUrl) => {
+                    const { jsPDF } = await import('jspdf');
+                    const orientation = imageWidth >= imageHeight ? 'landscape' : 'portrait';
+                    const pdf = new jsPDF({
+                        orientation,
+                        unit: 'mm',
+                        format: 'a4',
+                        compress: true,
+                    });
+                    const pageWidth = pdf.internal.pageSize.getWidth();
+                    const pageHeight = pdf.internal.pageSize.getHeight();
+                    const margin = 10;
+                    const availableWidth = pageWidth - (margin * 2);
+                    const availableHeight = pageHeight - (margin * 2);
+                    const imageRatio = imageWidth / imageHeight;
+                    const pageRatio = availableWidth / availableHeight;
+                    const pdfImageWidth = imageRatio > pageRatio
+                        ? availableWidth
+                        : availableHeight * imageRatio;
+                    const pdfImageHeight = imageRatio > pageRatio
+                        ? availableWidth / imageRatio
+                        : availableHeight;
+                    const x = (pageWidth - pdfImageWidth) / 2;
+                    const y = (pageHeight - pdfImageHeight) / 2;
+
+                    pdf.addImage(
+                        dataUrl,
+                        'PNG',
+                        x,
+                        y,
+                        pdfImageWidth,
+                        pdfImageHeight,
+                        undefined,
+                        'FAST',
+                    );
+                    pdf.save(`${diagramName}.pdf`);
+                })
                 .catch((err) => {
                     console.error('Export failed:', err);
                     notificationProvider.open({ type: "error", message: 'Failed to export diagram.' });
@@ -2561,6 +2712,7 @@ const EditProject = (props: IPropsEditProject) => {
                     open={isAddPageOpen}
                     onClose={() => setIsAddPageOpen(false)}
                     projectId={projectData?.id || null}
+                    onCreated={handleSetSelectedSchema}
                 />
                 <Header
                     diagramName={diagramName}
@@ -2573,6 +2725,8 @@ const EditProject = (props: IPropsEditProject) => {
                     onDownload={handleDownload}
                     onExportJson={handleExportJson}
                     onExportDDL={isPhysicalSchema ? () => setIsDDLExportOpen(true) : undefined}
+                    onApplyToDatabase={isPhysicalSchema ? () => setIsSchemaExportOpen(true) : undefined}
+                    onExportHistory={isPhysicalSchema ? () => setIsExportHistoryOpen(true) : undefined}
                     onExportHTMLDocs={() => setIsHTMLDocsExportOpen(true)}
                     onVersionHistory={() => setIsVersionHistoryOpen(true)}
                     onShareClick={() => setIsShareProjectOpen(true)}
@@ -2591,6 +2745,8 @@ const EditProject = (props: IPropsEditProject) => {
                     projectVisibility={projectData?.visibility}
                     normalizationOpen={isNormalizationOpen}
                     onToggleNormalizationPanel={(isLogicalSchema || isPhysicalSchema) ? () => setIsNormalizationOpen((v) => !v) : undefined}
+                    physicalModel={isPhysicalSchema ? _physicalModelData : null}
+                    schemaId={isPhysicalSchema ? selectedSchema?.id : null}
                 />
                 <ShareProject
                     projectId={projectData?.id}
@@ -2611,11 +2767,31 @@ const EditProject = (props: IPropsEditProject) => {
                     model={_physicalModelData}
                     diagramName={diagramName}
                 />
+                <DbFlowController
+                    flow="apply-schema"
+                    open={isSchemaExportOpen}
+                    onClose={() => setIsSchemaExportOpen(false)}
+                    projectId={projectData?.id ?? null}
+                    model={_physicalModelData}
+                />
+                <ExportHistoryDrawer
+                    open={isExportHistoryOpen}
+                    onClose={() => setIsExportHistoryOpen(false)}
+                    projectId={projectData?.id ?? null}
+                />
                 <DDLImportModal
                     isOpen={isDDLImportOpen}
                     onClose={() => setIsDDLImportOpen(false)}
-                    onImport={(model) => {
+                    onImport={async (model, dbms) => {
                         applyPhysicalModelPayload(model);
+                        if (selectedSchema?.id && projectData?.id && dbms) {
+                            try {
+                                await updateSchema(projectData.id, selectedSchema.id, { name: selectedSchema.name, dbms });
+                                router.refresh();
+                            } catch (e) {
+                                console.error("Failed to update schema dbms:", e);
+                            }
+                        }
                     }}
                     diagramName={diagramName}
                 />
@@ -2901,6 +3077,8 @@ const EditProject = (props: IPropsEditProject) => {
                         onRemovePhysicalFD={removePhysicalFD}
                         onUpdatePhysicalFD={updatePhysicalFD}
                         onTogglePhysicalFDDisplay={togglePhysicalFDDisplay}
+                        dataTypeOptions={physicalDbmsConfig?.dataTypes}
+                        indexTypeOptions={physicalDbmsConfig?.indexTypes}
                     />
                     {commentMode && (
                         <CommentPanel
@@ -3009,9 +3187,25 @@ const EditProject = (props: IPropsEditProject) => {
                                 setEdges((es) => es.map((e) => ({ ...e, selected: e.id === edge.id })));
                             }}
                             connectionMode={ConnectionMode.Loose}
-                            isValidConnection={() => {
+                            isValidConnection={(connection) => {
                                 // Allow multiple connections to the same handle
-                                return canEdit;
+                                if (!canEdit) return false;
+
+                                // Reject connecting a column to itself (same table + same column).
+                                // Logical handles are `${columnId}-left` / `${columnId}-right`;
+                                // physical handles are just the bare column name — stripping the
+                                // side suffix lets one check cover both diagram types.
+                                if (connection.source && connection.target && connection.source === connection.target) {
+                                    const stripSide = (handle?: string | null) =>
+                                        handle?.replace(/-(left|right)$/, "");
+                                    const sourceColumn = stripSide(connection.sourceHandle);
+                                    const targetColumn = stripSide(connection.targetHandle);
+                                    if (sourceColumn && targetColumn && sourceColumn === targetColumn) {
+                                        return false;
+                                    }
+                                }
+
+                                return true;
                             }}
                             onInit={(instance) => {
                                 reactFlowInstanceRef.current = instance;

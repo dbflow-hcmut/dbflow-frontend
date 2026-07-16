@@ -19,10 +19,12 @@ export const PROXY_PROJECT_DOCUMENTS = (id: string) => `${PROXY_PROJECT_DETAIL(i
 export const PROXY_PROJECT_DOCUMENT_PRESIGNED_UPLOAD = (id: string) => `${PROXY_PROJECT_DOCUMENTS(id)}/presigned-upload`;
 export const PROXY_PROJECT_DOCUMENT_DETAIL = (projectId: string, documentId: string) => `${PROXY_PROJECT_DOCUMENTS(projectId)}/${documentId}`;
 export const PROXY_PROJECT_DOCUMENT_DOWNLOAD_URL = (projectId: string, documentId: string) => `${PROXY_PROJECT_DOCUMENT_DETAIL(projectId, documentId)}/download-url`;
+export const PROXY_PROJECT_DOCUMENT_RETRY_INGEST = (projectId: string, documentId: string) => `${PROXY_PROJECT_DOCUMENT_DETAIL(projectId, documentId)}/retry-ingest`;
 export const PROXY_DELETE_SCHEMA = (projectId: string, schemaId: string) => `${PROXY_PROJECT_DETAIL(projectId)}/schemas/${schemaId}`;
 export const PROXY_UPDATE_SCHEMA = (projectId: string, schemaId: string) => `${PROXY_PROJECT_DETAIL(projectId)}/schemas/${schemaId}`;
 export const PROXY_SCHEMA_DIAGRAM = (schemaId: string) => `${PROXY_BASE}/schemas/${schemaId}/diagram`;
 export const PROXY_S3_AI_ATTACHMENT_PRESIGNED_UPLOAD = `${PROXY_BASE}/s3/presigned-ai-attachment`;
+export const PROXY_S3_AVATAR_PRESIGNED_UPLOAD = `${PROXY_BASE}/s3/presigned-avatar`;
 
 // LangGraph API endpoints
 export const LANGGRAPH_THREADS = `${LANGGRAPH_API_BASE}/threads`;
@@ -45,6 +47,12 @@ export const PROXY_SCHEMA_COMMENTS = (projectId: string, schemaId: string) => `$
 export const PROXY_SCHEMA_VERSIONS = (projectId: string, schemaId: string) => `${PROXY_BASE}/projects/${projectId}/schemas/${schemaId}/versions`;
 export const PROXY_SCHEMA_VERSION_DETAIL = (projectId: string, schemaId: string, versionId: string) => `${PROXY_SCHEMA_VERSIONS(projectId, schemaId)}/${versionId}`;
 
+// Schema sandbox (Query Generator / Seed Data Run target)
+export const PROXY_SCHEMA_SANDBOX = (projectId: string, schemaId: string) => `${PROXY_BASE}/projects/${projectId}/schemas/${schemaId}/sandbox`;
+export const PROXY_SCHEMA_SANDBOX_EXECUTE = (projectId: string, schemaId: string) => `${PROXY_SCHEMA_SANDBOX(projectId, schemaId)}/execute`;
+export const PROXY_SCHEMA_SANDBOX_RESET = (projectId: string, schemaId: string) => `${PROXY_SCHEMA_SANDBOX(projectId, schemaId)}/reset`;
+export const PROXY_SCHEMA_SANDBOX_STATUS = (projectId: string, schemaId: string) => `${PROXY_SCHEMA_SANDBOX(projectId, schemaId)}/status`;
+
 // Shared docs
 export const PROXY_SHARE_HTML = `${PROXY_BASE}/projects/shared-docs`;
 
@@ -57,6 +65,15 @@ export const PROXY_DB_CONNECTION_PLAIN_PARAMS = (connId: string) => `${PROXY_DB_
 export const PROXY_DB_CONNECTION_SCHEMAS = (connId: string) => `${PROXY_DB_CONNECTIONS}/${connId}/schemas`;
 export const PROXY_DB_CONNECTION_INTROSPECT = (connId: string) => `${PROXY_DB_CONNECTIONS}/${connId}/introspect`;
 export const PROXY_DB_CONNECTION_EXECUTE = (connId: string) => `${PROXY_DB_CONNECTIONS}/${connId}/execute`;
+export const PROXY_DB_CONNECTION_TEXT_TO_SQL = (connId: string) => `${PROXY_DB_CONNECTIONS}/${connId}/text-to-sql`;
 export const PROXY_PROJECT_DB_CONNECTIONS = (projectId: string) => `${PROXY_BASE}/projects/${projectId}/db-connections`;
 export const PROXY_PROJECT_DB_CONNECTION_LINK = (projectId: string) => `${PROXY_PROJECT_DB_CONNECTIONS(projectId)}/link`;
 export const PROXY_PROJECT_DB_CONNECTION_UNLINK = (projectId: string, connId: string) => `${PROXY_PROJECT_DB_CONNECTIONS(projectId)}/${connId}/unlink`;
+
+// DB Connection — permission check
+export const PROXY_DB_CONNECTION_PERMISSIONS = (connId: string) => `${PROXY_DB_CONNECTIONS}/${connId}/permissions`;
+
+// Export Records (per project)
+export const PROXY_PROJECT_EXPORT_RECORDS = (projectId: string) => `${PROXY_BASE}/projects/${projectId}/export-records`;
+export const PROXY_PROJECT_EXPORT_RECORD_DETAIL = (projectId: string, recordId: string) => `${PROXY_PROJECT_EXPORT_RECORDS(projectId)}/${recordId}`;
+export const PROXY_PROJECT_EXPORT_RECORD_ROLLBACK = (projectId: string, recordId: string) => `${PROXY_PROJECT_EXPORT_RECORD_DETAIL(projectId, recordId)}/rollback`;
