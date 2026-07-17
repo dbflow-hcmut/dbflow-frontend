@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo, useEffect, startTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Filter, Grid3x3, List, Plus, Calendar, Trash2, Database, FileCode2, PlugZap, ChevronDown } from "lucide-react";
+import { Search, Grid3x3, List, Plus, Calendar, Trash2, Database, FileCode2, PlugZap, ChevronDown } from "lucide-react";
 import { Input, Button, Avatar, Badge, Pagination, Skeleton, Modal, Dropdown } from "antd";
 import { formatDateTimeVN } from "@/utils/functions";
 import { useProjects, deleteProject } from "@/api/projects/client";
@@ -32,6 +32,7 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
     const currentPage = parseInt(searchParams.get("page") || "1", 10);
     const currentLimit = parseInt(searchParams.get("limit") || "9", 10);
     const serverKeyword = searchParams.get("keyword") || "";
+    const workspaceId = searchParams.get("workspaceId") || undefined;
 
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -71,7 +72,8 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
         currentPage,
         currentLimit,
         searchKeyword,
-        shouldFetchFromClient
+        shouldFetchFromClient,
+        workspaceId,
     );
 
     const apiProjects = useMemo(() => {
@@ -97,6 +99,9 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
         } else {
             params.delete("keyword");
         }
+        if (workspaceId) {
+            params.set("workspaceId", workspaceId);
+        }
         router.push(`/projects?${params.toString()}`);
     };
 
@@ -104,6 +109,7 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
         if (!apiProjects || !Array.isArray(apiProjects)) return [];
         return apiProjects.map((apiProject) => ({
             id: apiProject.id,
+            workspaceId: apiProject.workspaceId,
             name: apiProject.name,
             owner: apiProject.owner,
             createdAt: apiProject.createdAt,

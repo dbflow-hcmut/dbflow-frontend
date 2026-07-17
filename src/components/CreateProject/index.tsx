@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
-import { Form, Input, Button } from "antd";
+import React, { useEffect, useState } from "react";
+import { Form, Input, Button, Select } from "antd";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -11,18 +11,42 @@ import { revalidateProjects } from "@/app/projects/actions";
 import { notificationProvider } from "@/providers/notification";
 import { CreateProjectFormValues } from "@/types/projects.type";
 import { useCreateProject } from "./api/client";
+import { getWorkspaces, WorkspaceSummary } from "@/api/workspaces/client";
 
 export default function CreateProject() {
     const router = useRouter();
     const [form] = Form.useForm();
     const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+    const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+    const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState(true);
     const { create, isLoading } = useCreateProject();
     
     const projectName = Form.useWatch("name", form);
+    const selectedWorkspaceId = Form.useWatch("workspaceId", form);
+
+    useEffect(() => {
+        void getWorkspaces()
+            .then((items) => {
+                setWorkspaces(items);
+                const personal = items.find((item) => item.type === "personal");
+                const preferred = localStorage.getItem("active_workspace_id");
+                const selected =
+                    items.find((item) => item.id === preferred) ?? personal ?? items[0];
+                if (selected) form.setFieldValue("workspaceId", selected.id);
+            })
+            .catch(() => {
+                notificationProvider.open({
+                    type: "error",
+                    message: "Failed to load workspaces",
+                });
+            })
+            .finally(() => setIsLoadingWorkspaces(false));
+    }, [form]);
 
     const handleSubmit = async (values: CreateProjectFormValues) => {
         try {
             const result = await create({
+                workspaceId: values.workspaceId,
                 name: values.name,
                 description: values.description,
             });
@@ -92,6 +116,36 @@ export default function CreateProject() {
                             onFinish={handleSubmit}
                             autoComplete="off"
                         >
+                            <Form.Item
+                                label={null}
+                                name="workspaceId"
+                                rules={[{ required: true, message: "Select a workspace" }]}
+                            >
+                                <div className="flex flex-col sm:flex-row items-start gap-3 sm:gap-4 p-3 sm:p-6">
+                                    <div className="w-full sm:w-1/5 text-gray-900 font-semibold pt-0 sm:pt-2 text-sm">
+                                        Workspace
+                                    </div>
+                                    <div className="w-full sm:w-4/5">
+                                        <Select
+                                            className="w-full"
+                                            value={selectedWorkspaceId}
+                                            loading={isLoadingWorkspaces}
+                                            placeholder="Select workspace"
+                                            options={workspaces.map((workspace) => ({
+                                                value: workspace.id,
+                                                label: `${workspace.name} (${workspace.type})`,
+                                            }))}
+                                            onChange={(workspaceId) => {
+                                                form.setFieldValue("workspaceId", workspaceId);
+                                                localStorage.setItem("active_workspace_id", workspaceId);
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                            </Form.Item>
+
+                            <div className="border-t border-gray-200" />
+
                             <Form.Item
                                 label={null}
                                 name="name"

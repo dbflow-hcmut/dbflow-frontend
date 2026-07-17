@@ -13,11 +13,21 @@ import {
   User,
   LogOut,
   X,
+  Plus,
+  SlidersHorizontal,
+  CreditCard,
 } from "lucide-react";
-import { Avatar, Dropdown } from "antd";
+import { Avatar, Dropdown, Input, Modal, Select } from "antd";
 import classNames from "classnames";
 import { getUserMe } from "@/api/users/client";
 import type { UserResponse } from "@/types/user.type";
+import {
+  createTeamWorkspace,
+  getWorkspaces,
+  WorkspaceSummary,
+} from "@/api/workspaces/client";
+import { useRouter, useSearchParams } from "next/navigation";
+import { notificationProvider } from "@/providers/notification";
 
 interface NavItem {
   label: string;
@@ -43,6 +53,11 @@ const navItems: NavItem[] = [
     path: "/projects",
   },
   {
+    label: "Plans",
+    icon: <CreditCard className="h-5 w-5" />,
+    path: "/pricing",
+  },
+  {
     label: "Settings",
     icon: <Settings className="h-5 w-5" />,
     path: "/settings",
@@ -51,9 +66,16 @@ const navItems: NavItem[] = [
 
 export default function Sidebar({ mobileOpen = false, onMobileClose, mobile = false }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isLogoHovered, setIsLogoHovered] = useState(false);
   const [userData, setUserData] = useState<UserResponse | null>(null);
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>();
+  const [createTeamOpen, setCreateTeamOpen] = useState(false);
+  const [teamName, setTeamName] = useState("");
+  const [creatingTeam, setCreatingTeam] = useState(false);
 
   useEffect(() => {
     if (mobile && !mobileOpen) return;
@@ -78,6 +100,24 @@ export default function Sidebar({ mobileOpen = false, onMobileClose, mobile = fa
       }
     })();
   }, [mobile, mobileOpen]);
+
+  useEffect(() => {
+    if (mobile && !mobileOpen) return;
+    void getWorkspaces().then((items) => {
+      setWorkspaces(items);
+      const queryWorkspace = searchParams.get("workspaceId");
+      const storedWorkspace = localStorage.getItem("active_workspace_id");
+      const selected =
+        items.find((item) => item.id === queryWorkspace) ??
+        items.find((item) => item.id === storedWorkspace) ??
+        items.find((item) => item.type === "personal") ??
+        items[0];
+      if (selected) {
+        setActiveWorkspaceId(selected.id);
+        localStorage.setItem("active_workspace_id", selected.id);
+      }
+    });
+  }, [mobile, mobileOpen, searchParams]);
 
   const isActive = (path: string) => pathname === path || pathname.startsWith(path + "/");
   const showText = mobile || !isCollapsed;
@@ -181,6 +221,48 @@ export default function Sidebar({ mobileOpen = false, onMobileClose, mobile = fa
       </div>
 
       <nav className="flex flex-1 flex-col gap-1 px-2 py-4">
+        {showText && workspaces.length > 0 && (
+          <div className="mb-3 px-1">
+            <Select
+              className="w-full"
+              size="small"
+              value={activeWorkspaceId}
+              options={workspaces.map((workspace) => ({
+                value: workspace.id,
+                label: workspace.name,
+              }))}
+              onChange={(workspaceId) => {
+                setActiveWorkspaceId(workspaceId);
+                localStorage.setItem("active_workspace_id", workspaceId);
+                if (pathname.startsWith("/projects")) {
+                  const params = new URLSearchParams(searchParams.toString());
+                  params.set("workspaceId", workspaceId);
+                  params.set("page", "1");
+                  router.push(`/projects?${params.toString()}`);
+                }
+              }}
+            />
+            <div className="mt-2 flex gap-1">
+              <button
+                type="button"
+                className="flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs text-gray-600 hover:bg-gray-100"
+                onClick={() => setCreateTeamOpen(true)}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                New team
+              </button>
+              {activeWorkspaceId && (
+                <Link
+                  href={`/workspaces/${activeWorkspaceId}/settings`}
+                  className="flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs text-gray-600 hover:bg-gray-100"
+                >
+                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                  Manage
+                </Link>
+              )}
+            </div>
+          </div>
+        )}
         {navItems.map((item) => {
           const active = isActive(item.path);
           return (
@@ -238,6 +320,47 @@ export default function Sidebar({ mobileOpen = false, onMobileClose, mobile = fa
     </aside>
   );
 
+  const createTeamModal = (
+    <Modal
+      title="Create team workspace"
+      open={createTeamOpen}
+      okText="Create team"
+      confirmLoading={creatingTeam}
+      okButtonProps={{ disabled: teamName.trim().length < 2 }}
+      onCancel={() => {
+        setCreateTeamOpen(false);
+        setTeamName("");
+      }}
+      onOk={() => {
+        setCreatingTeam(true);
+        void createTeamWorkspace(teamName.trim())
+          .then((workspace) => {
+            setWorkspaces((current) => [...current, workspace]);
+            setActiveWorkspaceId(workspace.id);
+            localStorage.setItem("active_workspace_id", workspace.id);
+            setCreateTeamOpen(false);
+            setTeamName("");
+            router.push(`/workspaces/${workspace.id}/settings`);
+          })
+          .catch((error) => {
+            notificationProvider.open({
+              type: "error",
+              message: "Failed to create team",
+              description: error instanceof Error ? error.message : undefined,
+            });
+          })
+          .finally(() => setCreatingTeam(false));
+      }}
+    >
+      <Input
+        value={teamName}
+        maxLength={100}
+        placeholder="Team name"
+        onChange={(event) => setTeamName(event.target.value)}
+      />
+    </Modal>
+  );
+
   if (mobile) {
     return (
       <>
@@ -258,9 +381,15 @@ export default function Sidebar({ mobileOpen = false, onMobileClose, mobile = fa
         >
           {sidebar}
         </div>
+        {createTeamModal}
       </>
     );
   }
 
-  return <div className="relative h-full">{sidebar}</div>;
+  return (
+    <div className="relative h-full">
+      {sidebar}
+      {createTeamModal}
+    </div>
+  );
 }

@@ -80,8 +80,10 @@ export async function createDbConnection(
     return apiPost<DBConnection, typeof values>(PROXY_DB_CONNECTIONS, values);
 }
 
-export async function getMyDbConnections(): Promise<DBConnection[]> {
-    return apiGet<DBConnection[]>(PROXY_DB_CONNECTIONS);
+export async function getMyDbConnections(workspaceId?: string): Promise<DBConnection[]> {
+    const url = new URL(PROXY_DB_CONNECTIONS, window.location.origin);
+    if (workspaceId) url.searchParams.set("workspaceId", workspaceId);
+    return apiGet<DBConnection[]>(url.toString());
 }
 
 export async function getDbConnection(connId: string): Promise<DBConnection> {

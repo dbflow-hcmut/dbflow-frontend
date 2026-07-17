@@ -11,6 +11,34 @@ export const PROXY_USERS_ME = `${PROXY_USERS}/me`;
 export const PROXY_USERS_PROFILE = `${PROXY_USERS}/profile`;
 export const PROXY_USERS_CHANGE_PASSWORD = `${PROXY_USERS}/change-password`;
 
+export const PROXY_WORKSPACES = `${PROXY_BASE}/workspaces`;
+export const PROXY_WORKSPACE_DETAIL = (workspaceId: string) =>
+  `${PROXY_WORKSPACES}/${workspaceId}`;
+export const PROXY_WORKSPACE_MEMBERS = (workspaceId: string) =>
+  `${PROXY_WORKSPACE_DETAIL(workspaceId)}/members`;
+export const PROXY_WORKSPACE_INVITATIONS = (workspaceId: string) =>
+  `${PROXY_WORKSPACE_DETAIL(workspaceId)}/invitations`;
+export const PROXY_WORKSPACE_MEMBER_ROLE = (
+  workspaceId: string,
+  userId: string,
+) => `${PROXY_WORKSPACE_MEMBERS(workspaceId)}/${userId}/role`;
+export const PROXY_WORKSPACE_MEMBER = (workspaceId: string, userId: string) =>
+  `${PROXY_WORKSPACE_MEMBERS(workspaceId)}/${userId}`;
+export const PROXY_WORKSPACE_LEAVE = (workspaceId: string) =>
+  `${PROXY_WORKSPACE_DETAIL(workspaceId)}/leave`;
+export const PROXY_WORKSPACE_TRANSFER_OWNERSHIP = (workspaceId: string) =>
+  `${PROXY_WORKSPACE_DETAIL(workspaceId)}/transfer-ownership`;
+export const PROXY_ACCEPT_WORKSPACE_INVITATION = `${PROXY_BASE}/workspace-invitations/accept`;
+export const PROXY_PLANS = `${PROXY_BASE}/plans`;
+export const PROXY_WORKSPACE_SUBSCRIPTION = (workspaceId: string) =>
+  `${PROXY_WORKSPACE_DETAIL(workspaceId)}/subscription`;
+export const PROXY_WORKSPACE_ENTITLEMENTS = (workspaceId: string) =>
+  `${PROXY_WORKSPACE_DETAIL(workspaceId)}/entitlements`;
+export const PROXY_BILLING_CHECKOUT = `${PROXY_BASE}/billing/checkout`;
+export const PROXY_BILLING_ORDERS = (workspaceId: string) =>
+  `${PROXY_BASE}/billing/workspaces/${workspaceId}/orders`;
+export const PROXY_ADMIN = `${PROXY_BASE}/admin`;
+
 export const PROXY_PROJECTS = `${PROXY_BASE}/projects`;
 export const PROXY_PROJECT_DETAIL = (id: string) => `${PROXY_PROJECTS}/${id}`;
 export const PROXY_DELETE_PROJECT = (id: string) => `${PROXY_PROJECTS}/${id}`;
@@ -30,6 +58,12 @@ export const PROXY_S3_AVATAR_PRESIGNED_UPLOAD = `${PROXY_BASE}/s3/presigned-avat
 export const LANGGRAPH_THREADS = `${LANGGRAPH_API_BASE}/threads`;
 export const LANGGRAPH_STREAM = (threadId: string) => `${LANGGRAPH_API_BASE}/threads/${threadId}/runs/stream`;
 export const LANGGRAPH_CANCEL_RUN = (threadId: string, runId: string) => `${LANGGRAPH_API_BASE}/threads/${threadId}/runs/${runId}/cancel`;
+
+export const PROXY_AI_THREADS = `${PROXY_BASE}/ai-gateway/threads`;
+export const PROXY_AI_STREAM = (threadId: string) =>
+  `${PROXY_AI_THREADS}/${threadId}/runs/stream`;
+export const PROXY_AI_CANCEL_RUN = (threadId: string, runId: string) =>
+  `${PROXY_AI_THREADS}/${threadId}/runs/${runId}/cancel`;
 
 // Chat conversation API endpoints (proxied through backend)
 export const PROXY_SCHEMA_MODEL = (projectId: string, schemaId: string) => `${PROXY_BASE}/projects/${projectId}/schemas/${schemaId}/model`;

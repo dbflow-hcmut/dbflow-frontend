@@ -1,6 +1,7 @@
 import { SchemaType } from "@/utils/constants";
 
 export interface CreateProjectRequest {
+    workspaceId?: string;
     name: string;
     description?: string;
     skipDefaultSchema?: boolean;
@@ -8,6 +9,7 @@ export interface CreateProjectRequest {
 
 export interface ProjectResponse {
     id: string;
+    workspaceId: string;
     name: string;
     owner: {
         id: string;
@@ -30,6 +32,7 @@ export interface Owner {
 
 export interface Project {
     id: string;
+    workspaceId: string;
     name: string;
     owner: Owner;
     createdAt: string;
@@ -55,6 +58,7 @@ export interface ProjectsListProps {
 }
 
 export interface CreateProjectFormValues {
+    workspaceId: string;
     name: string;
     description?: string;
 }

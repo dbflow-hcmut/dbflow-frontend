@@ -8,10 +8,11 @@ interface ProjectsPageProps {
         page?: string;
         limit?: string;
         keyword?: string;
+        workspaceId?: string;
     }>;
 }
 
-async function fetchProjects(page: number = 1, limit: number = 9, keyword?: string) {
+async function fetchProjects(page: number = 1, limit: number = 9, keyword?: string, workspaceId?: string) {
     try {
         let url = PROXY_PROJECTS;
         const params = new URLSearchParams();
@@ -19,6 +20,9 @@ async function fetchProjects(page: number = 1, limit: number = 9, keyword?: stri
         params.set("limit", limit.toString());
         if (keyword) {
             params.set("keyword", keyword);
+        }
+        if (workspaceId) {
+            params.set("workspaceId", workspaceId);
         }
         url = `${url}?${params.toString()}`;
         
@@ -41,8 +45,9 @@ export default async function ProjectsPage({ searchParams }: ProjectsPageProps) 
     const page = parseInt(params.page || "1", 10);
     const limit = parseInt(params.limit || "9", 10);
     const keyword = params.keyword;
+    const workspaceId = params.workspaceId;
     
-    const result = await fetchProjects(page, limit, keyword);
+    const result = await fetchProjects(page, limit, keyword, workspaceId);
     return (
         <ProjectsList 
             initialProjects={result.items} 

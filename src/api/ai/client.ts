@@ -1,9 +1,9 @@
 "use client";
 
 import {
-  LANGGRAPH_THREADS,
-  LANGGRAPH_STREAM,
-  LANGGRAPH_CANCEL_RUN,
+  PROXY_AI_THREADS,
+  PROXY_AI_STREAM,
+  PROXY_AI_CANCEL_RUN,
   PROXY_S3_AI_ATTACHMENT_PRESIGNED_UPLOAD,
 } from "@/api";
 import { apiPost } from "@/lib/clientFetch";
@@ -106,6 +106,7 @@ export async function uploadAttachmentForAIRecord(
   file: File,
   attachmentId: string,
 ): Promise<{ key: string; uploadUrl: string; url: string } | null> {
+  void attachmentId;
   try {
     const data = await apiPost<
       { key: string; uploadUrl: string; url: string },
@@ -486,9 +487,10 @@ function tryParsePartialJson(partial: string): Record<string, unknown> | null {
  */
 export async function cancelRun(threadId: string, runId: string): Promise<void> {
   try {
-    await fetch(LANGGRAPH_CANCEL_RUN(threadId, runId), {
+    await fetch(PROXY_AI_CANCEL_RUN(threadId, runId), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
     });
   } catch (error) {
     console.warn("Failed to cancel run:", error);
@@ -541,7 +543,7 @@ export async function streamChatToLangGraph(
       }
     }
 
-    const url = LANGGRAPH_STREAM(threadId);
+    const url = PROXY_AI_STREAM(threadId);
     
     const requestBody: LangGraphStreamRequest = {
       assistant_id: assistantId,
@@ -567,6 +569,7 @@ export async function streamChatToLangGraph(
       },
       body: JSON.stringify(requestBody),
       signal: abortSignal,
+      credentials: "include",
     });
 
     if (!response.ok) {
@@ -723,7 +726,7 @@ export function generateThreadId(): string {
  * @param threadId - Optional thread ID, if not provided will be auto-generated
  */
 export async function createThread(threadId?: string): Promise<string> {
-  const response = await fetch(LANGGRAPH_THREADS, {
+  const response = await fetch(PROXY_AI_THREADS, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -731,6 +734,7 @@ export async function createThread(threadId?: string): Promise<string> {
     body: JSON.stringify({
       thread_id: threadId,
     }),
+    credentials: "include",
   });
 
   if (!response.ok) {

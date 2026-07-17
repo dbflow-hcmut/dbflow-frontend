@@ -11,6 +11,7 @@ export type SSHAuthType = "password" | "private_key";
 
 export interface DBConnection {
     id: string;
+    workspaceId: string;
     name: string;
     dbms: DBConnectionDBMS;
     method: DBConnectionMethod;
@@ -29,6 +30,7 @@ export interface DBConnection {
 }
 
 export interface DBConnectionFormValues {
+    workspaceId?: string;
     name: string;
     dbms: DBConnectionDBMS;
     method: DBConnectionMethod;
