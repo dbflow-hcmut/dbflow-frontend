@@ -5,13 +5,14 @@ import { Form, Input, Button, Select } from "antd";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Menu } from "lucide-react";
+import { ChevronDown, Menu } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import { revalidateProjects } from "@/app/projects/actions";
 import { notificationProvider } from "@/providers/notification";
 import { CreateProjectFormValues } from "@/types/projects.type";
 import { useCreateProject } from "./api/client";
 import { getWorkspaces, WorkspaceSummary } from "@/api/workspaces/client";
+import { getActiveWorkspaceId, setActiveWorkspaceId } from "@/utils/active-workspace";
 
 export default function CreateProject() {
     const router = useRouter();
@@ -29,7 +30,7 @@ export default function CreateProject() {
             .then((items) => {
                 setWorkspaces(items);
                 const personal = items.find((item) => item.type === "personal");
-                const preferred = localStorage.getItem("active_workspace_id");
+                const preferred = getActiveWorkspaceId();
                 const selected =
                     items.find((item) => item.id === preferred) ?? personal ?? items[0];
                 if (selected) form.setFieldValue("workspaceId", selected.id);
@@ -86,7 +87,7 @@ export default function CreateProject() {
                 </button>
                 <Link href="/ai-chat" prefetch className="flex cursor-pointer items-center gap-2">
                     <Image src="/favicon.ico" alt="DB Flow" width={24} height={24} priority />
-                    <span className="text-lg font-bold text-gray-900">DB Flow</span>
+                    <span className="text-lg font-bold text-primary-500">DB Flow</span>
                 </Link>
             </header>
             <Sidebar
@@ -95,10 +96,10 @@ export default function CreateProject() {
                 onMobileClose={() => setIsMobileSidebarOpen(false)}
             />
 
-            <div className="flex-1 pt-2 sm:pt-6 md:pt-10 justify-center items-center overflow-auto mx-auto w-full px-3 sm:px-6">
-                <div className="max-w-2xl mx-auto border border-gray-200 rounded-lg shadow-md w-full">
-                    <div className="p-3 sm:p-6 pb-3 sm:pb-4">
-                        <div className="text-base sm:text-lg font-semibold text-gray-900 mb-2">
+            <div className="mx-auto flex w-full flex-1 items-start justify-center overflow-auto px-3 pb-8 pt-6 sm:px-6 sm:pt-8 md:pt-10">
+                <div className="mx-auto w-full max-w-2xl rounded-[20px] bg-white p-5 sm:p-7">
+                    <div className="pb-5">
+                        <div className="mb-2 text-lg font-semibold text-gray-900 sm:text-xl">
                             Create a new project
                         </div>
                         <p className="text-gray-600 text-xs sm:text-sm leading-relaxed">
@@ -107,8 +108,6 @@ export default function CreateProject() {
                             final schema in your preferred DBMS format.
                         </p>
                     </div>
-
-                    <div className="border-t border-gray-200" />
 
                         <Form
                             form={form}
@@ -121,13 +120,14 @@ export default function CreateProject() {
                                 name="workspaceId"
                                 rules={[{ required: true, message: "Select a workspace" }]}
                             >
-                                <div className="flex flex-col sm:flex-row items-start gap-3 sm:gap-4 p-3 sm:p-6">
+                                <div className="flex flex-col items-start gap-3 py-3 sm:flex-row sm:gap-4">
                                     <div className="w-full sm:w-1/5 text-gray-900 font-semibold pt-0 sm:pt-2 text-sm">
                                         Workspace
                                     </div>
                                     <div className="w-full sm:w-4/5">
                                         <Select
-                                            className="w-full"
+                                            className="w-full [&_.ant-select-selector]:!h-11 [&_.ant-select-selector]:!rounded-xl [&_.ant-select-selector]:!border-0 [&_.ant-select-selector]:!bg-gray-100 [&_.ant-select-selector]:!px-4 [&_.ant-select-selector]:!shadow-none"
+                                            suffixIcon={<ChevronDown className="relative top-0.5 h-4 w-4 text-gray-400" />}
                                             value={selectedWorkspaceId}
                                             loading={isLoadingWorkspaces}
                                             placeholder="Select workspace"
@@ -137,14 +137,12 @@ export default function CreateProject() {
                                             }))}
                                             onChange={(workspaceId) => {
                                                 form.setFieldValue("workspaceId", workspaceId);
-                                                localStorage.setItem("active_workspace_id", workspaceId);
+                                                setActiveWorkspaceId(workspaceId);
                                             }}
                                         />
                                     </div>
                                 </div>
                             </Form.Item>
-
-                            <div className="border-t border-gray-200" />
 
                             <Form.Item
                                 label={null}
@@ -154,21 +152,18 @@ export default function CreateProject() {
                                     { max: 100, message: "" },
                                 ]}
                             >
-                                <div className="flex flex-col sm:flex-row items-start gap-3 sm:gap-4 p-3 sm:p-6">
+                                <div className="flex flex-col items-start gap-3 py-3 sm:flex-row sm:gap-4">
                                     <div className="w-full sm:w-1/5 text-gray-900 font-semibold pt-0 sm:pt-2 text-sm">
                                         Project Name
                                     </div>
                                     <div className="w-full sm:w-4/5">
                                         <Input
                                             placeholder="Enter project name"
-                                            className="!h-10"
+                                            className="!h-11 !rounded-xl !border-0 !bg-gray-100 !px-4 !shadow-none"
                                         />
                                     </div>
                                 </div>
                             </Form.Item>
-
-                            <div className="border-t border-gray-200" />
-
 
                             <Form.Item
                                 label={null}
@@ -177,7 +172,7 @@ export default function CreateProject() {
                                     { max: 500, message: "" },
                                 ]}
                             >
-                                <div className="flex flex-col sm:flex-row items-start gap-3 sm:gap-4 p-3 sm:p-6">
+                                <div className="flex flex-col items-start gap-3 py-3 sm:flex-row sm:gap-4">
                                     <div className="w-full sm:w-1/5 text-gray-900 font-semibold pt-0 sm:pt-2 text-sm">
                                         Description
                                     </div>
@@ -185,15 +180,16 @@ export default function CreateProject() {
                                         <Input.TextArea
                                             placeholder="Enter project description (optional)"
                                             rows={4}
+                                            className="!resize-none !rounded-xl !border-0 !bg-gray-100 !px-4 !py-3 !shadow-none"
                                         />
                                     </div>
                                 </div>
                             </Form.Item>
 
-                            <div className="flex flex-col sm:flex-row justify-end gap-3 p-3 sm:p-6 border-t border-gray-200">
+                            <div className="flex flex-col justify-end gap-3 pt-5 sm:flex-row">
                                 <Button 
                                     onClick={handleCancel}
-                                    className="!h-10 w-full sm:w-auto order-2 sm:order-1"
+                                    className="order-2 !h-10 w-full !rounded-xl !border-0 !bg-gray-100 !px-5 !shadow-none hover:!bg-gray-200 sm:order-1 sm:w-auto"
                                 >
                                     Cancel
                                 </Button>
@@ -202,7 +198,7 @@ export default function CreateProject() {
                                     htmlType="submit"
                                     loading={isLoading}
                                     disabled={isLoading || !projectName?.trim()}
-                                    className="!h-10 !font-medium w-full sm:w-auto order-1 sm:order-2"
+                                    className="order-1 !h-10 w-full !rounded-xl !border-0 !px-5 !font-medium !shadow-none sm:order-2 sm:w-auto"
                                 >
                                     Create new project
                                 </Button>

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { ChevronDown, Search, User, LayoutGrid, ChartArea, Settings, LogOut, FolderKanban, Sparkles } from "lucide-react";
+import { ChevronDown, Search, User, LayoutGrid, ChartArea, Settings, LogOut, FolderKanban, Sparkles, ShieldCheck } from "lucide-react";
 import { Input, Dropdown, Avatar, InputRef } from "antd";
 import Image from "next/image";
 import Link from "next/link";
@@ -309,14 +309,23 @@ export default function Header() {
 
             {/* Menu Items */}
             <div className="py-1 px-1">
-                <Link 
-                    href="/settings" 
-                    prefetch={true}
+                {userData?.role?.toLowerCase() === "admin" && (
+                    <Link
+                        href="/admin"
+                        className="flex items-center gap-2 px-4 py-2 hover:bg-gray-100! transition-colors text-gray-700! !text-gray-700 rounded-lg cursor-pointer"
+                    >
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>Admin Portal</span>
+                    </Link>
+                )}
+                <button
+                    type="button"
+                    onClick={() => window.dispatchEvent(new CustomEvent('dbflow:open-settings'))}
                     className="flex items-center gap-2 px-4 py-2 hover:bg-gray-100! transition-colors text-gray-700! rounded-lg cursor-pointer"
                 >
                     <Settings className="w-4 h-4" />
                     <span>Settings</span>
-                </Link>
+                </button>
                 
                 <div className="border-t border-gray-200 my-1"></div>
                 
@@ -399,4 +408,3 @@ export default function Header() {
         </header>
     );
 }
-

@@ -19,6 +19,7 @@ import {
 import { getUserMe } from "@/api/users/client";
 import {
   BillingOrder,
+  cancelBillingOrder,
   getBillingOrders,
   getWorkspaceEntitlements,
   WorkspaceEntitlements,
@@ -26,23 +27,22 @@ import {
 import { notificationProvider } from "@/providers/notification";
 import {
   Button,
-  Card,
   Form,
   Input,
   Modal,
   Select,
   Space,
-  Spin,
   Table,
   Tabs,
-  Tag,
   Progress,
 } from "antd";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { formatBytes } from "@/utils/functions";
+import LoadingIndicator from "@/components/LoadingIndicator";
 
-type Props = { workspaceId: string };
+type Props = { workspaceId: string; embedded?: boolean };
+type WorkspaceTab = "general" | "plan" | "orders" | "members" | "invitations";
 type InviteValues = {
   email: string;
   role: Exclude<WorkspaceRole, "owner">;
@@ -55,7 +55,22 @@ const ASSIGNABLE_ROLES: Exclude<WorkspaceRole, "owner">[] = [
   "viewer",
 ];
 
-export default function WorkspaceSettings({ workspaceId }: Props) {
+function StatusPill({ value }: { value: string }) {
+  const normalizedValue = value.toLowerCase();
+  const colorClass = ["active", "paid", "completed", "success"].includes(normalizedValue)
+    ? "bg-emerald-50 text-emerald-700"
+    : ["pending", "trialing", "processing"].includes(normalizedValue)
+      ? "bg-amber-50 text-amber-700"
+      : "bg-gray-100 text-gray-700";
+
+  return (
+    <span className={`inline-flex min-h-9 items-center rounded-xl px-3 text-[13px] font-semibold capitalize ${colorClass}`}>
+      {value}
+    </span>
+  );
+}
+
+export default function WorkspaceSettings({ workspaceId, embedded = false }: Props) {
   const router = useRouter();
   const [workspace, setWorkspace] = useState<WorkspaceSummary>();
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
@@ -65,6 +80,8 @@ export default function WorkspaceSettings({ workspaceId }: Props) {
   const [orders, setOrders] = useState<BillingOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [cancelingOrderId, setCancelingOrderId] = useState<string>();
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>("general");
   const [inviteOpen, setInviteOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [generalForm] = Form.useForm<{ name: string }>();
@@ -74,22 +91,17 @@ export default function WorkspaceSettings({ workspaceId }: Props) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [
-        workspaceData,
-        memberData,
-        invitationData,
-        user,
-        entitlementData,
-        orderData,
-      ] =
+      const [workspaceData, user, entitlementData, orderData] =
         await Promise.all([
           getWorkspace(workspaceId),
-          getWorkspaceMembers(workspaceId),
-          getWorkspaceInvitations(workspaceId).catch(() => []),
           getUserMe(),
           getWorkspaceEntitlements(workspaceId),
           getBillingOrders(workspaceId).catch(() => []),
         ]);
+      const memberData = await getWorkspaceMembers(workspaceId);
+      const invitationData = entitlementData.access.restricted
+        ? []
+        : await getWorkspaceInvitations(workspaceId).catch(() => []);
       setWorkspace(workspaceData);
       setMembers(memberData);
       setInvitations(invitationData);
@@ -112,9 +124,21 @@ export default function WorkspaceSettings({ workspaceId }: Props) {
     void load();
   }, [load]);
 
-  const canManage = ["owner", "admin"].includes(
+  const canManageWorkspace = ["owner", "admin"].includes(
     workspace?.currentUserRole ?? "",
   );
+  const canManageTeam =
+    canManageWorkspace && entitlements?.plan.features?.team_roles === true;
+  const canViewBilling = ["owner", "billing"].includes(
+    workspace?.currentUserRole ?? "",
+  );
+  useEffect(() => {
+    if (!canViewBilling && activeTab === "orders") setActiveTab("general");
+  }, [activeTab, canViewBilling]);
+  const showUpgrade =
+    entitlements &&
+    (entitlements.access.restricted ||
+      ["free", "team_free"].includes(entitlements.plan.code));
   const isOwner = workspace?.currentUserRole === "owner";
 
   const handleUpdateGeneral = async (values: { name: string }) => {
@@ -243,17 +267,18 @@ export default function WorkspaceSettings({ workspaceId }: Props) {
     label: string,
     used: number,
     limit: number | null | undefined,
-    suffix?: string,
+    formatValue: (value: number) => string = (value) => value.toLocaleString(),
   ) => (
-    <div>
-      <div className="mb-2 flex justify-between text-sm">
-        <span>{label}</span>
-        <span>
-          {used}/{limit ?? "Unlimited"}
-          {suffix ?? ""}
+    <div className="border-b border-gray-100 py-4">
+      <div className="mb-2 flex justify-between text-sm text-gray-700">
+        <span className="font-medium">{label}</span>
+        <span className="text-gray-500">
+          {formatValue(used)}/{limit != null ? formatValue(limit) : "Unlimited"}
         </span>
       </div>
       <Progress
+        size="small"
+        strokeColor="#42a5f5"
         percent={
           limit
             ? Math.min(100, Math.round((used / limit) * 100))
@@ -264,11 +289,7 @@ export default function WorkspaceSettings({ workspaceId }: Props) {
   );
 
   if (loading) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <Spin size="large" />
-      </div>
-    );
+    return <LoadingIndicator fullArea label="Loading workspace settings" />;
   }
 
   if (!workspace) return null;
@@ -288,16 +309,16 @@ export default function WorkspaceSettings({ workspaceId }: Props) {
       title: "Role",
       key: "role",
       render: (_: unknown, member: WorkspaceMember) =>
-        member.role === "owner" || !canManage ? (
-          <Tag>{member.role}</Tag>
+        member.role === "owner" || !canManageTeam ? (
+          <StatusPill value={member.role} />
         ) : (
           <Select
             size="small"
             value={member.role}
-            className="w-32"
+            className="!h-9 w-32 [&_.ant-select-arrow]:!translate-y-[1px] [&_.ant-select-selector]:!h-9 [&_.ant-select-selector]:!rounded-xl [&_.ant-select-selector]:!border-0 [&_.ant-select-selector]:!bg-gray-100 [&_.ant-select-selector]:!px-3 [&_.ant-select-selector]:!shadow-none [&_.ant-select-selection-item]:!flex [&_.ant-select-selection-item]:!items-center [&_.ant-select-selection-item]:!text-[13px] [&_.ant-select-selection-item]:!font-semibold"
             options={ASSIGNABLE_ROLES.map((role) => ({
               value: role,
-              label: role,
+              label: role.charAt(0).toUpperCase() + role.slice(1),
             }))}
             onChange={(role) => void handleRoleChange(member, role)}
           />
@@ -307,10 +328,14 @@ export default function WorkspaceSettings({ workspaceId }: Props) {
       title: "Actions",
       key: "actions",
       render: (_: unknown, member: WorkspaceMember) =>
-        canManage &&
+        canManageTeam &&
         member.role !== "owner" &&
         member.userId !== currentUserId ? (
-          <Button danger type="link" onClick={() => handleRemove(member)}>
+          <Button
+            danger
+            className="!h-9 !rounded-xl !border-0 !bg-red-50 !px-4 !text-[13px] !font-semibold !shadow-none hover:!bg-red-100"
+            onClick={() => handleRemove(member)}
+          >
             Remove
           </Button>
         ) : null,
@@ -318,85 +343,127 @@ export default function WorkspaceSettings({ workspaceId }: Props) {
   ];
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8">
+    <div className={embedded ? "w-full" : "mx-auto max-w-5xl px-4 py-8"}>
+      {entitlements?.access.restricted && (
+        <div className={`mb-6 rounded-lg px-4 py-3 text-sm ${entitlements.access.action === "revoke" ? "bg-rose-50 text-rose-900" : "bg-amber-50 text-amber-900"}`}>
+          <div className="font-semibold">
+            {entitlements.access.action === "revoke" ? "Subscription access revoked" : "Subscription paused — Free plan active"}
+          </div>
+          <div className="mt-1">{entitlements.access.message || (entitlements.access.action === "revoke" ? "Your paid subscription was revoked. Existing projects remain available under Free plan limits." : "Your paid subscription is paused. Existing projects remain available under Free plan limits.")}</div>
+        </div>
+      )}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">{workspace.name}</h1>
-        <p className="text-sm text-gray-500">
-          {workspace.type === "team" ? "Team workspace" : "Personal workspace"}
-        </p>
+        <h2 className="mb-8 !text-[15px] !font-semibold text-gray-950">Workspace</h2>
+        <p className="mt-2 text-sm font-medium text-gray-500">Manage workspace details, access, billing, and usage.</p>
       </div>
 
       <Tabs
+        activeKey={activeTab}
+        onChange={(key) => setActiveTab(key as WorkspaceTab)}
+        className="workspace-settings-tabs"
         items={[
           {
             key: "general",
             label: "General",
             children: (
-              <Card>
+              <div>
+                <div className="border-b border-gray-100 pb-5">
+                  <p className="mt-1 text-sm font-medium text-gray-500">Basic details about this workspace and your current access.</p>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="py-3">
+                      <div className="text-xs !font-semibold uppercase tracking-wide text-gray-500">Current plan</div>
+                      <div className="mt-2 font-medium text-gray-900">{entitlements?.plan.name ?? "Free"}</div>
+                      <p className="mt-1 text-xs leading-5 text-gray-500">
+                        {entitlements?.access.restricted ? "This workspace is currently using Free plan limits." : "Your current subscription and entitlements for this workspace."}
+                      </p>
+                    </div>
+                    <div className="py-3">
+                      <div className="text-xs !font-semibold  uppercase tracking-wide text-gray-500">Your role</div>
+                      <div className="mt-2 font-medium capitalize text-gray-900">{workspace.currentUserRole}</div>
+                      <p className="mt-1 text-xs leading-5 text-gray-500">
+                        {canManageWorkspace ? "You can update workspace details and manage access." : "Your access is managed by a workspace owner or admin."}
+                      </p>
+                    </div>
+                    <div className="py-3 sm:col-span-2 lg:col-span-1">
+                      <div className="text-xs !font-semibold  uppercase tracking-wide text-gray-500">Status</div>
+                      <div color={workspace.status === "active" ? "green" : "default"} className="mt-2 font-medium capitalize text-gray-900">{entitlements?.access.restricted ? "Free plan" : workspace.status}</div>
+                      <p className="mt-1 text-xs leading-5 text-gray-500">Active workspaces are available to all permitted members.</p>
+                    </div>
+                </div>
+                </div>
+
                 <Form
+                  className="[&_.ant-form-item-explain]:hidden"
+                  id="workspace-general-form"
                   form={generalForm}
-                  layout="vertical"
+                  layout="horizontal"
+                  labelAlign="left"
+                  colon={false}
+                  labelCol={{ flex: "auto" }}
+                  wrapperCol={{ flex: "0 0 320px" }}
                   onFinish={handleUpdateGeneral}
+                  onFinishFailed={({ errorFields }) => notificationProvider.open({
+                    type: "error",
+                    message: errorFields[0]?.errors[0] ?? "Please check the workspace information",
+                  })}
                 >
                   <Form.Item
+                    className="!mb-0 border-b border-gray-100 [&_.ant-form-item-row]:min-h-14 [&_.ant-form-item-row]:items-center"
                     name="name"
-                    label="Workspace name"
+                    label={<span className="text-sm font-medium text-gray-900">Workspace name</span>}
                     rules={[
-                      { required: true },
-                      { min: 2, max: 100 },
+                      { required: true, message: "Please enter a workspace name" },
+                      { min: 2, message: "Workspace name must be at least 2 characters" },
+                      { max: 100, message: "Workspace name cannot exceed 100 characters" },
                     ]}
                   >
-                    <Input disabled={!canManage} />
+                    <Input style={{ height: 32 }} className="!border-gray-200 !text-sm" disabled={!canManageWorkspace} />
                   </Form.Item>
-                  {canManage && (
-                    <Button type="primary" htmlType="submit" loading={saving}>
-                      Save changes
-                    </Button>
-                  )}
                 </Form>
 
-                {workspace.type === "team" && (
-                  <div className="mt-8 border-t border-gray-200 pt-6">
-                    <Space wrap>
+                <div className="mt-4 flex flex-wrap justify-end gap-2">
+                  {workspace.type === "team" && (
+                    <Space wrap size={8}>
                       {isOwner && (
-                        <Button onClick={() => setTransferOpen(true)}>
+                        <Button className="!h-8 !px-4 !text-xs !font-medium" onClick={() => setTransferOpen(true)}>
                           Transfer ownership
                         </Button>
                       )}
                       {!isOwner && (
-                        <Button danger onClick={handleLeave}>
+                        <Button className="!h-8 !px-4 !text-xs !font-medium" danger onClick={handleLeave}>
                           Leave workspace
                         </Button>
                       )}
                     </Space>
+                  )}
+                  {canManageTeam && (
+                    <Button form="workspace-general-form" className="!h-8 !px-4 !text-xs !font-medium" type="primary" htmlType="submit" loading={saving}>
+                      Save changes
+                    </Button>
+                  )}
+                  {showUpgrade && (
+                    <Button
+                      type="primary"
+                      className="!h-8 !px-4 !text-xs !font-semibold"
+                      onClick={() => router.push(`/pricing?workspaceId=${encodeURIComponent(workspaceId)}`)}
+                    >
+                      Upgrade this workspace
+                    </Button>
+                  )}
                   </div>
-                )}
-              </Card>
+              </div>
             ),
           },
           {
             key: "plan",
             label: "Plan & usage",
             children: (
-              <Card>
+              <div>
+                <div className="mb-6">
+                  <h2 className="!text-[15px] !font-semibold text-gray-900">Plan & usage</h2>
+                  <p className="mt-1 text-sm text-gray-500">Review your current plan and monitor workspace limits.</p>
+                </div>
                 <div className="grid gap-6 md:grid-cols-2">
-                  <div>
-                    <div className="text-sm text-gray-500">Current plan</div>
-                    <div className="mt-1 text-xl font-semibold text-gray-900">
-                      {entitlements?.plan.name ?? "Unknown"}
-                    </div>
-                    <Tag className="mt-2">
-                      {entitlements?.subscription.status ?? "unknown"}
-                    </Tag>
-                    <div className="mt-4">
-                      <Link
-                        href={`/pricing?workspaceId=${workspaceId}`}
-                        className="inline-flex rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                      >
-                        Upgrade plan
-                      </Link>
-                    </div>
-                  </div>
                   <div>
                     {renderUsage(
                       "Workspace seats",
@@ -428,7 +495,7 @@ export default function WorkspaceSettings({ workspaceId }: Props) {
                     "Document storage",
                     entitlements?.usage.documentStorage.used ?? 0,
                     entitlements?.usage.documentStorage.limit,
-                    " bytes",
+                    formatBytes,
                   )}
                   {renderUsage(
                     `Exports (${entitlements?.usage.exports.periodKey ?? "current month"})`,
@@ -436,66 +503,162 @@ export default function WorkspaceSettings({ workspaceId }: Props) {
                     entitlements?.usage.exports.limit,
                   )}
                   <div>
-                    <div className="text-sm text-gray-500">
-                      Schemas currently stored
+                    <div className="flex min-h-16 items-center justify-between gap-4 border-b border-gray-100 py-4">
+                      <div>
+                        <div className="text-sm font-medium text-gray-700">Schemas</div>
+                        <div className="mt-1 text-xs text-gray-500">
+                          {entitlements?.usage.schemas.used ?? 0} currently stored
+                        </div>
+                      </div>
+                      <div className="text-right text-sm text-gray-500">
+                        {entitlements?.usage.schemas.limitPerProject == null
+                          ? "Unlimited"
+                          : `${entitlements.usage.schemas.limitPerProject}`}
+                      </div>
                     </div>
-                    <div className="mt-1 text-lg font-medium text-gray-900">
-                      {entitlements?.usage.schemas.used ?? 0}
+                  </div>
+                  <div className="flex min-h-16 items-center justify-between gap-4 border-b border-gray-100 py-4">
+                    <div>
+                      <div className="text-sm font-medium text-gray-700">Schema versions</div>
+                      <div className="mt-1 text-xs text-gray-500">Version history retained for each schema</div>
                     </div>
-                    <div className="text-xs text-gray-500">
-                      Limit per project:{" "}
-                      {entitlements?.usage.schemas.limitPerProject ??
-                        "Unlimited"}
+                    <div className="text-right text-sm text-gray-500">
+                      {entitlements?.plan.limits.schema_versions_per_schema == null
+                        ? "Unlimited"
+                        : `${entitlements.plan.limits.schema_versions_per_schema.toLocaleString()}`}
                     </div>
                   </div>
                 </div>
-              </Card>
+              </div>
             ),
           },
           {
             key: "orders",
             label: `Billing history (${orders.length})`,
+            disabled: !canViewBilling,
             children: (
-              <Card>
+              <div>
                 <Table
                   rowKey="id"
                   dataSource={orders}
                   pagination={{ pageSize: 10 }}
+                  scroll={{ x: 1100, y: 420 }}
                   columns={[
-                    { title: "Order", dataIndex: "orderNumber" },
+                    {
+                      title: "Order",
+                      dataIndex: "orderNumber",
+                      width: 210,
+                    },
                     {
                       title: "Plan",
+                      width: 130,
                       render: (_: unknown, order: BillingOrder) =>
                         order.plan?.name ?? "-",
                     },
-                    { title: "Cycle", dataIndex: "billingCycle" },
+                    {
+                      title: "Billing period",
+                      width: 180,
+                      render: (_: unknown, order: BillingOrder) => {
+                        const periodDate =
+                          order.renewalPeriodStart ?? order.createdAt;
+                        return new Intl.DateTimeFormat("en-US", {
+                          month: "short",
+                          year: "numeric",
+                        }).format(new Date(periodDate));
+                      },
+                    },
+                    {
+                      title: "Cycle",
+                      dataIndex: "billingCycle",
+                      width: 110,
+                    },
                     {
                       title: "Amount",
+                      width: 140,
                       render: (_: unknown, order: BillingOrder) =>
                         `${Number(order.amount).toLocaleString("vi-VN")} ${order.currency}`,
                     },
                     {
                       title: "Status",
                       dataIndex: "status",
-                      render: (status: string) => <Tag>{status}</Tag>,
+                      width: 120,
+                      render: (status: string) => <StatusPill value={status} />,
                     },
                     {
                       title: "Action",
+                      width: 250,
+                      fixed: "right",
                       render: (_: unknown, order: BillingOrder) =>
-                        order.status === "pending" && order.checkoutUrl ? (
-                          <Button
-                            type="link"
-                            onClick={() => {
-                              window.location.href = order.checkoutUrl!;
-                            }}
-                          >
-                            Continue payment
-                          </Button>
+                        order.status === "pending" ? (
+                          <Space size={8}>
+                            {order.checkoutUrl ? (
+                              <Button
+                                className="!h-9 !rounded-xl !border-0 !bg-gray-100 !px-4 !text-[13px] !font-semibold !text-gray-800 !shadow-none hover:!bg-gray-200"
+                                onClick={() => {
+                                  window.open(
+                                    order.checkoutUrl!,
+                                    "_blank",
+                                    "noopener,noreferrer",
+                                  );
+                                }}
+                              >
+                                Continue payment
+                              </Button>
+                            ) : null}
+                            {order.subscriptionId ? (
+                              <Button
+                                danger
+                                className="!h-9 !rounded-xl !border-0 !bg-red-50 !px-4 !text-[13px] !font-semibold !text-red-600 !shadow-none hover:!bg-red-100"
+                                loading={cancelingOrderId === order.id}
+                                onClick={() => {
+                                  Modal.confirm({
+                                    title: "Cancel renewal bill?",
+                                    content:
+                                      "This workspace will not renew at the end of the current period.",
+                                    okText: "Cancel bill",
+                                    okButtonProps: { danger: true },
+                                    onOk: async () => {
+                                      setCancelingOrderId(order.id);
+                                      try {
+                                        await cancelBillingOrder(workspaceId, order.id);
+                                        setOrders((current) =>
+                                          current.map((item) =>
+                                            item.id === order.id
+                                              ? { ...item, status: "canceled", checkoutUrl: null }
+                                              : item,
+                                          ),
+                                        );
+                                        setEntitlements((current) =>
+                                          current
+                                            ? {
+                                                ...current,
+                                                subscription: {
+                                                  ...current.subscription,
+                                                  cancelAtPeriodEnd: true,
+                                                },
+                                              }
+                                            : current,
+                                        );
+                                        notificationProvider.open({
+                                          type: "success",
+                                          message: "Renewal bill canceled",
+                                        });
+                                      } finally {
+                                        setCancelingOrderId(undefined);
+                                      }
+                                    },
+                                  });
+                                }}
+                              >
+                                Cancel bill
+                              </Button>
+                            ) : null}
+                          </Space>
                         ) : null,
                     },
                   ]}
                 />
-              </Card>
+              </div>
             ),
           },
           {
@@ -503,30 +666,34 @@ export default function WorkspaceSettings({ workspaceId }: Props) {
             label: `Members (${members.length})`,
             disabled: workspace.type === "personal",
             children: (
-              <Card
-                extra={
-                  canManage ? (
-                    <Button type="primary" onClick={() => setInviteOpen(true)}>
+              <div>
+                {canManageTeam && (
+                  <div className="mb-4 flex justify-end">
+                    <Button
+                      type="primary"
+                      className="!h-9 !rounded-xl !border-0 !px-4 !text-[13px] !font-semibold !shadow-none"
+                      onClick={() => setInviteOpen(true)}
+                    >
                       Invite member
                     </Button>
-                  ) : null
-                }
-              >
+                  </div>
+                )}
                 <Table
+                  className="[&_.ant-table]:!overflow-hidden [&_.ant-table]:!rounded-2xl [&_.ant-table-thead>tr>th]:!border-b-0 [&_.ant-table-thead>tr>th]:!bg-gray-50 [&_.ant-table-thead>tr>th]:!text-xs [&_.ant-table-thead>tr>th]:!font-semibold [&_.ant-table-tbody>tr>td]:!py-4"
                   rowKey="userId"
                   dataSource={members}
                   columns={memberColumns}
                   pagination={false}
                 />
-              </Card>
+              </div>
             ),
           },
           {
             key: "invitations",
             label: `Invitations (${invitations.length})`,
-            disabled: workspace.type === "personal" || !canManage,
+            disabled: workspace.type === "personal" || !canManageTeam,
             children: (
-              <Card>
+              <div>
                 <Table
                   rowKey="id"
                   dataSource={invitations}
@@ -537,7 +704,7 @@ export default function WorkspaceSettings({ workspaceId }: Props) {
                     {
                       title: "Status",
                       dataIndex: "status",
-                      render: (status: string) => <Tag>{status}</Tag>,
+                      render: (status: string) => <StatusPill value={status} />,
                     },
                     {
                       title: "Actions",
@@ -559,7 +726,7 @@ export default function WorkspaceSettings({ workspaceId }: Props) {
                     },
                   ]}
                 />
-              </Card>
+              </div>
             ),
           },
         ]}

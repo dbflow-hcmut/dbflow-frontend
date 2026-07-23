@@ -7,6 +7,7 @@ import ReactFlow, { Node, Edge, ReactFlowProvider, Background, BackgroundVariant
 import { apiGet, apiPost } from "@/lib/clientFetch";
 import { PROXY_SCHEMA_VERSIONS, PROXY_SCHEMA_VERSION_DETAIL } from "@/api";
 import { notificationProvider } from "@/providers/notification";
+import { trackExportUsage } from "@/api/exports/client";
 import type { PhysicalModelPayload } from "../../utils/physical-model.builder";
 import { buildPhysicalModel } from "../../utils/physical-model.builder";
 import {
@@ -514,7 +515,14 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
         });
     }, []);
 
-    const handleDownload = useCallback((text: string, filename: string) => {
+    const handleDownload = useCallback(async (text: string, filename: string) => {
+        if (!projectId) return;
+        try {
+            await trackExportUsage(projectId, "sql");
+        } catch (error) {
+            notificationProvider.open({ type: "error", message: error instanceof Error ? error.message : "Unable to export SQL" });
+            return;
+        }
         const blob = new Blob([text], { type: "text/sql;charset=utf-8" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -522,7 +530,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
         a.download = filename;
         a.click();
         URL.revokeObjectURL(url);
-    }, []);
+    }, [projectId]);
 
     // ── Select options ───────────────────────────────────────────
 

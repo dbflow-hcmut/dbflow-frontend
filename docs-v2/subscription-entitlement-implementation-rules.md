@@ -5,7 +5,8 @@
 Đã implement plan/subscription theo workspace, seat entitlement và resource
 quota cho project, schema và DB connection.
 Quota document storage, export và schema version cũng đã được nối vào các
-write flow tương ứng.
+write flow tương ứng. Export usage dùng monthly usage counter riêng, không
+phụ thuộc vào export history.
 Chưa implement checkout, orders, payment provider hoặc webhook.
 
 Code chính:
@@ -53,6 +54,7 @@ Giá hiện tại chỉ là seed cho development/planning, chưa được nối 
 GET /plans
 GET /workspaces/:workspaceId/subscription
 GET /workspaces/:workspaceId/entitlements
+POST /projects/:projectId/export-records/usage
 ```
 
 Entitlement response hiện có plan, subscription và workspace seat usage.
@@ -80,6 +82,8 @@ used seats = active workspace members + pending invitations
 - Plan & usage tab hiển thị projects, DB connections và schema usage.
 - AI request counter và monthly limit cũng được hiển thị.
 - Document storage và monthly export usage được hiển thị.
+- Export usage lấy từ `usage_counters` với metric `exports_monthly` và period
+  UTC `YYYY-MM`. Xóa một export history record không làm giảm usage.
 
 ## 8. Resource quota
 
@@ -99,6 +103,12 @@ used seats = active workspace members + pending invitations
 
 - Limit `null` là unlimited.
 - Backend resolve workspace/membership trước quota check.
+- Client-side exports phải gọi endpoint export usage trước khi tạo file tải
+  xuống. Endpoint reserve rồi commit một usage event theo `operation_id`; nếu
+  quota đã hết thì backend trả `QUOTA_EXCEEDED` và frontend
+  không tiếp tục export.
+- Các loại client export đang được ghi nhận: PNG, SVG, PDF, JSON, SQL và HTML.
+  Apply-to-database được ghi nhận khi backend tạo export record thành công.
 
 ## 9. Limitations
 

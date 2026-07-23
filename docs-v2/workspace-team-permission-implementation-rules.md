@@ -22,7 +22,7 @@ Code chính:
 - `dbflow-frontend/src/components/Sidebar/index.tsx`
 - `dbflow-frontend/src/app/projects/page.tsx`
 - `dbflow-frontend/src/components/WorkspaceSettings/index.tsx`
-- `dbflow-frontend/src/app/workspaces/[workspaceId]/settings/page.tsx`
+- `dbflow-frontend/src/components/SettingsModal/index.tsx`
 
 ## 2. Data model hiện tại
 
@@ -75,6 +75,8 @@ Slug backfill dùng `personal-<user uuid>` để đảm bảo unique.
 2. Tạo `team` workspace.
 3. Tạo owner membership cho user trong cùng transaction.
 4. Nếu một bước lỗi, toàn bộ transaction rollback.
+5. Frontend persist team mới làm active workspace rồi mở Settings modal trực
+   tiếp ở tab Workspace. Không có route settings riêng theo workspace.
 
 ### Invite và accept
 
@@ -82,7 +84,9 @@ Slug backfill dùng `personal-<user uuid>` để đảm bảo unique.
 2. Service từ chối nếu user đã là member hoặc pending invite còn hiệu lực.
 3. Tạo secure random token, lưu hash và gửi raw token qua email.
 4. User đăng nhập và accept bằng token.
-5. Backend lock invitation, kiểm tra status, expiry, email và workspace status.
+5. Backend lock riêng row invitation (không join relation trong câu `FOR
+   UPDATE`), sau đó tải workspace để kiểm tra status. Cách tách query tránh
+   PostgreSQL áp dụng row lock lên nullable side của outer join.
 6. Tạo membership và chuyển invitation sang accepted trong cùng transaction.
 
 ### Transfer ownership
@@ -116,18 +120,41 @@ Slug backfill dùng `personal-<user uuid>` để đảm bảo unique.
   `localStorage.active_workspace_id`.
 - Trên Projects route, đổi workspace cập nhật query `workspaceId` và reset page
   về 1.
+- Khi mở `/projects` bằng URL chưa có `workspaceId` (bao gồm refresh URL cũ),
+  client khôi phục workspace hợp lệ đã lưu, ghi nó vào query và tải lại danh
+  sách theo workspace đó. Link Projects trong sidebar cũng luôn giữ active
+  workspace trong query.
 - Server Projects page forward `workspaceId` xuống backend để render đúng list.
 - Create Project mặc định dùng active workspace; nếu chưa có thì ưu tiên
   personal workspace.
+- Client create-project dùng một entry point chung: nếu caller (AI chat, import
+  DDL hoặc DB introspection) không truyền `workspaceId`, request tự lấy
+  `localStorage.active_workspace_id`. Backend vẫn quyết định fallback và kiểm
+  tra membership nếu client không có preference hợp lệ.
 - Active workspace trong localStorage chỉ là UI preference. Backend luôn kiểm
   tra membership lại.
+- Khi mở project trực tiếp, frontend đồng bộ active workspace thành
+  `project.workspaceId`. Billing/quota của project-scoped operation vẫn do
+  backend resolve từ project, không tin UI preference.
 
 ### Workspace management UI
 
-- Sidebar cho phép tạo Team và mở trang Manage của active workspace.
+- Settings được mount thành modal toàn cục trong AppShell và chỉ xuất hiện trong
+  account popup khi người dùng click avatar. Entry Settings phát event
+  `dbflow:open-settings`; không có mục Settings trong navigation chính và không
+  còn route `/settings`.
+- Modal dùng navigation Profile, Security và Workspace ở cột trái; nội dung
+  workspace tiếp tục dùng active workspace hiện tại.
+- Workspace settings điều khiển tab con bằng state (`activeKey`); các thao tác
+  reload data như invite, đổi role, remove hoặc revoke không được reset người
+  dùng về tab General.
+- Sidebar cho phép tạo Team; workspace mới vẫn mở trang quản lý workspace cụ
+  thể sau khi tạo thành công.
 - General tab sửa workspace name theo permission backend.
 - Members tab hỗ trợ invite, đổi role và remove member.
 - Invitations tab list/revoke pending invitations.
+- Billing history tab chỉ mở cho workspace role `owner` hoặc `billing`; các role
+  khác bị disable ngay trên UI và backend vẫn kiểm tra permission.
 - Owner có transfer ownership; non-owner member có leave action.
 - UI ẩn action không phù hợp theo `currentUserRole`, nhưng backend vẫn là nguồn
   authorization cuối cùng.

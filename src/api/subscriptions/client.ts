@@ -4,9 +4,9 @@ import {
   PROXY_WORKSPACE_SUBSCRIPTION,
   PROXY_BILLING_CHECKOUT,
   PROXY_BILLING_ORDERS,
+  PROXY_CANCEL_BILLING_ORDER,
 } from "@/api";
-import { apiGet } from "@/lib/clientFetch";
-import { apiPost } from "@/lib/clientFetch";
+import { apiGet, apiPatch, apiPost } from "@/lib/clientFetch";
 
 export interface Plan {
   id: string;
@@ -23,6 +23,8 @@ export interface Plan {
   includedSeats: number;
   limits: Record<string, number | null>;
   features: Record<string, boolean>;
+  isActive?: boolean;
+  displayOrder?: number;
 }
 
 export interface Subscription {
@@ -40,6 +42,12 @@ export interface Subscription {
 export interface WorkspaceEntitlements {
   subscription: Subscription;
   plan: Plan;
+  access: {
+    suspended: boolean;
+    restricted: boolean;
+    action: string | null;
+    message: string | null;
+  };
   usage: {
     workspaceSeats: {
       active: number;
@@ -80,13 +88,18 @@ export interface WorkspaceEntitlements {
 export interface BillingOrder {
   id: string;
   orderNumber: string;
-  workspaceId: string;
+  workspaceId: string | null;
+  workspaceName?: string | null;
   billingCycle: "monthly" | "yearly";
   quantity: number;
   amount: string;
   currency: string;
   status: "pending" | "paid" | "failed" | "canceled" | "expired";
   checkoutUrl?: string | null;
+  subscriptionId?: string | null;
+  renewalPeriodStart?: string | null;
+  renewalPeriodEnd?: string | null;
+  expiresAt?: string | null;
   createdAt: string;
   plan?: Plan;
 }
@@ -106,7 +119,8 @@ export function getWorkspaceEntitlements(workspaceId: string) {
 }
 
 export function createPayOSCheckout(values: {
-  workspaceId: string;
+  workspaceId?: string;
+  workspaceName?: string;
   planCode: string;
   billingCycle: "monthly" | "yearly";
   quantity: number;
@@ -116,4 +130,11 @@ export function createPayOSCheckout(values: {
 
 export function getBillingOrders(workspaceId: string) {
   return apiGet<BillingOrder[]>(PROXY_BILLING_ORDERS(workspaceId));
+}
+
+export function cancelBillingOrder(workspaceId: string, orderId: string) {
+  return apiPatch<BillingOrder, Record<string, never>>(
+    PROXY_CANCEL_BILLING_ORDER(workspaceId, orderId),
+    {},
+  );
 }

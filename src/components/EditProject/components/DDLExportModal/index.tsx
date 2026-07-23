@@ -7,12 +7,14 @@ import { generateDDL, DEFAULT_DDL_OPTIONS } from "../../utils/ddl-generator";
 import type { DDLOptions, DDLResult } from "../../utils/ddl-generator";
 import type { PhysicalModelPayload } from "../../utils/physical-model.builder";
 import type { DBMSType } from "../../utils/dbms-config";
+import { trackExportUsage } from "@/api/exports/client";
 
 interface DDLExportModalProps {
     isOpen: boolean;
     onClose: () => void;
     model: PhysicalModelPayload | null;
     diagramName: string;
+    projectId: string | null;
 }
 
 const DBMS_OPTIONS: { label: string; value: DBMSType }[] = [
@@ -26,6 +28,7 @@ const DDLExportModal: React.FC<DDLExportModalProps> = ({
     onClose,
     model,
     diagramName,
+    projectId,
 }) => {
     const [options, setOptions] = useState<DDLOptions>(DEFAULT_DDL_OPTIONS);
 
@@ -52,8 +55,14 @@ const DDLExportModal: React.FC<DDLExportModalProps> = ({
         });
     }, [result?.sql]);
 
-    const handleDownload = useCallback(() => {
-        if (!result?.sql) return;
+    const handleDownload = useCallback(async () => {
+        if (!result?.sql || !projectId) return;
+        try {
+            await trackExportUsage(projectId, "sql");
+        } catch (error) {
+            notificationProvider.open({ type: "error", message: error instanceof Error ? error.message : "Unable to export SQL" });
+            return;
+        }
         const blob = new Blob([result.sql], { type: "text/sql;charset=utf-8" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -61,7 +70,7 @@ const DDLExportModal: React.FC<DDLExportModalProps> = ({
         a.download = `${diagramName || "schema"}.sql`;
         a.click();
         URL.revokeObjectURL(url);
-    }, [result?.sql, diagramName]);
+    }, [result?.sql, diagramName, projectId]);
 
     const tableCount = model?.tables?.length ?? 0;
     const fkCount = result?.statements.filter((s) => s.type === "ALTER_TABLE_FK").length ?? 0;

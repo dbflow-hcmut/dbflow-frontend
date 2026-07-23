@@ -226,11 +226,12 @@ export const DBFLOW_ASSISTANT_ID = process.env.NEXT_PUBLIC_DBFLOW_ASSISTANT_ID |
 
 export interface LangGraphStreamRequest {
   assistant_id: string;
-  input: {
+    input: {
     messages: ChatMessage[];
     current_level?: string;
     input_model?: Record<string, unknown> | null;
     project_id?: string;
+    workspace_id?: string;
     input_intent?: string;
   };
   config?: {
@@ -561,6 +562,16 @@ export async function streamChatToLangGraph(
       },
       stream_mode: ["messages"],
     };
+
+    if (!projectId) {
+      const activeWorkspaceId =
+        typeof window !== "undefined"
+          ? localStorage.getItem("active_workspace_id")
+          : null;
+      if (activeWorkspaceId) {
+        requestBody.input.workspace_id = activeWorkspaceId;
+      }
+    }
 
     const response = await fetch(url, {
       method: "POST",

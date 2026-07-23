@@ -9,6 +9,7 @@ import type { HTMLDocsOptions, HTMLDocsResult } from "../../utils/html-docs-gene
 import type { PhysicalModelPayload } from "../../utils/physical-model.builder";
 import type { LogicalModelPayload } from "../../utils/logical-model.builder";
 import type { ConceptualModelPayload } from "../../utils/conceptual-model.builder";
+import { trackExportUsage } from "@/api/exports/client";
 
 type SchemaModel = PhysicalModelPayload | LogicalModelPayload | ConceptualModelPayload;
 type SchemaKind = "physical" | "logical" | "conceptual";
@@ -19,6 +20,7 @@ interface HTMLDocsExportModalProps {
     model: SchemaModel | null;
     schemaKind: SchemaKind;
     diagramName: string;
+    projectId: string | null;
 }
 
 const HTMLDocsExportModal: React.FC<HTMLDocsExportModalProps> = ({
@@ -27,6 +29,7 @@ const HTMLDocsExportModal: React.FC<HTMLDocsExportModalProps> = ({
     model,
     schemaKind,
     diagramName,
+    projectId,
 }) => {
     const [options, setOptions] = useState<HTMLDocsOptions>(DEFAULT_HTML_DOCS_OPTIONS);
     const [sharing, setSharing] = useState(false);
@@ -77,9 +80,15 @@ const HTMLDocsExportModal: React.FC<HTMLDocsExportModalProps> = ({
         });
     }, [getCurrentHtml]);
 
-    const handleDownload = useCallback(() => {
+    const handleDownload = useCallback(async () => {
         const html = getCurrentHtml();
-        if (!html) return;
+        if (!html || !projectId) return;
+        try {
+            await trackExportUsage(projectId, "html");
+        } catch (error) {
+            notificationProvider.open({ type: "error", message: error instanceof Error ? error.message : "Unable to export HTML" });
+            return;
+        }
         const blob = new Blob([html], { type: "text/html;charset=utf-8" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -87,7 +96,7 @@ const HTMLDocsExportModal: React.FC<HTMLDocsExportModalProps> = ({
         a.download = `${diagramName || "schema"}-docs.html`;
         a.click();
         URL.revokeObjectURL(url);
-    }, [getCurrentHtml, diagramName]);
+    }, [getCurrentHtml, diagramName, projectId]);
 
     const handlePreviewInBrowser = useCallback(() => {
         const html = getCurrentHtml();

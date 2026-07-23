@@ -2,8 +2,8 @@
 
 import React, { useState, useMemo, useEffect, startTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Grid3x3, List, Plus, Calendar, Trash2, Database, FileCode2, PlugZap, ChevronDown } from "lucide-react";
-import { Input, Button, Avatar, Badge, Pagination, Skeleton, Modal, Dropdown } from "antd";
+import { Search, Grid3x3, List, Plus, Calendar, Trash2, Database, FileCode2, PlugZap, ChevronDown, MoreVertical } from "lucide-react";
+import { Input, Button, Avatar, Pagination, Skeleton, Modal, Dropdown } from "antd";
 import { formatDateTimeVN } from "@/utils/functions";
 import { useProjects, deleteProject } from "@/api/projects/client";
 import { getUserMe } from "@/api/users/client";
@@ -14,6 +14,7 @@ import ImportDDLModal from "@/components/ImportDDLModal";
 import DBConnectionModal from "../DBConnectionModal";
 import IntrospectSchemaModal from "@/components/IntrospectSchemaModal";
 import type { DBConnection } from "@/types/db-connection.type";
+import { getActiveWorkspaceId } from "@/utils/active-workspace";
 
 
 export default function ProjectsList({ initialProjects = [], initialPagination }: ProjectsListProps) {
@@ -32,7 +33,24 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
     const currentPage = parseInt(searchParams.get("page") || "1", 10);
     const currentLimit = parseInt(searchParams.get("limit") || "9", 10);
     const serverKeyword = searchParams.get("keyword") || "";
-    const workspaceId = searchParams.get("workspaceId") || undefined;
+    const queryWorkspaceId = searchParams.get("workspaceId") || undefined;
+    const [workspaceId, setWorkspaceId] = useState(queryWorkspaceId);
+
+    useEffect(() => {
+        if (queryWorkspaceId) {
+            setWorkspaceId(queryWorkspaceId);
+            return;
+        }
+
+        const storedWorkspaceId = getActiveWorkspaceId();
+        if (!storedWorkspaceId) return;
+
+        setWorkspaceId(storedWorkspaceId);
+        const params = new URLSearchParams(searchParams.toString());
+        params.set("workspaceId", storedWorkspaceId);
+        params.set("page", "1");
+        router.replace(`/projects?${params.toString()}`);
+    }, [queryWorkspaceId, router, searchParams]);
 
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -59,6 +77,7 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
     }, [debouncedSearch]);
 
     const shouldFetchFromClient = useMemo(() => {
+        if (workspaceId && workspaceId !== queryWorkspaceId) return true;
         if (searchKeyword && searchKeyword !== serverKeyword) return true;
         if (initialPagination) {
             if (currentPage !== initialPagination.page || currentLimit !== initialPagination.limit) {
@@ -66,7 +85,7 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
             }
         }
         return false;
-    }, [searchKeyword, serverKeyword, currentPage, currentLimit, initialPagination]);
+    }, [workspaceId, queryWorkspaceId, searchKeyword, serverKeyword, currentPage, currentLimit, initialPagination]);
 
     const { data: projectsData, isLoading } = useProjects(
         currentPage,
@@ -173,27 +192,27 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                         prefix={<Search className="w-4 h-4 text-gray-400" />}
                         value={searchValue}
                         onChange={(e) => setSearchValue(e.target.value)}
-                        className="w-full lg:max-w-md"
+                        className="w-full !rounded-xl !border-0 !bg-gray-100 !shadow-none lg:max-w-md"
                         allowClear
                     />
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex shrink-0 items-center border border-gray-200 rounded-lg overflow-hidden">
+                    <div className="flex shrink-0 items-center overflow-hidden rounded-xl bg-gray-100 p-1">
                         <button
                             onClick={() => setViewMode("grid")}
-                            className={`p-2 cursor-pointer ${viewMode === "grid"
-                                ? "bg-gray-100 text-gray-900"
-                                : "text-gray-500 hover:bg-gray-50"
+                            className={`cursor-pointer rounded-lg p-2 ${viewMode === "grid"
+                                ? "bg-white text-gray-900"
+                                : "text-gray-500 hover:bg-white/70"
                                 }`}
                         >
                             <Grid3x3 className="w-4 h-4" />
                         </button>
                         <button
                             onClick={() => setViewMode("list")}
-                            className={`p-2 border-l border-gray-200 cursor-pointer ${viewMode === "list"
-                                ? "bg-gray-100 text-gray-900"
-                                : "text-gray-500 hover:bg-gray-50"
+                            className={`cursor-pointer rounded-lg p-2 ${viewMode === "list"
+                                ? "bg-white text-gray-900"
+                                : "text-gray-500 hover:bg-white/70"
                                 }`}
                         >
                             <List className="w-4 h-4" />
@@ -243,7 +262,7 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                     >
                         <Button
                             icon={<Database className="w-4 h-4" />}
-                            className="flex min-w-0 cursor-pointer items-center gap-1"
+                            className="flex min-w-0 cursor-pointer items-center gap-1 !rounded-xl !border-0 !bg-gray-100 !shadow-none hover:!bg-gray-200"
                         >
                             <span className="hidden sm:inline">Connect to Database</span>
                             <span className="sm:hidden">Connect</span>
@@ -255,7 +274,7 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                         type="primary"
                         icon={<Plus className="w-4 h-4" />}
                         onClick={() => router.push("/projects/new")}
-                        className="cursor-pointer"
+                        className="cursor-pointer !rounded-xl !border-0 !shadow-none"
                     >
                         <span className="hidden sm:inline">New project</span>
                         <span className="sm:hidden">New</span>
@@ -286,16 +305,16 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                 viewMode === "grid" ? (
                     <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
                         {[1, 2, 3, 4, 5, 6].map((i) => (
-                            <div key={i} className="bg-white rounded-lg border border-gray-200 p-6">
+                            <div key={i} className="rounded-xl bg-gray-100 p-6">
                                 <Skeleton active paragraph={{ rows: 3 }} />
                             </div>
                         ))}
                     </div>
                 ) : (
-                    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                    <div className="overflow-hidden rounded-xl bg-white">
                         <div className="overflow-x-auto">
                             <table className="min-w-max w-full">
-                                <thead className="bg-gray-50 border-b border-gray-200">
+                                <thead className="bg-gray-50">
                                     <tr>
                                         <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
                                             PROJECT
@@ -314,7 +333,7 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                                         </th>
                                     </tr>
                                 </thead>
-                                <tbody className="bg-white divide-y divide-gray-200">
+                                <tbody className="divide-y divide-gray-100 bg-white">
                                     {[1, 2, 3, 4, 5, 6].map((i) => (
                                         <tr key={i}>
                                             <td className="px-6 py-4">
@@ -351,32 +370,35 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                         <div
                             key={project.id}
                             onClick={() => handleProjectClick(project.id)}
-                            className="bg-white border border-gray-200 rounded-lg p-6 cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all relative"
+                            className="relative flex cursor-pointer flex-col rounded-xl bg-gray-100 p-5 transition-colors hover:bg-gray-200/70"
                         >
-                            <div className="flex items-start justify-between mb-4">
-                                <h3 className="text-lg font-semibold text-gray-900 flex-1 pr-2">
+                            <div className="flex min-h-[52px] items-start justify-between gap-3">
+                                <h3 className="line-clamp-2 min-w-0 flex-1 break-words text-lg font-semibold leading-[26px] text-gray-900">
                                     {project.name}
                                 </h3>
-                                <div className="flex items-center gap-2">
-                                    <Badge
-                                        status={project.status === "active" ? "success" : "default"}
-                                        text={project.status === "active" ? "Active" : "Archived"}
-                                        className="text-xs"
-                                    />
-                                    <Button
-                                        type="text"
-                                        size="small"
-                                        danger
-                                        icon={<Trash2 className="w-4 h-4" />}
-                                        loading={deletingProjectId === project.id}
-                                        onClick={(e) => handleDeleteClick(e, project.id, project.name)}
-                                        className="flex items-center justify-center"
-                                        title={isOwner(project) ? "Delete project" : "Leave project"}
-                                    />
+                                <div className="flex shrink-0 items-center gap-2">
+                                    <Dropdown
+                                        trigger={["click"]}
+                                        placement="bottomRight"
+                                        menu={{
+                                            items: [{ key: "delete", danger: true, icon: <Trash2 className="h-4 w-4" />, label: "Delete" }],
+                                            onClick: ({ domEvent }) => handleDeleteClick(domEvent as React.MouseEvent, project.id, project.name),
+                                        }}
+                                    >
+                                        <Button
+                                            type="text"
+                                            size="small"
+                                            aria-label="Project actions"
+                                            icon={<MoreVertical className="h-5 w-5" />}
+                                            loading={deletingProjectId === project.id}
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="flex items-center justify-center text-gray-500"
+                                        />
+                                    </Dropdown>
                                 </div>
                             </div>
 
-                            <div className="flex items-center gap-3 mb-4">
+                            <div className="mt-4 flex items-center gap-3">
                                 <Avatar src={project.owner.avatar} size="small" />
                                 <div className="flex-1 min-w-0">
                                     <div className="text-sm font-medium text-gray-900 truncate">
@@ -388,7 +410,7 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                                 </div>
                             </div>
 
-                            <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
+                            <div className="mt-4 flex items-center gap-2 text-xs text-gray-500">
                                 <Calendar className="w-3 h-3" />
                                 <span>Updated {new Date(project.updatedAt).toLocaleDateString()}</span>
                             </div>
@@ -396,10 +418,10 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                     ))}
                 </div>
             ) : (
-                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <div className="overflow-hidden rounded-xl bg-white">
                     <div className="overflow-x-auto">
                         <table className="min-w-max w-full">
-                            <thead className="bg-gray-50 border-b border-gray-200">
+                            <thead className="bg-gray-50">
                                 <tr>
                                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
                                         PROJECT
@@ -422,7 +444,7 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                                 </tr>
                             </thead>
 
-                            <tbody className="bg-white divide-y divide-gray-200">
+                            <tbody className="divide-y divide-gray-100 bg-white">
                                 {projects.map((project) => (
                                     <tr
                                         key={project.id}
@@ -462,16 +484,24 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                                         </td>
 
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            <Button
-                                                type="text"
-                                                size="small"
-                                                danger
-                                                icon={<Trash2 className="w-4 h-4" />}
-                                                loading={deletingProjectId === project.id}
-                                                onClick={(e) => handleDeleteClick(e, project.id, project.name)}
-                                                className="flex items-center justify-center"
-                                                title={isOwner(project) ? "Delete project" : "Leave project"}
-                                            />
+                                            <Dropdown
+                                                trigger={["click"]}
+                                                placement="bottomRight"
+                                                menu={{
+                                                    items: [{ key: "delete", danger: true, icon: <Trash2 className="h-4 w-4" />, label: "Delete" }],
+                                                    onClick: ({ domEvent }) => handleDeleteClick(domEvent as React.MouseEvent, project.id, project.name),
+                                                }}
+                                            >
+                                                <Button
+                                                    type="text"
+                                                    size="small"
+                                                    aria-label="Project actions"
+                                                    icon={<MoreVertical className="h-5 w-5" />}
+                                                    loading={deletingProjectId === project.id}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    className="flex items-center justify-center text-gray-500"
+                                                />
+                                            </Dropdown>
                                         </td>
                                     </tr>
                                 ))}

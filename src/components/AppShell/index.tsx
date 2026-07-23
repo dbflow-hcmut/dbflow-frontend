@@ -9,15 +9,35 @@ import { Menu } from "lucide-react";
 import SplashScreen from "@/components/SplashScreen";
 import Sidebar from "@/components/Sidebar";
 import { shouldShowLayout } from "@/utils/functions";
+import { SettingsModal } from "@/components/SettingsModal";
 
 export default function AppShell({ children }: PropsWithChildren): React.JSX.Element {
   const { resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'profile' | 'security' | 'workspace'>('profile');
   const pathname = usePathname();
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    const openSettings = (event: Event) => {
+      const requestedTab = (event as CustomEvent<{ tab?: 'profile' | 'security' | 'workspace' }>).detail?.tab;
+      setSettingsInitialTab(requestedTab ?? 'profile');
+      setSettingsOpen(true);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSettingsOpen(false);
+    };
+    window.addEventListener("dbflow:open-settings", openSettings);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("dbflow:open-settings", openSettings);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
   }, []);
 
   if (!mounted || !resolvedTheme) {
@@ -59,6 +79,7 @@ export default function AppShell({ children }: PropsWithChildren): React.JSX.Ele
           {children}
         </main>
       </div>
+      {settingsOpen && <SettingsModal initialTab={settingsInitialTab} onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

@@ -7,6 +7,7 @@ export type UserResponse = {
     phone: string;
     bio: string;
     avatar: string;
+    role?: string;
 };
 
 export type UpdateProfileDto = {

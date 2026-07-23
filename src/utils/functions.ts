@@ -19,6 +19,14 @@ export function formatDateTimeVN(input: string | number | Date): string {
     }).format(new Date(input));
   }
 
+export function formatBytes(bytes: number | null | undefined): string {
+    if (bytes == null) return "Unlimited";
+    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(bytes % 1024 ** 3 === 0 ? 0 : 1)} GB`;
+    if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(bytes % 1024 ** 2 === 0 ? 0 : 1)} MB`;
+    if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${bytes} B`;
+  }
+
 export const getToken = async () => {
   try {
       const response = await fetch('/api/auth/token', {

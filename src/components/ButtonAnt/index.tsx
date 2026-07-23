@@ -8,7 +8,7 @@ const ButtonAnt = (props: ButtonProps) => {
 
   return (
     <Button
-      className={classNames('!py-3 !h-auto !text-base !font-medium', className)}
+      className={classNames(className, '!py-3 !h-auto !text-base !font-medium')}
       {...rest}
     />
   );

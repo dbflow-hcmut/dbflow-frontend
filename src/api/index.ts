@@ -3,6 +3,7 @@ export const FE_BASE = process.env.NEXT_PUBLIC_APP_URL;
 export const LANGGRAPH_API_BASE = process.env.NEXT_PUBLIC_LANGGRAPH_API;
 
 export const API_LOGIN = `${API_BASE}/auth/login`;
+export const API_REGISTER = `${API_BASE}/auth/register`;
 
 export const PROXY_BASE = `${FE_BASE}/api/proxy`;
 
@@ -37,6 +38,10 @@ export const PROXY_WORKSPACE_ENTITLEMENTS = (workspaceId: string) =>
 export const PROXY_BILLING_CHECKOUT = `${PROXY_BASE}/billing/checkout`;
 export const PROXY_BILLING_ORDERS = (workspaceId: string) =>
   `${PROXY_BASE}/billing/workspaces/${workspaceId}/orders`;
+export const PROXY_CANCEL_BILLING_ORDER = (
+  workspaceId: string,
+  orderId: string,
+) => `${PROXY_BILLING_ORDERS(workspaceId)}/${orderId}/cancel`;
 export const PROXY_ADMIN = `${PROXY_BASE}/admin`;
 
 export const PROXY_PROJECTS = `${PROXY_BASE}/projects`;
@@ -109,5 +114,6 @@ export const PROXY_DB_CONNECTION_PERMISSIONS = (connId: string) => `${PROXY_DB_C
 
 // Export Records (per project)
 export const PROXY_PROJECT_EXPORT_RECORDS = (projectId: string) => `${PROXY_BASE}/projects/${projectId}/export-records`;
+export const PROXY_PROJECT_EXPORT_USAGE = (projectId: string) => `${PROXY_PROJECT_EXPORT_RECORDS(projectId)}/usage`;
 export const PROXY_PROJECT_EXPORT_RECORD_DETAIL = (projectId: string, recordId: string) => `${PROXY_PROJECT_EXPORT_RECORDS(projectId)}/${recordId}`;
 export const PROXY_PROJECT_EXPORT_RECORD_ROLLBACK = (projectId: string, recordId: string) => `${PROXY_PROJECT_EXPORT_RECORD_DETAIL(projectId, recordId)}/rollback`;

@@ -11,7 +11,6 @@ import { useState } from "react";
 import { notificationProvider } from "@/providers/notification";
 import { signIn } from "next-auth/react";
 import Image from "next/image";
-import { API_BASE } from "@/api";
 
 interface SignUpFormValues {
     fullName: string;
@@ -30,13 +29,14 @@ export default function SignUpPage() {
     const handleSignUp = async (values: SignUpFormValues) => {
         setLoading(true);
         try {
-            // Register on backend
-            const registerRes = await fetch(`${API_BASE}/auth/register`, {
+            // Register through the same-origin Next.js BFF to avoid browser CORS.
+            const registerRes = await fetch('/api/auth/register', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'accept': 'application/json',
                 },
+                credentials: 'include',
                 body: JSON.stringify({
                     fullName: values.fullName,
                     email: values.email,
@@ -58,7 +58,7 @@ export default function SignUpPage() {
             }
 
             // Auto login after registration
-            const callbackUrl = searchParams.get('callbackUrl') || '/projects';
+            const callbackUrl = searchParams.get('callbackUrl') || '/';
             const loginRes = await fetch('/api/auth/login', {
                 method: 'POST',
                 headers: {
@@ -107,7 +107,7 @@ export default function SignUpPage() {
     const handleGoogleSignUp = async () => {
         setGoogleLoading(true);
         try {
-            const callbackUrl = searchParams.get('callbackUrl') || '/ai-chat';
+            const callbackUrl = searchParams.get('callbackUrl') || '/';
             await signIn('google', { callbackUrl });
         } catch (error) {
             console.error('Google sign up error:', error);
@@ -120,14 +120,14 @@ export default function SignUpPage() {
     };
 
     return (
-        <div className="h-screen flex flex-col bg-bg-light justify-center items-center px-4 sm:px-0">
-            <div className='w-full sm:w-[545px]'>
-                <div className="flex justify-between items-center pb-8">
+        <div className="min-h-dvh w-full overflow-y-auto bg-[#f4f4f5] px-4 py-8 sm:py-10">
+            <div className='mx-auto w-full sm:w-[545px]'>
+                <div className="flex items-center justify-between px-2 pb-7">
                     <LogoHeader size="large" />
-                    <CloseOutlined className="text-lg !text-gray-600 cursor-pointer" onClick={() => router.back()} />
+                    <button type="button" aria-label="Back to home" className="grid size-10 cursor-pointer place-items-center rounded-full border-0 bg-white text-gray-500 transition hover:-translate-y-0.5 hover:text-gray-900" onClick={() => router.push('/')}><CloseOutlined /></button>
                 </div>
-                <div className="bg-white border rounded-lg p-6 w-full border-gray-200">
-                    <div className="text-2xl font-medium pb-6">Create your account</div>
+                <div className="w-full rounded-[20px] bg-white p-6 sm:p-7">
+                    <div className="pb-6 text-2xl font-medium tracking-[-0.025em]">Create your account</div>
                     <Form
                         form={form}
                         onFinish={handleSignUp}
@@ -141,7 +141,7 @@ export default function SignUpPage() {
                                 { required: true, message: "Please enter your name!" },
                             ]}
                         >
-                            <InputAnt placeholder="John Doe" className="w-full text-sm" />
+                            <InputAnt placeholder="John Doe" className="w-full rounded-xl !border-gray-200 bg-gray-50 text-sm hover:!border-gray-300 focus:!bg-white" />
                         </Form.Item>
 
                         <div className="mb-1">Email</div>
@@ -152,7 +152,7 @@ export default function SignUpPage() {
                                 { type: "email", message: "Please enter a valid email!" }
                             ]}
                         >
-                            <InputAnt placeholder="name@work-email.com" className="w-full text-sm" />
+                            <InputAnt placeholder="name@work-email.com" className="w-full rounded-xl !border-gray-200 bg-gray-50 text-sm hover:!border-gray-300 focus:!bg-white" />
                         </Form.Item>
 
                         <div className="mb-1">Password</div>
@@ -163,7 +163,7 @@ export default function SignUpPage() {
                                 { min: 6, message: "Password must be at least 6 characters!" }
                             ]}
                         >
-                            <PassAnt type="password" placeholder="password" className="w-full text-sm" />
+                            <PassAnt type="password" placeholder="password" className="w-full rounded-xl !border-gray-200 bg-gray-50 text-sm hover:!border-gray-300 focus:!bg-white" />
                         </Form.Item>
 
                         <div className="mb-1">Confirm Password</div>
@@ -182,14 +182,14 @@ export default function SignUpPage() {
                                 }),
                             ]}
                         >
-                            <PassAnt type="password" placeholder="confirm password" className="w-full text-sm" />
+                            <PassAnt type="password" placeholder="confirm password" className="w-full rounded-xl !border-gray-200 bg-gray-50 text-sm hover:!border-gray-300 focus:!bg-white" />
                         </Form.Item>
 
                         <Form.Item>
                             <ButtonAnt 
                                 type="primary" 
                                 htmlType="submit" 
-                                className="w-full"
+                                className="w-full !rounded-xl !border-0"
                                 loading={loading}
                             >
                                 Sign up with Email
@@ -197,15 +197,15 @@ export default function SignUpPage() {
                         </Form.Item>
 
                         <div className="flex items-center gap-4">
-                            <div className="flex-1 h-px bg-gray-300" />
+                            <div className="h-px flex-1 bg-gray-200" />
                             <div className="text-gray-500 text-sm font-medium">OR</div>
-                            <div className="flex-1 h-px bg-gray-300" />
+                            <div className="h-px flex-1 bg-gray-200" />
                         </div>
 
                         <div className="pt-4">
                             <ButtonAnt 
                                 type="default" 
-                                className="w-full"
+                                className="w-full !rounded-xl !border-0 !bg-gray-100 !shadow-none hover:!bg-gray-200"
                                 onClick={handleGoogleSignUp}
                                 loading={googleLoading}
                             >
