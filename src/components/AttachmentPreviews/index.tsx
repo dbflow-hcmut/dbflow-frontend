@@ -2,7 +2,7 @@
 
 import React from "react";
 import { Image as AntImage } from "antd";
-import { X as XIcon, Loader2 } from "lucide-react";
+import { X as XIcon } from "lucide-react";
 import type { Attachment } from "@/api/ai/client";
 
 interface AttachmentPreviewsProps {
@@ -132,7 +132,7 @@ export function AttachmentPreviews({
               />
               {a.uploading && (
                 <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                  <Loader2 size={16} className="text-white animate-spin" />
+                  <span className="text-[10px] font-medium text-white">Uploading</span>
                 </div>
               )}
               {!readonly && !a.uploading && (
@@ -169,9 +169,7 @@ export function AttachmentPreviews({
               <p className="text-xs font-medium text-gray-800 truncate leading-tight">{a.name}</p>
               <div className="flex items-center gap-1 mt-0.5">
                 {a.uploading ? (
-                  <span className="text-[10px] text-gray-400 flex items-center gap-0.5">
-                    <Loader2 size={10} className="animate-spin" /> uploading…
-                  </span>
+                  <span className="text-[10px] text-gray-400">uploading…</span>
                 ) : (
                   <>
                     <FileTypeLabel fileType={a.fileType} />

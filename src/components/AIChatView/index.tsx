@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { ArrowUp, Loader2, RefreshCw, Square, Plus } from "lucide-react";
+import { ArrowUp, RefreshCw, Square, Plus } from "lucide-react";
 import { Input, Tooltip } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
 import { usePathname, useRouter } from "next/navigation";
@@ -489,6 +489,10 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
 
           const project = await createProject({
             name: `AI: ${projectName}`,
+            workspaceId:
+              typeof window !== "undefined"
+                ? localStorage.getItem("active_workspace_id") ?? undefined
+                : undefined,
             skipDefaultSchema: true,
           });
           if (!project) throw new Error("Failed to create project");
@@ -751,7 +755,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
             </div>
 
             <div>
-              <div className="rounded-[26px] border border-gray-200 bg-white p-2 transition-colors focus-within:border-gray-300">
+              <div className="rounded-[26px] border border-gray-100 bg-white p-2 transition-colors focus-within:border-gray-200">
                 {attachments.length > 0 && (
                   <div className="px-2 pt-2 pb-2">
                     <AttachmentPreviews attachments={attachments} onRemove={removeAttachment} />
@@ -810,20 +814,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
           <div className="flex-1 overflow-y-auto">
             <div className="max-w-3xl mx-auto px-4 py-6">
               {isLoadingHistory ? (
-                <div className="flex flex-col gap-6 py-4">
-                  <div className="flex justify-end">
-                    <div className="w-[60%] h-12 bg-gray-200 rounded-2xl rounded-tr-sm animate-pulse" />
-                  </div>
-                  <div className="flex justify-start">
-                    <div className="w-[75%] h-20 bg-gray-100 rounded-2xl rounded-tl-sm animate-pulse" />
-                  </div>
-                  <div className="flex justify-end">
-                    <div className="w-[50%] h-10 bg-gray-200 rounded-2xl rounded-tr-sm animate-pulse" />
-                  </div>
-                  <div className="flex justify-start">
-                    <div className="w-[70%] h-16 bg-gray-100 rounded-2xl rounded-tl-sm animate-pulse" />
-                  </div>
-                </div>
+                <div className="min-h-[240px]" />
               ) : (
               <>
               {messages.map((message, index) => {
@@ -911,17 +902,6 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
                   <div className="flex justify-start">
                     <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-5 py-3">
                       <div className="flex items-center gap-2">
-                        <div className="flex gap-1">
-                          <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></span>
-                          <span
-                            className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                            style={{ animationDelay: "0.2s" }}
-                          ></span>
-                          <span
-                            className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                            style={{ animationDelay: "0.4s" }}
-                          ></span>
-                        </div>
                         <span className="text-sm text-gray-500">Thinking...</span>
                       </div>
                     </div>
@@ -929,7 +909,6 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
 
                   {reasoningInfo && (
                     <div className="flex items-center gap-2 mt-2 ml-1">
-                      <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-pulse"></span>
                       <span className="text-xs text-gray-400 italic">
                         {reasoningInfo.reasoning || "Analyzing your request..."}
                       </span>
@@ -943,7 +922,6 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
                   <div className="flex justify-start">
                     <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-5 py-3">
                       <div className="flex items-center gap-2">
-                        <Loader2 className="w-4 h-4 text-primary-500 animate-spin" />
                         <span className="text-sm text-gray-500">Generating schema...</span>
                       </div>
                     </div>
@@ -956,7 +934,6 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
                   <div className="flex justify-start">
                     <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-5 py-3">
                       <div className="flex items-center gap-2">
-                        <Loader2 className="w-4 h-4 text-primary-500 animate-spin" />
                         <span className="text-sm text-gray-500">Creating project and opening editor...</span>
                       </div>
                     </div>
@@ -973,7 +950,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
           <div>
             <div className="max-w-3xl mx-auto px-4 py-4">
               <div>
-                <div className="rounded-[26px] border border-gray-200 bg-white p-2 transition-colors focus-within:border-gray-300">
+                <div className="rounded-[26px] border border-gray-100 bg-white p-2 transition-colors focus-within:border-gray-200">
                   {attachments.length > 0 && (
                     <div className="px-2 pt-2 pb-2">
                       <AttachmentPreviews attachments={attachments} onRemove={removeAttachment} />

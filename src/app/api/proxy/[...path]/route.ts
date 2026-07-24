@@ -60,11 +60,24 @@ async function forward(req: NextRequest) {
     return NextResponse.redirect(new URL(`/not-found`, req.nextUrl.origin));
   }
 
+  const contentType =
+    beRes.headers.get("content-type") || "application/json";
+  if (contentType.includes("text/event-stream") && beRes.body) {
+    return new NextResponse(beRes.body, {
+      status: beRes.status,
+      headers: {
+        "content-type": contentType,
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+      },
+    });
+  }
+
   const responseBody = await beRes.text();
   return new NextResponse(responseBody, {
     status: beRes.status,
     headers: {
-      "content-type": beRes.headers.get("content-type") || "application/json",
+      "content-type": contentType,
     },
   });
 }
@@ -74,5 +87,4 @@ export const POST = forward;
 export const PUT = forward;
 export const PATCH = forward;
 export const DELETE = forward;
-
 

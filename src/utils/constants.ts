@@ -9,6 +9,7 @@ export const ROUTES_WITH_LAYOUT = [
     "/projects",
     "/usage",
     "/settings",
+    "/workspaces",
 ];
 
 // Routes that should only match exactly (no sub-route matching)

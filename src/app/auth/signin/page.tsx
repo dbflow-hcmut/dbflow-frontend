@@ -27,7 +27,7 @@ export default function SignInPage() {
     const handleSignIn = async (values: SignInFormValues) => {
         setLoading(true);
         try {
-            const callbackUrl = searchParams.get('callbackUrl') || '/projects';
+            const callbackUrl = searchParams.get('callbackUrl') || '/';
             // Call proxy login to set access_token on FE domain
             const beRes = await fetch('/api/auth/login', {
                 method: 'POST',
@@ -73,7 +73,7 @@ export default function SignInPage() {
     const handleGoogleLogin = async () => {
         setGoogleLoading(true);
         try {
-            const callbackUrl = searchParams.get('callbackUrl') || '/ai-chat';
+            const callbackUrl = searchParams.get('callbackUrl') || '/';
             await signIn('google', { callbackUrl });
         } catch (error) {
             console.error('Google login error:', error);
@@ -86,14 +86,14 @@ export default function SignInPage() {
     };
 
     return (
-        <div className="h-screen flex flex-col bg-bg-light justify-center items-center px-4 sm:px-0">
+        <div className="flex min-h-dvh flex-col items-center justify-center bg-[#f4f4f5] px-4 py-8 sm:px-0">
             <div className='w-full sm:w-[545px]'>
-                <div className="flex justify-between items-center pb-8">
+                <div className="flex items-center justify-between px-2 pb-7">
                     <LogoHeader size="large" />
-                    <CloseOutlined className="text-lg !text-gray-600 cursor-pointer" onClick={() => router.back()} />
+                    <button type="button" aria-label="Back to home" className="grid size-10 cursor-pointer place-items-center rounded-full border-0 bg-white text-gray-500 transition hover:-translate-y-0.5 hover:text-gray-900" onClick={() => router.push('/')}><CloseOutlined /></button>
                 </div>
-                <div className="bg-white border rounded-lg p-6 w-full border-gray-200">
-                    <div className="text-2xl font-medium pb-6">Login to your account</div>
+                <div className="w-full rounded-[20px] bg-white p-6 sm:p-7">
+                    <div className="pb-6 text-2xl font-medium tracking-[-0.025em]">Login to your account</div>
                     <Form
                         form={form}
                         onFinish={handleSignIn}
@@ -108,7 +108,7 @@ export default function SignInPage() {
                                 { type: "email", message: "Please enter a valid email!" }
                             ]}
                         >
-                            <InputAnt placeholder="name@work-email.com" className="w-full text-sm" />
+                            <InputAnt placeholder="name@work-email.com" className="w-full rounded-xl !border-gray-200 bg-gray-50 text-sm hover:!border-gray-300 focus:!bg-white" />
                         </Form.Item>
 
                         <div className="flex justify-between items-center mb-1">
@@ -122,14 +122,14 @@ export default function SignInPage() {
                                 { min: 6, message: "Password must be at least 6 characters!" }
                             ]}
                         >
-                            <PassAnt type="password" placeholder="password" className="w-full text-sm" />
+                            <PassAnt type="password" placeholder="password" className="w-full rounded-xl !border-gray-200 bg-gray-50 text-sm hover:!border-gray-300 focus:!bg-white" />
                         </Form.Item>
 
                         <Form.Item>
                             <ButtonAnt 
                                 type="primary" 
                                 htmlType="submit" 
-                                className="w-full"
+                                className="w-full !rounded-xl !border-0"
                                 loading={loading}
                             >
                                 Sign in with Email
@@ -137,15 +137,15 @@ export default function SignInPage() {
                         </Form.Item>
 
                         <div className="flex items-center gap-4">
-                            <div className="flex-1 h-px bg-gray-300" />
+                            <div className="h-px flex-1 bg-gray-200" />
                             <div className="text-gray-500 text-sm font-medium">OR</div>
-                            <div className="flex-1 h-px bg-gray-300" />
+                            <div className="h-px flex-1 bg-gray-200" />
                         </div>
 
                         <div className="pt-4">
                             <ButtonAnt 
                                 type="default" 
-                                className="w-full"
+                                className="w-full !rounded-xl !border-0 !bg-gray-100 !shadow-none hover:!bg-gray-200"
                                 onClick={handleGoogleLogin}
                                 loading={googleLoading}
                             >

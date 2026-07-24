@@ -105,6 +105,8 @@ import {
 } from "./utils/conceptual-diagram.builder";
 import type { StoredDiagramNode as StoredConceptualNode, StoredDiagramEdge as StoredConceptualEdge } from "./utils/conceptual-diagram.builder";
 import { runConceptualLinter, runLogicalLinter, runPhysicalLinter } from "./utils/schema-linter";
+import { trackExportUsage } from "@/api/exports/client";
+import { setActiveWorkspaceId } from "@/utils/active-workspace";
 import type { LintResult } from "./utils/schema-linter";
 import LinterPanel from "./components/LinterPanel";
 import NormalizationPanel from "./components/NormalizationPanel";
@@ -158,6 +160,12 @@ const EditProject = (props: IPropsEditProject) => {
     const [edges, setEdgesState, onEdgesChange] = useEdgesState(initialEdges);
     const isDiagramReadyRef = useRef(false);
     const [interactionMode, setInteractionMode] = useState<'default' | 'panning'>('default');
+
+    useEffect(() => {
+        if (projectData?.workspaceId) {
+            setActiveWorkspaceId(projectData.workspaceId);
+        }
+    }, [projectData?.workspaceId]);
 
     // Wrapper setNodes và setEdges - chỉ cập nhật state, không lưu history ngay
     // History sẽ được lưu bởi useEffect khi state thay đổi
@@ -2539,10 +2547,20 @@ const EditProject = (props: IPropsEditProject) => {
         setIsExportModalOpen(true);
     }, [nodes]);
 
-    const executeExport = useCallback((settings: ExportSettings) => {
+    const executeExport = useCallback(async (settings: ExportSettings) => {
         const { format, scope, transparent, backgroundColor, quality } = settings;
         const instance = reactFlowInstanceRef.current;
-        if (!instance) return;
+        if (!instance || !projectData?.id) return;
+
+        try {
+            await trackExportUsage(projectData.id, format);
+        } catch (error) {
+            notificationProvider.open({
+                type: "error",
+                message: error instanceof Error ? error.message : "Unable to export diagram",
+            });
+            return;
+        }
 
         const nodesToExport = scope === 'selected' ? nodes.filter(n => n.selected) : nodes;
         const nodesBounds = getNodesBounds(nodesToExport);
@@ -2665,9 +2683,19 @@ const EditProject = (props: IPropsEditProject) => {
                     notificationProvider.open({ type: "error", message: 'Failed to export diagram.' });
                 });
         }
-    }, [nodes, edges, diagramName]);
+    }, [nodes, edges, diagramName, projectData?.id]);
 
-    const handleExportJson = useCallback(() => {
+    const handleExportJson = useCallback(async () => {
+        if (!projectData?.id) return;
+        try {
+            await trackExportUsage(projectData.id, "json");
+        } catch (error) {
+            notificationProvider.open({
+                type: "error",
+                message: error instanceof Error ? error.message : "Unable to export JSON",
+            });
+            return;
+        }
         const data = {
             nodes,
             edges,
@@ -2681,7 +2709,7 @@ const EditProject = (props: IPropsEditProject) => {
         a.download = `${diagramName}.json`;
         a.click();
         URL.revokeObjectURL(url);
-    }, [nodes, edges, diagramName]);
+    }, [nodes, edges, diagramName, projectData?.id]);
 
     // Show loading state when redirecting to accept invite page
     if (isRedirecting) {
@@ -2766,6 +2794,7 @@ const EditProject = (props: IPropsEditProject) => {
                     onClose={() => setIsDDLExportOpen(false)}
                     model={_physicalModelData}
                     diagramName={diagramName}
+                    projectId={projectData?.id ?? null}
                 />
                 <DbFlowController
                     flow="apply-schema"
@@ -2816,6 +2845,7 @@ const EditProject = (props: IPropsEditProject) => {
                         : "physical"
                     }
                     diagramName={diagramName}
+                    projectId={projectData?.id ?? null}
                 />
                 <VersionHistoryDrawer
                     open={isVersionHistoryOpen}

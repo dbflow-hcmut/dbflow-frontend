@@ -10,19 +10,20 @@ export default auth((req) => {
   const isNotFoundRoute = pathname.startsWith("/not-found");
   const isPublicRoute = pathname.startsWith("/_next");
   const isSharedDocsRoute = pathname.startsWith("/shared-docs");
+  const isPublicPricingRoute = pathname === "/pricing";
 
   if (pathname === "/") {
     if (isLoggedIn) {
       return NextResponse.redirect(new URL("/ai-chat", req.url));
     }
-    return NextResponse.redirect(new URL("/auth/signin", req.url));
+    return NextResponse.next();
   }
 
   if (isAuthRoute && isLoggedIn) {
     return NextResponse.redirect(new URL("/ai-chat", req.url));
   }
 
-  if (!isLoggedIn && !isAuthRoute && !isApiRoute && !isNotFoundRoute && !isPublicRoute && !isSharedDocsRoute) {
+  if (!isLoggedIn && !isAuthRoute && !isApiRoute && !isNotFoundRoute && !isPublicRoute && !isSharedDocsRoute && !isPublicPricingRoute) {
     const signInUrl = new URL("/auth/signin", req.url);
     const callbackUrl = pathname + req.nextUrl.search;
     signInUrl.searchParams.set("callbackUrl", callbackUrl);
@@ -37,4 +38,3 @@ export const config = {
     "/((?!api|_next/static|_next/image|favicon.ico|Gilroy/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ttf|woff|woff2|otf|css|js)$).*)",
   ],
 };
-

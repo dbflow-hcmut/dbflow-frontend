@@ -462,6 +462,8 @@ const Header: React.FC<HeaderProps> = ({
                 onCancel={() => setIsDocumentsOpen(false)}
                 footer={null}
                 width="min(1100px, calc(100vw - 48px))"
+                centered
+                className="[&_.ant-modal-content]:!overflow-hidden [&_.ant-modal-content]:!rounded-[20px] [&_.ant-modal-content]:!p-0 [&_.ant-modal-content]:!shadow-[0_24px_80px_rgba(15,23,42,0.16)] [&_.ant-modal-header]:!mb-0 [&_.ant-modal-header]:!px-6 [&_.ant-modal-header]:!pb-4 [&_.ant-modal-header]:!pt-5 [&_.ant-modal-title]:!text-base [&_.ant-modal-title]:!font-semibold [&_.ant-modal-title]:!text-gray-900 [&_.ant-modal-close]:!right-5 [&_.ant-modal-close]:!top-4 [&_.ant-modal-close]:!grid [&_.ant-modal-close]:!size-9 [&_.ant-modal-close]:!place-items-center [&_.ant-modal-close]:!rounded-xl [&_.ant-modal-close]:!text-gray-400 hover:[&_.ant-modal-close]:!bg-gray-100 hover:[&_.ant-modal-close]:!text-gray-700 [&_.ant-modal-body]:!p-0"
                 destroyOnHidden
             >
                 <ProjectDocumentsHub
