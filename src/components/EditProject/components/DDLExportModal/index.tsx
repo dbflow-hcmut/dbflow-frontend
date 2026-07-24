@@ -81,17 +81,18 @@ const DDLExportModal: React.FC<DDLExportModalProps> = ({
             open={isOpen}
             onCancel={onClose}
             title="Export DDL (SQL Script)"
-            width={720}
-            styles={{ body: { padding: 0, height: "calc(80vh - 55px)", overflow: "hidden" } }}
+            width={760}
+            styles={{ body: { height: "calc(80vh - 132px)" } }}
             centered
+            className="[&_.ant-modal-content]:!overflow-hidden [&_.ant-modal-content]:!rounded-[20px] [&_.ant-modal-content]:!p-0 [&_.ant-modal-content]:!shadow-[0_24px_80px_rgba(15,23,42,0.16)] [&_.ant-modal-header]:!mb-0 [&_.ant-modal-header]:!px-6 [&_.ant-modal-header]:!pb-4 [&_.ant-modal-header]:!pt-5 [&_.ant-modal-title]:!text-base [&_.ant-modal-title]:!font-semibold [&_.ant-modal-title]:!text-gray-900 [&_.ant-modal-close]:!right-5 [&_.ant-modal-close]:!top-4 [&_.ant-modal-close]:!grid [&_.ant-modal-close]:!size-9 [&_.ant-modal-close]:!place-items-center [&_.ant-modal-close]:!rounded-xl [&_.ant-modal-close]:!text-gray-400 hover:[&_.ant-modal-close]:!bg-gray-100 hover:[&_.ant-modal-close]:!text-gray-700 [&_.ant-modal-body]:!overflow-y-auto [&_.ant-modal-body]:!p-0 [&_.ant-modal-footer]:!m-0 [&_.ant-modal-footer]:!border-t [&_.ant-modal-footer]:!border-gray-100 [&_.ant-modal-footer]:!px-6 [&_.ant-modal-footer]:!py-4"
             footer={
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                     <span className="text-xs text-gray-400">
                         {tableCount} table{tableCount !== 1 ? "s" : ""} · {fkCount} FK{fkCount !== 1 ? "s" : ""} · {indexCount} index{indexCount !== 1 ? "es" : ""}
                     </span>
                     <div className="flex gap-2">
                         <Tooltip title="Copy to clipboard">
-                            <Button icon={<Copy size={15} />} onClick={handleCopy} disabled={!result?.sql} className="!text-xs">
+                            <Button icon={<Copy size={15} />} onClick={handleCopy} disabled={!result?.sql} className="!h-9 !rounded-xl !border-0 !bg-gray-100 !px-4 !text-xs !font-semibold !text-gray-700 !shadow-none hover:!bg-gray-200">
                                 Copy
                             </Button>
                         </Tooltip>
@@ -100,7 +101,7 @@ const DDLExportModal: React.FC<DDLExportModalProps> = ({
                             icon={<Download size={15} />}
                             onClick={handleDownload}
                             disabled={!result?.sql}
-                            className="!text-xs"
+                            className="!h-9 !rounded-xl !border-0 !px-4 !text-xs !font-semibold !shadow-none"
                         >
                             Download .sql
                         </Button>
@@ -108,74 +109,74 @@ const DDLExportModal: React.FC<DDLExportModalProps> = ({
                 </div>
             }
         >
-            <div className="flex flex-col gap-4 text-xs">
+            <div className="flex min-h-full flex-col gap-5 px-6 pb-6 text-xs">
                 {/* DBMS selector */}
-                <div>
-                    <div className="text-xs font-medium mb-1.5">Target DBMS</div>
+                <section>
+                    <div className="mb-2 text-xs font-semibold text-gray-700">Target DBMS</div>
                     <Segmented
                         block
                         value={options.dbms}
                         onChange={(val) => updateOption("dbms", val as DBMSType)}
                         options={DBMS_OPTIONS}
-                        className="!text-xs"
+                        className="!rounded-2xl !bg-gray-100 !p-1 [&_.ant-segmented-item]:!rounded-xl [&_.ant-segmented-item]:!py-1 [&_.ant-segmented-item]:!text-xs [&_.ant-segmented-item]:!font-medium [&_.ant-segmented-item-selected]:!shadow-sm"
                     />
-                </div>
+                </section>
 
                 {/* Options */}
-                <div>
-                    <div className="text-xs font-medium mb-1.5">Options</div>
-                    <div className="flex flex-col gap-1">
+                <section>
+                    <div className="mb-2 text-xs font-semibold text-gray-700">Options</div>
+                    <div className="grid gap-1 rounded-2xl bg-gray-50 p-3 sm:grid-cols-2">
                         <Checkbox
                             checked={options.includeCreateTable}
                             onChange={(e) => updateOption("includeCreateTable", e.target.checked)}
-                            className="!text-xs"
+                            className="min-h-9 rounded-xl px-2 transition-colors hover:bg-white [&_.ant-checkbox+span]:!text-xs [&_.ant-checkbox+span]:!text-gray-700"
                         >
                             CREATE TABLE statements
                         </Checkbox>
                         <Checkbox
                             checked={options.includeForeignKeys}
                             onChange={(e) => updateOption("includeForeignKeys", e.target.checked)}
-                            className="!text-xs"
+                            className="min-h-9 rounded-xl px-2 transition-colors hover:bg-white [&_.ant-checkbox+span]:!text-xs [&_.ant-checkbox+span]:!text-gray-700"
                         >
                             FOREIGN KEY constraints (ALTER TABLE)
                         </Checkbox>
                         <Checkbox
                             checked={options.includeIndexes}
                             onChange={(e) => updateOption("includeIndexes", e.target.checked)}
-                            className="!text-xs"
+                            className="min-h-9 rounded-xl px-2 transition-colors hover:bg-white [&_.ant-checkbox+span]:!text-xs [&_.ant-checkbox+span]:!text-gray-700"
                         >
                             CREATE INDEX statements
                         </Checkbox>
                         <Checkbox
                             checked={options.includeDropIfExists}
                             onChange={(e) => updateOption("includeDropIfExists", e.target.checked)}
-                            className="!text-xs"
+                            className="min-h-9 rounded-xl px-2 transition-colors hover:bg-white [&_.ant-checkbox+span]:!text-xs [&_.ant-checkbox+span]:!text-gray-700"
                         >
                             Add DROP TABLE IF EXISTS before each table
                         </Checkbox>
                         <Checkbox
                             checked={options.includeIfNotExists}
                             onChange={(e) => updateOption("includeIfNotExists", e.target.checked)}
-                            className="!text-xs"
+                            className="min-h-9 rounded-xl px-2 transition-colors hover:bg-white [&_.ant-checkbox+span]:!text-xs [&_.ant-checkbox+span]:!text-gray-700"
                         >
                             Add IF NOT EXISTS to CREATE TABLE
                         </Checkbox>
                     </div>
-                </div>
+                </section>
 
                 {/* Warnings */}
                 {result && result.warnings.length > 0 && (
-                    <div className="flex flex-col gap-0.5">
+                    <div className="flex flex-col gap-1 rounded-2xl bg-amber-50 px-4 py-3">
                         {result.warnings.map((w, i) => (
-                            <span key={i} className="text-xs text-amber-600">{w}</span>
+                            <span key={i} className="text-xs text-amber-700">{w}</span>
                         ))}
                     </div>
                 )}
 
                 {/* SQL Preview */}
-                <div>
-                    <div className="text-xs font-medium mb-1.5">SQL Preview</div>
-                    <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <section className="min-h-0 flex-1">
+                    <div className="mb-2 text-xs font-semibold text-gray-700">SQL Preview</div>
+                    <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-gray-100 shadow-[0_12px_36px_rgba(15,23,42,0.06)]">
                         <Editor
                             height={340}
                             language="sql"
@@ -201,7 +202,7 @@ const DDLExportModal: React.FC<DDLExportModalProps> = ({
                             }}
                         />
                     </div>
-                </div>
+                </section>
             </div>
         </Modal>
     );

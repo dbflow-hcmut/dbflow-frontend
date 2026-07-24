@@ -190,7 +190,7 @@ export default function ProjectDocumentsHub({
   }
 
   return (
-    <div className={embedded ? "flex h-[500px] flex-col bg-white pt-2" : "min-h-full bg-[#FCFCFC]"}>
+    <div className={embedded ? "flex h-[600px] max-h-[calc(100vh-180px)] flex-col bg-white" : "min-h-full bg-[#FCFCFC]"}>
       <AntImage
         src={previewImage?.url}
         alt={previewImage?.title}
@@ -212,19 +212,19 @@ export default function ProjectDocumentsHub({
         onChange={(event) => void handleUpload(event.target.files)}
       />
 
-      <div className={embedded ? "flex min-h-0 flex-1 flex-col gap-4" : "mx-auto flex max-w-6xl flex-col gap-5 px-5 py-6"}>
+      <div className={embedded ? "flex min-h-0 flex-1 flex-col gap-5 px-6 pb-6" : "mx-auto flex max-w-6xl flex-col gap-5 px-5 py-6"}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="rounded-lg bg-[#F3F4F6] px-4 py-3">
-            <div className="text-xs font-medium uppercase text-gray-500">Documents</div>
-            <div className="mt-1 text-xl font-semibold text-gray-950">{documents.length}</div>
+          <div className="rounded-2xl bg-gray-50 px-5 py-4 transition-colors hover:bg-gray-100">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Documents</div>
+            <div className="mt-1.5 text-xl font-semibold text-gray-900">{documents.length}</div>
           </div>
-         <div className="rounded-lg bg-[#F3F4F6] px-4 py-3">
-            <div className="text-xs font-medium uppercase text-gray-500">Storage</div>
-            <div className="mt-1 text-xl font-semibold text-gray-950">{formatBytes(totalSize)}</div>
+         <div className="rounded-2xl bg-gray-50 px-5 py-4 transition-colors hover:bg-gray-100">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Storage</div>
+            <div className="mt-1.5 text-xl font-semibold text-gray-900">{formatBytes(totalSize)}</div>
           </div>
-          <div className="rounded-lg bg-[#F3F4F6] px-4 py-3">
-            <div className="text-xs font-medium uppercase text-gray-500">Project Scope</div>
-            <div className="mt-1 truncate text-xl font-semibold text-gray-950">
+          <div className="rounded-2xl bg-gray-50 px-5 py-4 transition-colors hover:bg-gray-100">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Project Scope</div>
+            <div className="mt-1.5 truncate text-xl font-semibold text-gray-900">
               {formatProjectScope(projectScope)}
             </div>
           </div>
@@ -233,14 +233,15 @@ export default function ProjectDocumentsHub({
         <div className="flex items-center gap-3">
           <Input
             allowClear
-            prefix={<Search className="h-8 w-4 text-gray-400" />}
+            prefix={<Search className="mr-1 h-4 w-4 text-gray-400" />}
             placeholder="Search documents"
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
+            className="!h-11 !rounded-xl !border-0 !bg-gray-100 !px-4 !shadow-none hover:!bg-gray-100 focus-within:!bg-white focus-within:!ring-1 focus-within:!ring-gray-200"
           />
           <Button
             type="primary"
-            className="h-10!"
+            className="!h-11 !rounded-xl !border-0 !px-5 !font-semibold !shadow-none"
             icon={uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
             disabled={uploading}
             onClick={() => fileInputRef.current?.click()}
@@ -249,8 +250,8 @@ export default function ProjectDocumentsHub({
           </Button>
         </div>
 
-        <div className={embedded ? "min-h-0 flex-1 overflow-auto rounded-lg bg-white" : "overflow-hidden rounded-lg border border-gray-200 bg-white"}>
-          <div className="grid grid-cols-[1fr_120px_120px] gap-3 border-b border-gray-100 py-3 text-xs font-medium uppercase text-gray-500 max-md:hidden">
+        <div className={embedded ? "min-h-0 flex-1 overflow-auto rounded-2xl bg-white ring-1 ring-gray-100" : "overflow-hidden rounded-2xl bg-white ring-1 ring-gray-100"}>
+          <div className="grid grid-cols-[1fr_120px_120px] gap-3 bg-gray-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-gray-400 max-md:hidden">
             <span>Name</span>
             <span>Size</span>
             <span className="text-right">Actions</span>
@@ -262,10 +263,12 @@ export default function ProjectDocumentsHub({
               Loading documents
             </div>
           ) : documents.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-14 text-center">
-              <FileText className="h-9 w-9 text-gray-300" />
-              <div className="mt-3 text-sm font-medium text-gray-800">No documents yet</div>
-              <div className="mt-1 text-sm text-gray-500">
+            <div className="flex h-full min-h-56 flex-col items-center justify-center px-6 py-14 text-center">
+              <div className="flex size-14 items-center justify-center rounded-2xl bg-gray-100">
+                <FileText className="h-6 w-6 text-gray-400" />
+              </div>
+              <div className="mt-4 text-sm font-semibold text-gray-800">No documents yet</div>
+              <div className="mt-1.5 text-sm text-gray-500">
                 Upload ER diagrams, schema files, SQL notes, or project specs.
               </div>
             </div>
@@ -274,10 +277,10 @@ export default function ProjectDocumentsHub({
               {documents.map((doc) => (
                 <div
                   key={doc.id}
-                  className="grid grid-cols-[1fr_120px_120px] items-center gap-3 py-3 max-md:grid-cols-1"
+                  className="grid grid-cols-[1fr_120px_120px] items-center gap-3 px-4 py-3 transition-colors hover:bg-gray-50 max-md:grid-cols-1"
                 >
                   <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600">
+                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-gray-100 text-gray-600">
                       <FileText className="h-4 w-4" />
                     </div>
                     <div className="min-w-0">
