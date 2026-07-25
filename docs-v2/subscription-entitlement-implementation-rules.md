@@ -23,6 +23,12 @@ Code chính:
 - Plan target: `personal | team | any`.
 - Limits và features lưu JSONB.
 - `null` limit biểu thị unlimited.
+- `ai_model` nullable chọn model AI cho workspace đang dùng plan. Admin có thể
+  nhập tên model trong plan form; để trống nghĩa là dùng `API_MODEL` của
+  backend.
+- Admin plan API resolve `effectiveAiModel` trực tiếp từ `plan.ai_model` hoặc
+  backend `API_MODEL`, để bảng luôn hiển thị tên model thực tế thay vì một nhãn
+  fallback chung.
 - Plan đang seed:
   - `free`: personal, 1 seat.
   - `pro`: personal paid target.

@@ -47,6 +47,38 @@ export interface AdminAiAnalytics {
     outputTokens: number;
     totalTokens: number;
   }[];
+  models: {
+    modelName: string;
+    totalCredits: number;
+    totalModelCalls: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    totalTokens: number;
+    series: {
+      period: string;
+      credits: number;
+      modelCalls: number;
+      inputTokens: number;
+      outputTokens: number;
+      totalTokens: number;
+    }[];
+  }[];
+  dailyModels: {
+    modelName: string;
+    totalCredits: number;
+    totalModelCalls: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    totalTokens: number;
+    series: {
+      period: string;
+      credits: number;
+      modelCalls: number;
+      inputTokens: number;
+      outputTokens: number;
+      totalTokens: number;
+    }[];
+  }[];
 }
 
 export interface AdminDbEngineBreakdown {
@@ -124,6 +156,7 @@ export interface PlanConfigInput {
   displayOrder: number;
   limits: Record<string, number | null>;
   features: Record<string, boolean>;
+  aiModel?: string | null;
 }
 
 export type CreatePlanInput = PlanConfigInput & { code: string };
@@ -132,13 +165,19 @@ export function getAdminDashboard() {
   return apiGet<AdminDashboard>(`${PROXY_ADMIN}/dashboard`);
 }
 
-export function getAdminOverviewAnalytics(from?: string, to?: string, bucket?: AnalyticsBucket) {
+export function getAdminOverviewAnalytics(
+  from?: string,
+  to?: string,
+  bucket?: AnalyticsBucket,
+) {
   const params = new URLSearchParams();
   if (from) params.set("from", from);
   if (to) params.set("to", to);
   if (bucket) params.set("bucket", bucket);
   const query = params.toString();
-  return apiGet<AdminOverviewAnalytics>(`${PROXY_ADMIN}/analytics/overview${query ? `?${query}` : ""}`);
+  return apiGet<AdminOverviewAnalytics>(
+    `${PROXY_ADMIN}/analytics/overview${query ? `?${query}` : ""}`,
+  );
 }
 
 export function getAdminUsers() {
@@ -150,10 +189,10 @@ export function updateAdminUserStatus(
   status: "active" | "suspended",
   reason?: string,
 ) {
-  return apiPatch<{ id: string; status: string }, { status: string; reason?: string }>(
-    `${PROXY_ADMIN}/users/${userId}/status`,
-    { status, reason },
-  );
+  return apiPatch<
+    { id: string; status: string },
+    { status: string; reason?: string }
+  >(`${PROXY_ADMIN}/users/${userId}/status`, { status, reason });
 }
 
 export function getAdminOrders() {
@@ -190,10 +229,10 @@ export function updateAdminSubscription(
   action: AdminSubscriptionAction,
   reason: string,
 ) {
-  return apiPatch<AdminSubscription, { action: AdminSubscriptionAction; reason: string }>(
-    `${PROXY_ADMIN}/subscriptions/${subscriptionId}`,
-    { action, reason },
-  );
+  return apiPatch<
+    AdminSubscription,
+    { action: AdminSubscriptionAction; reason: string }
+  >(`${PROXY_ADMIN}/subscriptions/${subscriptionId}`, { action, reason });
 }
 
 export function getAdminPlans() {
@@ -204,6 +243,12 @@ export function createAdminPlan(values: CreatePlanInput) {
   return apiPost<Plan, CreatePlanInput>(`${PROXY_ADMIN}/plans`, values);
 }
 
-export function updateAdminPlan(planId: string, values: Partial<PlanConfigInput>) {
-  return apiPatch<Plan, typeof values>(`${PROXY_ADMIN}/plans/${planId}`, values);
+export function updateAdminPlan(
+  planId: string,
+  values: Partial<PlanConfigInput>,
+) {
+  return apiPatch<Plan, typeof values>(
+    `${PROXY_ADMIN}/plans/${planId}`,
+    values,
+  );
 }

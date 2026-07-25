@@ -40,6 +40,14 @@ export default function AdminPlansPage() {
     { title: "Yearly", render: (_: unknown, plan: Plan) => money(plan.yearlyBasePrice) },
     { title: "Seats", dataIndex: "includedSeats" },
     {
+      title: "AI model",
+      render: (_: unknown, plan: Plan) => (
+        <span className="text-xs text-gray-300">
+          {plan.effectiveAiModel || "—"}
+        </span>
+      ),
+    },
+    {
       title: "Status",
       render: (_: unknown, plan: Plan) => (
         <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${plan.isActive ? "bg-emerald-500/15 text-emerald-400" : "bg-zinc-700/40 text-zinc-400"}`}>

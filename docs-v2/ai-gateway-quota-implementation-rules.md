@@ -18,6 +18,7 @@ Browser
  -> NestJS /ai-gateway
  -> resolve billing workspace
  -> reserve AI usage
+ -> resolve plan AI model
  -> LangGraph
  -> commit on accepted upstream response
  -> stream SSE back to browser
@@ -34,6 +35,10 @@ Nếu upstream không nhận request hoặc trả non-2xx, reservation được 
 - AI chat không có project: dùng active `workspace_id` hợp lệ; nếu request
   không có workspace thì fallback personal workspace của actor.
 - Usage event lưu cả actor `user_id` và billing `workspace_id`.
+- Khi reserve, backend lấy `subscription.plan.ai_model` và ghi vào metadata.
+  Gateway resolve model theo thứ tự `plan.ai_model -> backend API_MODEL` rồi
+  luôn inject `input.model_name`, để persisted thread state không giữ model cũ.
+  `dbflow-ai` không đọc `API_MODEL` và chỉ dùng model backend truyền vào.
 
 ## 4. Usage data model
 
@@ -44,6 +49,8 @@ Nếu upstream không nhận request hoặc trả non-2xx, reservation được 
 - Status: `reserved | committed | released`.
 - Lưu metric, quantity, period, metadata, `input_tokens`, `output_tokens` và
   `model_calls`.
+- `model_name` lưu model do provider trả về. Dữ liệu cũ hoặc event không có
+  model metadata giữ `NULL` và được admin analytics hiển thị là `Unknown`.
 
 ### `usage_counters`
 
@@ -89,6 +96,8 @@ Period key dùng UTC `YYYY-MM`.
 
 - Text-to-SQL reserve cùng metric `ai_requests_monthly`.
 - Billing workspace lấy từ DB connection.
+- Model lấy từ plan của billing workspace giống LangGraph flow; request trực
+  tiếp tới AI ingestion luôn nhận `model_name` đã resolve từ backend.
 - Success commit; exception release.
 
 ## 8. Limitations
@@ -100,9 +109,18 @@ Period key dùng UTC `YYYY-MM`.
   `model_calls` từ provider usage metadata để phục vụ admin analytics; các số
   token này không tham gia chặn quota.
 - Gateway gom token metadata từ toàn bộ model messages trong LangGraph stream.
+  Đồng thời collector lấy `response_metadata.model_name`; nếu một operation
+  dùng nhiều model khác nhau thì `model_name` của event là `multiple`.
   Endpoint text-to-SQL trực tiếp trả usage metadata để backend ghi cùng event.
 - Admin analytics lấy credits và token thật từ `usage_events`, không ước lượng
   bằng độ dài `chat_messages`.
+- Admin analytics group theo time bucket và `model_name`, đồng thời trả cả
+  series tổng và `models[]`. Dropdown `AI Assistant Activity` lọc client-side
+  trên payload này. Credit của một model là số committed usage event được ghi
+  nhận với model đó; token và model calls là tổng các cột tương ứng.
+- Payload còn có `dailyModels[]`, luôn group theo ngày dù overview đang chọn
+  week/month. `Model Usage Trend` render mỗi model thành một line và cho phép
+  chuyển metric giữa calls, credits và tổng tokens.
 - Chưa có cleanup job cho reservation bị treo do process crash.
 - Chưa có Redis counter; PostgreSQL transaction là source of truth hiện tại.
 - Chưa proxy các endpoint LangGraph ngoài thread create, stream và cancel.
