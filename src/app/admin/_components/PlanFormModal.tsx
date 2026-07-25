@@ -9,7 +9,6 @@ type PlanFormValues = {
   name: string;
   description?: string;
   workspaceType: "personal" | "team" | "any";
-  currency: string;
   monthlyBasePrice: number;
   yearlyBasePrice: number;
   monthlySeatPrice?: number;
@@ -43,7 +42,6 @@ export default function PlanFormModal({ open, mode, plan, confirmLoading, onCanc
         name: plan.name,
         description: plan.description ?? "",
         workspaceType: plan.workspaceType,
-        currency: plan.currency,
         monthlyBasePrice: Number(plan.monthlyBasePrice),
         yearlyBasePrice: Number(plan.yearlyBasePrice),
         monthlySeatPrice: plan.monthlySeatPrice != null ? Number(plan.monthlySeatPrice) : undefined,
@@ -63,7 +61,6 @@ export default function PlanFormModal({ open, mode, plan, confirmLoading, onCanc
     } else {
       form.resetFields();
       form.setFieldsValue({
-        currency: "USD",
         workspaceType: "personal",
         includedSeats: 1,
         isActive: true,
@@ -79,7 +76,7 @@ export default function PlanFormModal({ open, mode, plan, confirmLoading, onCanc
       name: values.name,
       description: values.description || undefined,
       workspaceType: values.workspaceType,
-      currency: values.currency,
+      currency: "VND",
       monthlyBasePrice: String(values.monthlyBasePrice),
       yearlyBasePrice: String(values.yearlyBasePrice),
       monthlySeatPrice: values.monthlySeatPrice != null ? String(values.monthlySeatPrice) : undefined,
@@ -134,20 +131,15 @@ export default function PlanFormModal({ open, mode, plan, confirmLoading, onCanc
         <Form.Item name="description" label="Description">
           <Input.TextArea rows={2} />
         </Form.Item>
-        <div className="grid grid-cols-2 gap-x-4">
-          <Form.Item name="workspaceType" label="Workspace type" rules={[{ required: true, message: "Required" }]}>
-            <Select
-              options={[
-                { value: "personal", label: "Personal" },
-                { value: "team", label: "Team" },
-                { value: "any", label: "Any" },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item name="currency" label="Currency" rules={[{ required: true, message: "Required" }]}>
-            <Input maxLength={3} placeholder="USD" />
-          </Form.Item>
-        </div>
+        <Form.Item name="workspaceType" label="Workspace type" rules={[{ required: true, message: "Required" }]}>
+          <Select
+            options={[
+              { value: "personal", label: "Personal" },
+              { value: "team", label: "Team" },
+              { value: "any", label: "Any" },
+            ]}
+          />
+        </Form.Item>
         <div className="grid grid-cols-2 gap-x-4">
           <Form.Item name="monthlyBasePrice" label="Monthly base price" rules={[{ required: true, message: "Required" }]}>
             <InputNumber className="w-full" min={0} />
@@ -164,7 +156,10 @@ export default function PlanFormModal({ open, mode, plan, confirmLoading, onCanc
           <Form.Item name="includedSeats" label="Included seats" rules={[{ required: true, message: "Required" }]}>
             <InputNumber className="w-full" min={1} />
           </Form.Item>
-          <Form.Item name="displayOrder" label="Display order">
+          <Form.Item
+            name="displayOrder"
+            label="Plan level"
+          >
             <InputNumber className="w-full" min={0} />
           </Form.Item>
         </div>

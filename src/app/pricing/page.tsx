@@ -130,6 +130,7 @@ export default function PricingPage() {
   );
 
   const currentPlanCode = entitlements?.plan.code;
+  const currentPlanOrder = entitlements?.plan.displayOrder;
 
   const switchAudience = (nextAudience: Audience) => {
     setAudience(nextAudience);
@@ -197,7 +198,7 @@ export default function PricingPage() {
       >
         <X className="h-5 w-5" />
       </button>
-      <div className="mx-auto max-w-6xl">
+      <div className="mx-auto max-w-[1600px]">
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-semibold tracking-tight text-gray-950">Upgrade your plan</h1>
           <p className="mt-2 text-sm text-gray-500">Choose the right plan for your projects and team.</p>
@@ -220,23 +221,27 @@ export default function PricingPage() {
           </button>
         </div>
 
-        <div className="grid items-stretch justify-center gap-8 md:grid-cols-[repeat(2,minmax(0,470px))]">
+        <div className="flex flex-wrap items-stretch justify-center gap-6">
           {availablePlans.map((plan) => {
             const baseAmount = Number(cycle === "yearly" ? plan.yearlyBasePrice : plan.monthlyBasePrice);
             const seatPrice = Number((cycle === "yearly" ? plan.yearlySeatPrice : plan.monthlySeatPrice) ?? 0);
             const total = baseAmount + Math.max(0, quantity - plan.includedSeats) * seatPrice;
             const isCurrent = plan.code === currentPlanCode;
+            const isDowngrade =
+              currentPlanOrder != null &&
+              (plan.displayOrder ?? 0) < currentPlanOrder;
             const isPaid = baseAmount > 0;
             const isPopular = plan.code === "pro" || plan.code === "team";
             const canCheckout =
               isPaid &&
               !isCurrent &&
+              !isDowngrade &&
               (!isAuthenticated || workspaceType === "team" || Boolean(workspaceId));
 
             return (
               <article
                 key={plan.id}
-                className={`relative flex min-h-[520px] flex-col rounded-2xl border bg-white p-6 ${isPopular ? "border-primary-300 shadow-[0_18px_50px_-28px_rgba(66,165,245,0.65)]" : "border-gray-200"}`}
+                className={`relative flex min-h-[520px] w-full flex-col rounded-2xl border bg-white p-6 md:w-[calc(50%_-_12px)] xl:w-[calc(25%_-_18px)] ${isPopular ? "border-primary-300 shadow-[0_18px_50px_-28px_rgba(66,165,245,0.65)]" : "border-gray-200"}`}
               >
                 <div className="relative mb-5 min-h-[76px]">
                   <div className="w-full">
@@ -289,6 +294,8 @@ export default function PricingPage() {
                     ? "Creating checkout…"
                     : isCurrent
                       ? "Your current plan"
+                      : isDowngrade
+                        ? "Downgrade unavailable"
                       : isPaid
                         ? workspaceType === "team" ? `Configure ${plan.name}` : `Upgrade to ${plan.name}`
                         : "Free plan"}
