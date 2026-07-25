@@ -26,9 +26,9 @@ export default function StatCard({ stat, icon, iconTone, formatValue }: StatCard
           {isUp ? <ArrowUpRight className="h-3.5 w-3.5" /> : <ArrowDownRight className="h-3.5 w-3.5" />}
           <span>{Math.abs(stat.changePct)}% vs previous period</span>
         </p>
-        <div className="h-9 w-24 flex-shrink-0">
+        <div className="h-10 w-24 flex-shrink-0 overflow-visible">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
+            <AreaChart data={chartData} margin={{ top: 6, right: 6, bottom: 6, left: 6 }}>
               <defs>
                 <linearGradient id={`spark-${stat.key}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={primaryColor} stopOpacity={0.4} />
@@ -41,6 +41,12 @@ export default function StatCard({ stat, icon, iconTone, formatValue }: StatCard
                 stroke={primaryColor}
                 strokeWidth={2}
                 fill={`url(#spark-${stat.key})`}
+                dot={
+                  stat.series.length <= 1
+                    ? { r: 3, strokeWidth: 2, fill: "#1A1C24" }
+                    : false
+                }
+                activeDot={false}
                 isAnimationActive={false}
               />
             </AreaChart>
