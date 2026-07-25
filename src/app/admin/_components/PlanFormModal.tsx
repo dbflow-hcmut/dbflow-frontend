@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Form, Input, InputNumber, Modal, Select, Switch } from "antd";
+import { AutoComplete, Form, Input, InputNumber, Modal, Select, Switch } from "antd";
 import { Plan } from "@/api/subscriptions/client";
 import { CreatePlanInput, PlanConfigInput } from "@/api/admin/client";
 import { PLAN_FEATURE_FIELDS, PLAN_LIMIT_FIELDS } from "../_lib/planConfig";
@@ -19,6 +19,7 @@ type PlanFormValues = {
   displayOrder: number;
   limits: Record<string, number | null | undefined>;
   features: Record<string, boolean>;
+  aiModel?: string;
 };
 
 type PlanFormModalProps = {
@@ -57,6 +58,7 @@ export default function PlanFormModal({ open, mode, plan, confirmLoading, onCanc
           }),
         ),
         features: Object.fromEntries(PLAN_FEATURE_FIELDS.map((field) => [field.key, Boolean(plan.features?.[field.key])])),
+        aiModel: plan.aiModel ?? undefined,
       });
     } else {
       form.resetFields();
@@ -92,6 +94,7 @@ export default function PlanFormModal({ open, mode, plan, confirmLoading, onCanc
         }),
       ),
       features: Object.fromEntries(PLAN_FEATURE_FIELDS.map((field) => [field.key, Boolean(values.features?.[field.key])])),
+      aiModel: values.aiModel?.trim() || null,
     };
     if (mode === "create") {
       onSubmitCreate({ ...shared, code: values.code });
@@ -167,6 +170,24 @@ export default function PlanFormModal({ open, mode, plan, confirmLoading, onCanc
         </div>
         <Form.Item name="isActive" label="Live (visible to customers)" valuePropName="checked">
           <Switch />
+        </Form.Item>
+
+        <Form.Item
+          name="aiModel"
+          label="AI model"
+        >
+          <AutoComplete
+            allowClear
+            placeholder="Default from environment"
+            options={[
+              { value: "gemini-3.6-flash", label: "Gemini 3.6 Flash" },
+              { value: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
+              { value: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite" },
+              { value: "gemini-3-flash", label: "Gemini 3 Flash" },
+              { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+              { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+            ]}
+          />
         </Form.Item>
 
         <p className="mb-1 text-sm font-medium text-gray-200">Limits</p>

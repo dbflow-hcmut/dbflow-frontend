@@ -13,6 +13,7 @@ import TotalSaleChart from "./_components/TotalSaleChart";
 import AiUsageChart from "./_components/AiUsageChart";
 import DatabaseDistributionChart from "./_components/DatabaseDistributionChart";
 import ProjectAnalyticsCard from "./_components/ProjectAnalyticsCard";
+import ModelUsageTrendChart from "./_components/ModelUsageTrendChart";
 import { compactMoney } from "./_lib/format";
 import { ADMIN_TABLE_CLASS } from "./_lib/styles";
 
@@ -98,6 +99,8 @@ export default function AdminOverviewPage() {
             <TotalSaleChart series={analytics.stats.find((stat) => stat.key === "revenue")?.series ?? []} bucket={analytics.range.bucket} />
             <AiUsageChart data={analytics.aiAnalytics} />
           </div>
+
+          <ModelUsageTrendChart data={analytics.aiAnalytics} />
 
           {/* Connected DB Engines & Projects / Document Hub */}
           <div className="grid gap-6 xl:grid-cols-2">

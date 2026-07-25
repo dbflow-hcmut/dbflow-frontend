@@ -23,6 +23,8 @@ export interface Plan {
   includedSeats: number;
   limits: Record<string, number | null>;
   features: Record<string, boolean>;
+  aiModel?: string | null;
+  effectiveAiModel?: string | null;
   isActive?: boolean;
   displayOrder?: number;
 }
