@@ -199,20 +199,6 @@ export function getAdminOrders() {
   return apiGet<AdminOrder[]>(`${PROXY_ADMIN}/orders`);
 }
 
-export function createAdminRenewalBill(subscriptionId: string) {
-  return apiPost<AdminOrder, Record<string, never>>(
-    `${PROXY_ADMIN}/subscriptions/${subscriptionId}/bills`,
-    {},
-  );
-}
-
-export function cancelAdminBill(orderId: string) {
-  return apiPatch<AdminOrder, Record<string, never>>(
-    `${PROXY_ADMIN}/orders/${orderId}/cancel`,
-    {},
-  );
-}
-
 export function getAdminSubscriptions() {
   return apiGet<AdminSubscription[]>(`${PROXY_ADMIN}/subscriptions`);
 }

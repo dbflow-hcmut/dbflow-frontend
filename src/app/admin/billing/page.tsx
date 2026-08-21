@@ -1,17 +1,15 @@
 "use client";
 
-import { AdminOrder, cancelAdminBill, getAdminOrders } from "@/api/admin/client";
+import { AdminOrder, getAdminOrders } from "@/api/admin/client";
 import LoadingIndicator from "@/components/LoadingIndicator";
-import { Avatar, Button, Input, Modal, Table } from "antd";
+import { Avatar, Input, Table } from "antd";
 import { useEffect, useState } from "react";
 import { money } from "../_lib/format";
 import { ADMIN_TABLE_CLASS } from "../_lib/styles";
-import { notificationProvider } from "@/providers/notification";
 
 export default function AdminBillingPage() {
   const [orders, setOrders] = useState<AdminOrder[]>();
   const [query, setQuery] = useState("");
-  const [cancelingId, setCancelingId] = useState<string>();
   useEffect(() => { void getAdminOrders().then(setOrders); }, []);
   if (!orders) return <LoadingIndicator fullArea size="medium" label="Loading billing orders" />;
   const filtered = orders.filter((item) => `${item.orderNumber} ${item.buyer?.fullName ?? ""} ${item.buyer?.email ?? ""} ${item.workspace?.name ?? ""} ${item.plan?.name ?? ""} ${item.status}`.toLowerCase().includes(query.toLowerCase()));
@@ -28,24 +26,6 @@ export default function AdminBillingPage() {
           { title: "Amount", render: (_: unknown, item: AdminOrder) => money(item.amount) },
           { title: "Expires", render: (_: unknown, item: AdminOrder) => item.expiresAt ? new Date(item.expiresAt).toLocaleString() : "-" },
           { title: "Status", dataIndex: "status", render: (value: string) => <span className={`inline-flex rounded-md px-2 py-0.5 text-xs font-semibold capitalize ${value === "paid" ? "bg-emerald-500/15 text-emerald-400" : value === "pending" ? "bg-amber-500/15 text-amber-400" : "bg-rose-500/15 text-rose-400"}`}>{value}</span> },
-          { title: "Action", render: (_: unknown, item: AdminOrder) => item.subscriptionId && ["pending", "failed"].includes(item.status) ? <Button danger className="!h-8 !px-3 !text-xs !font-semibold" loading={cancelingId === item.id} onClick={() => {
-            Modal.confirm({
-              title: "Cancel renewal bill?",
-              content: "The subscription will not renew at the end of its current period.",
-              okText: "Cancel bill",
-              okButtonProps: { danger: true },
-              onOk: async () => {
-                setCancelingId(item.id);
-                try {
-                  await cancelAdminBill(item.id);
-                  setOrders((current) => current?.map((order) => order.id === item.id ? { ...order, status: "canceled", checkoutUrl: null } : order));
-                  notificationProvider.open({ type: "success", message: "Renewal bill canceled" });
-                } finally {
-                  setCancelingId(undefined);
-                }
-              },
-            });
-          }}>Cancel bill</Button> : null },
         ]} />
       </div>
     </div>

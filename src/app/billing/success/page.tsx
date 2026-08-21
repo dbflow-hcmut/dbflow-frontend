@@ -31,8 +31,8 @@ export default function BillingSuccessPage() {
             Payment received
           </h1>
           <p className="mt-3 text-sm leading-6 text-gray-600">
-            Thank you! Your payment was received successfully. Your subscription will
-            update as soon as PayOS confirms the transaction.
+            Thank you! Stripe received your payment. Your subscription will update as
+            soon as the signed webhook is processed and will renew automatically.
           </p>
 
           <div className="mt-8 flex justify-end">

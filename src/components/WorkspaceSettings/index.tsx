@@ -19,7 +19,7 @@ import {
 import { getUserMe } from "@/api/users/client";
 import {
   BillingOrder,
-  cancelBillingOrder,
+  createStripeBillingPortal,
   getBillingOrders,
   getWorkspaceEntitlements,
   WorkspaceEntitlements,
@@ -80,7 +80,6 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
   const [orders, setOrders] = useState<BillingOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [cancelingOrderId, setCancelingOrderId] = useState<string>();
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("general");
   const [inviteOpen, setInviteOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
@@ -538,11 +537,33 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
             disabled: !canViewBilling,
             children: (
               <div>
+                {entitlements?.subscription.status === "active" &&
+                  entitlements.subscription.provider === "stripe" && (
+                  <div className="mb-4 flex justify-end">
+                    <Button
+                      type="primary"
+                      onClick={async () => {
+                        try {
+                          const session = await createStripeBillingPortal(workspaceId);
+                          window.location.href = session.url;
+                        } catch (error) {
+                          notificationProvider.open({
+                            type: "error",
+                            message: "Unable to open Stripe billing portal",
+                            description: error instanceof Error ? error.message : undefined,
+                          });
+                        }
+                      }}
+                    >
+                      Manage subscription
+                    </Button>
+                  </div>
+                )}
                 <Table
                   rowKey="id"
                   dataSource={orders}
                   pagination={{ pageSize: 10 }}
-                  scroll={{ x: 1100, y: 420 }}
+                  scroll={{ x: 850, y: 420 }}
                   columns={[
                     {
                       title: "Order",
@@ -583,78 +604,6 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
                       dataIndex: "status",
                       width: 120,
                       render: (status: string) => <StatusPill value={status} />,
-                    },
-                    {
-                      title: "Action",
-                      width: 250,
-                      fixed: "right",
-                      render: (_: unknown, order: BillingOrder) =>
-                        order.status === "pending" ? (
-                          <Space size={8}>
-                            {order.checkoutUrl ? (
-                              <Button
-                                className="!h-9 !rounded-xl !border-0 !bg-gray-100 !px-4 !text-[13px] !font-semibold !text-gray-800 !shadow-none hover:!bg-gray-200"
-                                onClick={() => {
-                                  window.open(
-                                    order.checkoutUrl!,
-                                    "_blank",
-                                    "noopener,noreferrer",
-                                  );
-                                }}
-                              >
-                                Continue payment
-                              </Button>
-                            ) : null}
-                            {order.subscriptionId ? (
-                              <Button
-                                danger
-                                className="!h-9 !rounded-xl !border-0 !bg-red-50 !px-4 !text-[13px] !font-semibold !text-red-600 !shadow-none hover:!bg-red-100"
-                                loading={cancelingOrderId === order.id}
-                                onClick={() => {
-                                  Modal.confirm({
-                                    title: "Cancel renewal bill?",
-                                    content:
-                                      "This workspace will not renew at the end of the current period.",
-                                    okText: "Cancel bill",
-                                    okButtonProps: { danger: true },
-                                    onOk: async () => {
-                                      setCancelingOrderId(order.id);
-                                      try {
-                                        await cancelBillingOrder(workspaceId, order.id);
-                                        setOrders((current) =>
-                                          current.map((item) =>
-                                            item.id === order.id
-                                              ? { ...item, status: "canceled", checkoutUrl: null }
-                                              : item,
-                                          ),
-                                        );
-                                        setEntitlements((current) =>
-                                          current
-                                            ? {
-                                                ...current,
-                                                subscription: {
-                                                  ...current.subscription,
-                                                  cancelAtPeriodEnd: true,
-                                                },
-                                              }
-                                            : current,
-                                        );
-                                        notificationProvider.open({
-                                          type: "success",
-                                          message: "Renewal bill canceled",
-                                        });
-                                      } finally {
-                                        setCancelingOrderId(undefined);
-                                      }
-                                    },
-                                  });
-                                }}
-                              >
-                                Cancel bill
-                              </Button>
-                            ) : null}
-                          </Space>
-                        ) : null,
                     },
                   ]}
                 />

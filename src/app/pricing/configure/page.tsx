@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  createPayOSCheckout,
+  createStripeCheckout,
   getPlans,
   Plan,
 } from "@/api/subscriptions/client";
@@ -62,14 +62,14 @@ export default function ConfigureBusinessPlanPage() {
     if (!plan || (!workspaceId && workspaceName.trim().length < 2)) return;
     setSubmitting(true);
     try {
-      const order = await createPayOSCheckout({
+      const order = await createStripeCheckout({
         workspaceId,
         workspaceName: workspaceId ? undefined : workspaceName.trim(),
         planCode: plan.code,
         billingCycle: cycle,
         quantity: seats,
       });
-      if (!order.checkoutUrl) throw new Error("PayOS checkout URL is missing");
+      if (!order.checkoutUrl) throw new Error("Stripe checkout URL is missing");
       window.location.href = order.checkoutUrl;
     } catch (error) {
       notificationProvider.open({

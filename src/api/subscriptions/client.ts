@@ -4,6 +4,7 @@ import {
   PROXY_WORKSPACE_SUBSCRIPTION,
   PROXY_BILLING_CHECKOUT,
   PROXY_BILLING_ORDERS,
+  PROXY_BILLING_PORTAL,
   PROXY_CANCEL_BILLING_ORDER,
 } from "@/api";
 import { apiGet, apiPatch, apiPost } from "@/lib/clientFetch";
@@ -38,6 +39,9 @@ export interface Subscription {
   currentPeriodStart: string;
   currentPeriodEnd: string;
   cancelAtPeriodEnd: boolean;
+  provider?: string | null;
+  providerCustomerId?: string | null;
+  providerSubscriptionId?: string | null;
   plan: Plan;
 }
 
@@ -120,7 +124,7 @@ export function getWorkspaceEntitlements(workspaceId: string) {
   );
 }
 
-export function createPayOSCheckout(values: {
+export function createStripeCheckout(values: {
   workspaceId?: string;
   workspaceName?: string;
   planCode: string;
@@ -128,6 +132,13 @@ export function createPayOSCheckout(values: {
   quantity: number;
 }) {
   return apiPost<BillingOrder, typeof values>(PROXY_BILLING_CHECKOUT, values);
+}
+
+export function createStripeBillingPortal(workspaceId: string) {
+  return apiPost<{ url: string }, Record<string, never>>(
+    PROXY_BILLING_PORTAL(workspaceId),
+    {},
+  );
 }
 
 export function getBillingOrders(workspaceId: string) {

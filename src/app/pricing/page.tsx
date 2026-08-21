@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  createPayOSCheckout,
+  createStripeCheckout,
   getPlans,
   getWorkspaceEntitlements,
   Plan,
@@ -161,18 +161,18 @@ export default function PricingPage() {
     if (!workspaceId || selectedWorkspace?.type !== workspaceType) return;
     setLoadingPlan(plan.id);
     try {
-      const order = await createPayOSCheckout({
+      const order = await createStripeCheckout({
         workspaceId,
         planCode: plan.code,
         billingCycle: cycle,
         quantity: 1,
       });
-      if (!order.checkoutUrl) throw new Error("PayOS checkout URL is missing");
+      if (!order.checkoutUrl) throw new Error("Stripe checkout URL is missing");
       window.location.href = order.checkoutUrl;
     } catch (error) {
       notificationProvider.open({
         type: "error",
-        message: "Unable to create PayOS checkout",
+        message: "Unable to create Stripe checkout",
         description: error instanceof Error ? error.message : undefined,
       });
     } finally {
@@ -201,7 +201,7 @@ export default function PricingPage() {
       <div className="mx-auto max-w-[1600px]">
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-semibold tracking-tight text-gray-950">Upgrade your plan</h1>
-          <p className="mt-2 text-sm text-gray-500">Choose the right plan for your projects and team.</p>
+          <p className="mt-2 text-sm leading-6 text-gray-500">Choose the right plan for your projects and team.</p>
         </div>
 
         <div className="mx-auto mb-6 grid max-w-sm grid-cols-2 rounded-3xl bg-gray-200/70 p-1">
@@ -219,6 +219,26 @@ export default function PricingPage() {
           >
             <Users className="h-4 w-4" /> Business
           </button>
+        </div>
+
+        <div className="mb-3 flex justify-end">
+          <div className="flex h-6 items-center rounded-full border border-gray-200 bg-white">
+            {(["monthly", "yearly"] as BillingCycle[]).map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => setCycle(item)}
+                className={`h-5 cursor-pointer rounded-full px-2 text-[11px]! capitalize leading-5 transition ${cycle === item ? "bg-primary-500 !text-white" : "text-gray-500 hover:bg-gray-50 hover:text-gray-900"}`}
+              >
+                {item}
+                {item === "yearly" && (
+                  <span className={`ml-1 text-[8px] ${cycle === item ? "text-green-100" : "text-green-600"}`}>
+                    save 17%
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="flex flex-wrap items-stretch justify-center gap-6">
@@ -243,31 +263,14 @@ export default function PricingPage() {
                 key={plan.id}
                 className={`relative flex min-h-[520px] w-full flex-col rounded-2xl border bg-white p-6 md:w-[calc(50%_-_12px)] xl:w-[calc(25%_-_18px)] ${isPopular ? "border-primary-300 shadow-[0_18px_50px_-28px_rgba(66,165,245,0.65)]" : "border-gray-200"}`}
               >
-                <div className="relative mb-5 min-h-[76px]">
-                  <div className="w-full">
-                    <h2 className="text-3xl! font-semibold! text-gray-950">{plan.name}</h2>
-                    <p className="mt-2 min-h-10 text-sm leading-5 text-gray-500">{plan.description}</p>
-                  </div>
-                  <div className="absolute right-0 top-0 flex items-center gap-2">
-                    {audience === "personal" && plan.code === "pro" && (
-                      <div className="flex rounded-3xl border border-gray-200 bg-gray-50 p-0.5">
-                        {(["monthly", "yearly"] as BillingCycle[]).map((item) => (
-                          <button
-                            key={item}
-                            type="button"
-                            onClick={() => setCycle(item)}
-                            className={`cursor-pointer rounded-3xl px-2.5 py-1 text-xs! capitalize transition ${cycle === item ? "bg-primary-500 !text-white shadow-sm" : "text-gray-500 hover:bg-white hover:text-gray-900"}`}
-                          >
-                            {item}
-                            {item === "yearly" && <span className={`ml-1 text-[9px] ${cycle === item ? "text-green-100" : "text-green-600"}`}>save 17%</span>}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                <div className="mb-3 flex min-h-7 items-center justify-end">
                     {isCurrent && (
-                      <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">Current plan</span>
+                      <span className="inline-flex h-6 items-center rounded-full bg-green-50 px-2.5 text-[10px] font-semibold text-green-700">Current plan</span>
                     )}
-                  </div>
+                </div>
+                <div className="mb-5 min-h-[76px]">
+                  <h2 className="text-3xl! font-semibold! text-gray-950">{plan.name}</h2>
+                  <p className="mt-2 min-h-10 text-sm leading-5 text-gray-500">{plan.description}</p>
                 </div>
 
                 <div className="mb-5 min-h-[86px]">
@@ -318,10 +321,6 @@ export default function PricingPage() {
             );
           })}
         </div>
-
-        <p className="pt-8 text-center text-xs text-gray-500">
-          Payments are processed securely through PayOS and VietQR. Paid plans use one-time billing for the selected period.
-        </p>
       </div>
     </div>
   );

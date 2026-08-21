@@ -1,6 +1,6 @@
 "use client";
 
-import { AdminSubscription, AdminSubscriptionAction, createAdminRenewalBill, getAdminSubscriptions, updateAdminSubscription } from "@/api/admin/client";
+import { AdminSubscription, AdminSubscriptionAction, getAdminSubscriptions, updateAdminSubscription } from "@/api/admin/client";
 import LoadingIndicator from "@/components/LoadingIndicator";
 import { Avatar, Button, Input, Modal, Table } from "antd";
 import { useEffect, useState } from "react";
@@ -20,7 +20,6 @@ export default function AdminSubscriptionsPage() {
   const [actionState, setActionState] = useState<{ item: AdminSubscription; action: AdminSubscriptionAction }>();
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
-  const [creatingBillId, setCreatingBillId] = useState<string>();
 
   const load = async () => setItems(await getAdminSubscriptions());
   useEffect(() => { void load(); }, []);
@@ -41,22 +40,6 @@ export default function AdminSubscriptionsPage() {
       notificationProvider.open({ type: "success", message: "Subscription updated" });
     } finally { setSaving(false); }
   };
-  const createBill = async (item: AdminSubscription) => {
-    setCreatingBillId(item.id);
-    try {
-      const bill = await createAdminRenewalBill(item.id);
-      notificationProvider.open({
-        type: "success",
-        message:
-          bill.status === "pending"
-            ? "Renewal bill is ready"
-            : `Existing ${bill.status} bill returned`,
-      });
-    } finally {
-      setCreatingBillId(undefined);
-    }
-  };
-
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 text-gray-100 sm:px-6 lg:px-10 lg:py-10">
       <div className="mb-6"><h2 className="text-2xl font-bold text-white">Subscriptions</h2><p className="mt-1 text-sm text-gray-400">Manage plan access and subscription lifecycle.</p></div>
@@ -70,9 +53,6 @@ export default function AdminSubscriptionsPage() {
           { title: "Period ends", dataIndex: "currentPeriodEnd", render: (value: string) => new Date(value).toLocaleDateString() },
           { title: "Actions", render: (_: unknown, item: AdminSubscription) => <div className="flex flex-wrap gap-1">
             {item.status === "paused" ? <Button className="!h-8 !px-3 !text-xs !font-semibold" onClick={() => openAction(item, "resume")}>Resume</Button> : item.status === "active" ? <Button className="!h-8 !px-3 !text-xs !font-semibold" onClick={() => openAction(item, "pause")}>Pause</Button> : null}
-            {item.status === "active" && !item.cancelAtPeriodEnd ? <Button className="!h-8 !px-3 !text-xs !font-semibold" onClick={() => openAction(item, "cancel_at_period_end")}>Cancel renewal</Button> : null}
-            {item.status === "active" && item.cancelAtPeriodEnd ? <Button className="!h-8 !px-3 !text-xs !font-semibold" onClick={() => openAction(item, "resume_renewal")}>Resume renewal</Button> : null}
-            {item.status === "active" ? <Button className="!h-8 !px-3 !text-xs !font-semibold" loading={creatingBillId === item.id} onClick={() => void createBill(item)}>Create bill</Button> : null}
             {!["canceled", "expired"].includes(item.status) ? <Button danger className="!h-8 !px-3 !text-xs !font-semibold" onClick={() => openAction(item, "revoke")}>Revoke now</Button> : null}
           </div> },
         ]} />

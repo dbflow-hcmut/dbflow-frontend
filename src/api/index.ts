@@ -38,6 +38,8 @@ export const PROXY_WORKSPACE_ENTITLEMENTS = (workspaceId: string) =>
 export const PROXY_BILLING_CHECKOUT = `${PROXY_BASE}/billing/checkout`;
 export const PROXY_BILLING_ORDERS = (workspaceId: string) =>
   `${PROXY_BASE}/billing/workspaces/${workspaceId}/orders`;
+export const PROXY_BILLING_PORTAL = (workspaceId: string) =>
+  `${PROXY_BASE}/billing/workspaces/${workspaceId}/portal`;
 export const PROXY_CANCEL_BILLING_ORDER = (
   workspaceId: string,
   orderId: string,
