@@ -16,6 +16,7 @@ import {
   User,
   LogOut,
   X,
+  ScrollText,
 } from "lucide-react";
 import { Avatar, Dropdown } from "antd";
 import classNames from "classnames";
@@ -59,6 +60,11 @@ const navItems: NavItem[] = [
     label: "Billing",
     icon: <BarChart3 className="h-5 w-5" />,
     path: "/admin/billing",
+  },
+  {
+    label: "Audit logs",
+    icon: <ScrollText className="h-5 w-5" />,
+    path: "/admin/audit-logs",
   },
 ];
 

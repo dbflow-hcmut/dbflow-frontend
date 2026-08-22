@@ -161,6 +161,23 @@ export interface PlanConfigInput {
 
 export type CreatePlanInput = PlanConfigInput & { code: string };
 
+export interface AdminAuditLog {
+  id: string;
+  adminUserId: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  beforeData: Record<string, unknown> | null;
+  afterData: Record<string, unknown> | null;
+  reason: string | null;
+  createdAt: string;
+  admin: { id: string; fullName: string; email: string } | null;
+}
+
+export function getAdminAuditLogs() {
+  return apiGet<AdminAuditLog[]>(`${PROXY_ADMIN}/audit-logs`);
+}
+
 export function getAdminDashboard() {
   return apiGet<AdminDashboard>(`${PROXY_ADMIN}/dashboard`);
 }

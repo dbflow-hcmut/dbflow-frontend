@@ -86,10 +86,17 @@ used seats = active workspace members + pending invitations
 - Hiển thị plan, subscription status, active/pending/used seats và progress.
 - Backend vẫn enforce seat; UI chỉ hiển thị.
 - Plan & usage tab hiển thị projects, DB connections và schema usage.
-- AI request counter và monthly limit cũng được hiển thị.
+- AI request counter và monthly limit cũng được hiển thị — **per-seat kể từ
+  `1784793600000-AddUserScopeToUsageCounters.ts`**: số hiển thị trong
+  `entitlements.usage.aiRequests` là phần của chính user gọi API, không phải
+  tổng cả workspace. Owner/Admin xem thêm bảng theo từng member qua
+  `GET /workspaces/:workspaceId/usage/ai-requests` (xem
+  `ai-gateway-quota-implementation-rules.md`).
 - Document storage và monthly export usage được hiển thị.
 - Export usage lấy từ `usage_counters` với metric `exports_monthly` và period
-  UTC `YYYY-MM`. Xóa một export history record không làm giảm usage.
+  UTC `YYYY-MM` — cũng đã thành per-seat cùng đợt đổi ở trên, vì dùng chung
+  bảng `usage_counters` với AI request. Xóa một export history record không
+  làm giảm usage.
 
 ## 8. Resource quota
 

@@ -29,12 +29,25 @@ export const PROXY_WORKSPACE_LEAVE = (workspaceId: string) =>
   `${PROXY_WORKSPACE_DETAIL(workspaceId)}/leave`;
 export const PROXY_WORKSPACE_TRANSFER_OWNERSHIP = (workspaceId: string) =>
   `${PROXY_WORKSPACE_DETAIL(workspaceId)}/transfer-ownership`;
+export const PROXY_WORKSPACE_AUDIT_LOGS = (workspaceId: string) =>
+  `${PROXY_WORKSPACE_DETAIL(workspaceId)}/audit-logs`;
+export const PROXY_WORKSPACE_GROUPS = (workspaceId: string) =>
+  `${PROXY_WORKSPACE_DETAIL(workspaceId)}/groups`;
+export const PROXY_WORKSPACE_GROUP = (workspaceId: string, groupId: string) =>
+  `${PROXY_WORKSPACE_GROUPS(workspaceId)}/${groupId}`;
+export const PROXY_WORKSPACE_GROUP_MEMBER = (
+  workspaceId: string,
+  groupId: string,
+  targetUserId: string,
+) => `${PROXY_WORKSPACE_GROUP(workspaceId, groupId)}/members/${targetUserId}`;
 export const PROXY_ACCEPT_WORKSPACE_INVITATION = `${PROXY_BASE}/workspace-invitations/accept`;
 export const PROXY_PLANS = `${PROXY_BASE}/plans`;
 export const PROXY_WORKSPACE_SUBSCRIPTION = (workspaceId: string) =>
   `${PROXY_WORKSPACE_DETAIL(workspaceId)}/subscription`;
 export const PROXY_WORKSPACE_ENTITLEMENTS = (workspaceId: string) =>
   `${PROXY_WORKSPACE_DETAIL(workspaceId)}/entitlements`;
+export const PROXY_WORKSPACE_AI_USAGE_BREAKDOWN = (workspaceId: string) =>
+  `${PROXY_WORKSPACE_DETAIL(workspaceId)}/usage/ai-requests`;
 export const PROXY_BILLING_CHECKOUT = `${PROXY_BASE}/billing/checkout`;
 export const PROXY_BILLING_ORDERS = (workspaceId: string) =>
   `${PROXY_BASE}/billing/workspaces/${workspaceId}/orders`;
@@ -48,6 +61,7 @@ export const PROXY_ADMIN = `${PROXY_BASE}/admin`;
 
 export const PROXY_PROJECTS = `${PROXY_BASE}/projects`;
 export const PROXY_PROJECT_DETAIL = (id: string) => `${PROXY_PROJECTS}/${id}`;
+export const PROXY_PROJECT_GROUP = (id: string) => `${PROXY_PROJECT_DETAIL(id)}/group`;
 export const PROXY_DELETE_PROJECT = (id: string) => `${PROXY_PROJECTS}/${id}`;
 export const PROXY_PROJECT_SCHEMAS = (id: string) => `${PROXY_PROJECT_DETAIL(id)}/schemas`;
 export const PROXY_PROJECT_DOCUMENTS = (id: string) => `${PROXY_PROJECT_DETAIL(id)}/documents`;

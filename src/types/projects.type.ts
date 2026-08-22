@@ -5,6 +5,7 @@ export interface CreateProjectRequest {
     name: string;
     description?: string;
     skipDefaultSchema?: boolean;
+    groupId?: string;
 }
 
 export interface ProjectResponse {
@@ -20,6 +21,7 @@ export interface ProjectResponse {
     createdAt: string;
     updatedAt: string;
     visibility?: string;
+    groupId?: string | null;
     status: "active" | "archived";
 }
 
@@ -37,6 +39,7 @@ export interface Project {
     owner: Owner;
     createdAt: string;
     updatedAt: string;
+    groupId?: string | null;
     status: "active" | "archived";
 }
 
@@ -61,6 +64,7 @@ export interface CreateProjectFormValues {
     workspaceId: string;
     name: string;
     description?: string;
+    groupId?: string;
 }
 
 export interface ProjectSchemasResponse {
@@ -113,5 +117,9 @@ export interface IUserSharedProject {
 
 export interface ISharedPermissionResponse {
     project_mode: string;
+    workspace_id: string;
+    workspace_type: "personal" | "team";
+    group_id: string | null;
+    group_name: string | null;
     list_users: IUserSharedProject[];
 }

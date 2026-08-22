@@ -32,6 +32,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { notificationProvider } from "@/providers/notification";
 import { getActiveWorkspaceId, setActiveWorkspaceId as persistActiveWorkspaceId } from "@/utils/active-workspace";
 import { ChatConversation, deleteConversation, getConversations } from "@/api/chat/client";
+import { getWorkspaceSubscription } from "@/api/subscriptions/client";
 
 interface NavItem {
   label: string;
@@ -77,6 +78,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose, mobile = fa
   const [userData, setUserData] = useState<UserResponse | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>();
+  const [activePlanName, setActivePlanName] = useState<string>();
   const [createTeamOpen, setCreateTeamOpen] = useState(false);
   const [teamName, setTeamName] = useState("");
   const [creatingTeam, setCreatingTeam] = useState(false);
@@ -139,6 +141,28 @@ export default function Sidebar({ mobileOpen = false, onMobileClose, mobile = fa
     });
   }, [mobile, mobileOpen, pathname, router, searchParams]);
 
+  useEffect(() => {
+    if (!activeWorkspaceId) {
+      setActivePlanName(undefined);
+      return;
+    }
+
+    let cancelled = false;
+    setActivePlanName(undefined);
+    void getWorkspaceSubscription(activeWorkspaceId)
+      .then((subscription) => {
+        if (!cancelled) setActivePlanName(subscription.plan.name);
+      })
+      .catch((error) => {
+        if (!cancelled) setActivePlanName(undefined);
+        console.error("Failed to load workspace subscription", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspaceId]);
+
   const isActive = (path: string) => {
     if (path === "/ai-chat") return pathname === "/ai-chat";
     if (path === "/history") return pathname === "/history" || pathname.startsWith("/ai-chat/c/");
@@ -186,7 +210,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose, mobile = fa
         ))}
       </div>
       <div className="mx-2 my-2 border-t border-gray-200" />
-      <button type="button" className="flex h-10 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-sm text-gray-800 transition-colors hover:bg-gray-100" onClick={() => { setAccountMenuOpen(false); setCreateTeamOpen(true); }}><Plus className="h-[18px] w-[18px]" /><span>New team</span></button>
+      <button type="button" className="flex h-10 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-sm text-gray-800 transition-colors hover:bg-gray-100" onClick={() => { setAccountMenuOpen(false); setCreateTeamOpen(true); }}><Plus className="h-[18px] w-[18px]" /><span>New workspace</span></button>
       {userData?.role?.toLowerCase() === "admin" && (
         <Link
           href="/admin"
@@ -370,7 +394,14 @@ export default function Sidebar({ mobileOpen = false, onMobileClose, mobile = fa
                 <span className="block truncate text-sm font-medium text-gray-900">
                   {userData?.fullName || "User"}
                 </span>
-                <span className="block truncate text-xs text-gray-500">{activeWorkspace?.name || ""}</span>
+                <span className="flex min-w-0 items-center gap-1.5 text-xs text-gray-500">
+                  <span className="truncate">{activeWorkspace?.name || ""}</span>
+                  {activePlanName && (
+                    <span className="shrink-0 rounded-md bg-primary-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary-600">
+                      {activePlanName}
+                    </span>
+                  )}
+                </span>
               </span>
             )}
           </button>

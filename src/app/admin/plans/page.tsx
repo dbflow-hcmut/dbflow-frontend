@@ -5,6 +5,7 @@ import { Plan } from "@/api/subscriptions/client";
 import LoadingIndicator from "@/components/LoadingIndicator";
 import { Button, Table } from "antd";
 import { notificationProvider } from "@/providers/notification";
+import Link from "next/link";
 import { Plus } from "lucide-react";
 import { ADMIN_TABLE_CLASS } from "../_lib/styles";
 import { useMemo, useState, useEffect } from "react";
@@ -70,7 +71,13 @@ export default function AdminPlansPage() {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold text-white">Plans & pricing</h2>
-          <p className="mt-1 text-sm text-gray-400">Tune pricing, seats and configuration. Changes are recorded in the admin audit log.</p>
+          <p className="mt-1 text-sm text-gray-400">
+            Tune pricing, seats and configuration. Changes are recorded in the{" "}
+            <Link href="/admin/audit-logs" className="text-primary-400 underline hover:text-primary-300">
+              admin audit log
+            </Link>
+            .
+          </p>
         </div>
         <Button type="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setModalState({ mode: "create" })}>
           Add plan

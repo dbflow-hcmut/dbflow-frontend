@@ -10,11 +10,20 @@ Code chính:
 - `dbflow-backend/src/modules/workspaces/entity/workspace.entity.ts`
 - `dbflow-backend/src/modules/workspaces/entity/workspace-member.entity.ts`
 - `dbflow-backend/src/modules/workspaces/entity/workspace-invitation.entity.ts`
+- `dbflow-backend/src/modules/workspaces/entity/workspace-audit-log.entity.ts`
 - `dbflow-backend/src/modules/workspaces/workspaces.service.ts`
 - `dbflow-backend/src/modules/workspaces/workspaces.controller.ts`
+- `dbflow-backend/src/modules/projects/projects.service.ts`
+- `dbflow-backend/src/modules/groups/entity/group.entity.ts`
+- `dbflow-backend/src/modules/groups/entity/group-member.entity.ts`
+- `dbflow-backend/src/modules/groups/groups.service.ts`
+- `dbflow-backend/src/modules/groups/groups.controller.ts`
+- `dbflow-backend/src/migrations/1784800800000-CreateGroups.ts`
+- `dbflow-frontend/src/api/groups/client.ts`
 - `dbflow-backend/src/migrations/1778100000000-CreateWorkspacesTables.ts`
 - `dbflow-backend/src/migrations/1778200000000-CreateWorkspaceInvitationsTable.ts`
 - `dbflow-backend/src/migrations/1778300000000-AddWorkspaceOwnershipToResources.ts`
+- `dbflow-backend/src/migrations/1784797200000-CreateWorkspaceAuditLogs.ts`
 - `dbflow-backend/src/modules/auth/auth.controller.ts`
 - `dbflow-backend/src/modules/auth/auth.service.ts`
 - `dbflow-frontend/src/app/accept-workspace-invite/page.tsx`
@@ -48,6 +57,20 @@ Code chính:
 - Raw invitation token chỉ gửi qua email; database lưu SHA-256 hash.
 - Invitation hết hạn sau 7 ngày.
 - Chỉ một pending invitation được tồn tại cho cùng workspace/email.
+
+### Workspace audit log
+
+- Bảng `workspace_audit_logs`: `workspace_id`, `actor_user_id`, `action`,
+  `target_type`, `target_id`, `before_data`/`after_data` (jsonb), `created_at`.
+  Cùng shape với `admin_audit_logs` nhưng scope theo workspace thay vì toàn hệ
+  thống.
+- Ghi log tại: `updateMemberRole`, `removeMember`, `transferOwnership`,
+  `inviteMember`, `revokeInvitation` (trong `WorkspacesService`) và
+  `ProjectsService.updateProjectVisibility`.
+- `WorkspacesService.logActivity(...)` là entry point chung (public, để module
+  khác như `ProjectsService` gọi qua injected `WorkspacesService`).
+- `WorkspacesService.listAuditLogs(userId, workspaceId)` chỉ cho Owner/Admin
+  (không yêu cầu feature flag `team_roles`, khác với quản lý role/member).
 
 ## 3. Runtime flows
 
@@ -173,10 +196,83 @@ Slug backfill dùng `personal-<user uuid>` để đảm bảo unique.
 - Personal workspace không được invite member, leave hoặc transfer ownership.
 - API không tin workspace ownership từ request body; membership được query từ
   database bằng authenticated user ID.
-- Team project yêu cầu active workspace membership trước khi xét project
-  permission.
-- Personal project vẫn giữ project collaborator behavior hiện tại.
-- Team project chỉ mời được user đã là active workspace member.
+- Personal project vẫn giữ project collaborator behavior hiện tại
+  (`ProjectVisibility` + `user_projects` + `project_invitations`), không đổi.
+- **Quản lý project trong Team workspace không còn giới hạn ở người tạo**:
+  `checkOwnership` (đổi Group, quản lý collaborator) và `deleteProject`
+  cho phép cả Owner/Admin của workspace, qua
+  `WorkspacesService.isOwnerOrAdmin(userId, workspaceId)` — vì project thuộc
+  về team, không thuộc về cá nhân người tạo.
+- `getProjectPermissions`/`getAllProjectPermissions` trả thêm field
+  `canManage` (đúng = creator hoặc Owner/Admin), `workspace_type`,
+  `workspace_id`, `group_id`, `group_name` — frontend không còn chỉ dựa vào
+  `permission === 'owner'` để hiện nút quản lý. `owner`/`createdBy` trong
+  response chỉ còn là metadata "ai tạo ra", không phải quyền lực duy nhất.
+
+### 4.1 Team-workspace project access — Group-based (thay thế hoàn toàn `ProjectVisibility` cho nhánh Team)
+
+Sau bản đầu (D4/D6: mặc định `anyone_can_edit` cho mọi project Team), phát
+hiện gap: không có cách giấu 1 project khỏi 1 phần thành viên trong cùng
+team. Giải pháp: thêm khái niệm **Group** — xem
+`docs-v2/project-group-sharing-plan.md` cho bối cảnh thiết kế đầy đủ.
+`ProjectVisibility`/`user_projects`/`project_invitations` bị **bỏ hoàn toàn**
+cho nhánh Team (`createProject` không còn set `visibility` theo workspace
+type, cột `visibility` vẫn tồn tại trên mọi row nhưng vô nghĩa cho Team).
+
+Model mới:
+- `projects.group_id` (nullable, FK → `groups`, `ON DELETE SET NULL`) — 1
+  project thuộc tối đa 1 Group.
+- `groups`/`group_members` (module `groups` riêng, không nằm trong
+  `workspaces` để tránh circular dependency — xem §4.2) — Group là tập con
+  thành viên trong 1 workspace, không có role riêng, không có billing.
+
+Quy tắc truy cập (`ProjectsService.assertTeamProjectAccess`, dùng chung bởi
+`checkViewPermission`/`checkWritePermission`/`getAllProjects`):
+```
+canView(user, project):
+  if user.workspaceRole in [Owner, Admin]: true   # luôn thấy hết, xác nhận có chủ đích
+  if project.groupId is NULL: true                 # không giới hạn Group = cả team thấy
+  if user thuộc project.groupId (group_members): true
+  else: false
+
+canEdit(user, project) = canView(...) AND user.workspaceRole in [Owner, Admin, Member]
+```
+Owner/Admin luôn thấy hết bất kể Group — quyết định có chủ đích (giống
+GitLab: Owner group cha luôn thấy xuyên suốt), người dùng xác nhận chấp nhận
+trade-off này trong buổi thảo luận.
+
+`createProject` nhận thêm `dto.groupId` (optional, chỉ hợp lệ khi workspace
+là Team và group thuộc đúng workspace đó — validate qua
+`GroupsService.belongsToWorkspace`). Không truyền = project share cho cả
+team (hành vi mặc định, không đổi so với D4).
+
+`PATCH /projects/:projectId/group` (`ProjectsService.updateProjectGroup`) đổi
+Group của project đã tạo — dùng lại `checkOwnership` nên Owner/Admin/creator
+đều đổi được.
+
+Xóa 1 Group (`DELETE /workspaces/:id/groups/:groupId`) → mọi project thuộc
+Group đó tự động `group_id = NULL` (nhờ `ON DELETE SET NULL`, không cần code
+dọn dẹp) — quay lại hiện cho cả team.
+
+### 4.2 Module `groups` — tránh circular dependency
+
+`GroupsService` cần check "Owner/Admin của workspace" (cho create/delete
+group, quản lý member) và "active member" (cho list group, đọc để chọn lúc
+tạo project). `WorkspacesService` cần gọi
+`GroupsService.removeUserFromWorkspaceGroups` khi 1 user rời/bị xóa khỏi
+workspace. Để tránh `WorkspacesModule` ⇄ `GroupsModule` circular:
+
+- `GroupsModule` **không** import `WorkspacesModule` — tự inject
+  `WorkspaceMemberEntity`/`WorkspaceAuditLogEntity` trực tiếp qua
+  `TypeOrmModule.forFeature` (giống cách `SubscriptionsModule` đã làm với
+  `WorkspaceMemberEntity`/`WorkspaceEntity`/`WorkspaceInvitationEntity`), tự
+  viết audit-log row (cùng bảng `workspace_audit_logs`, không gọi
+  `WorkspacesService.logActivity`).
+- `WorkspacesModule` và `ProjectsModule` đều import `GroupsModule` (một
+  chiều) — không có cycle.
+- List group: mọi active member đọc được (cần cho dropdown chọn Group lúc
+  tạo project). Create/delete group, add/remove member trong group: chỉ
+  Owner/Admin.
 
 ## 5. API hiện tại
 
@@ -193,6 +289,14 @@ PATCH /workspaces/:workspaceId/members/:targetUserId/role
 DELETE /workspaces/:workspaceId/members/:targetUserId
 POST  /workspaces/:workspaceId/leave
 POST  /workspaces/:workspaceId/transfer-ownership
+GET   /workspaces/:workspaceId/audit-logs
+GET   /workspaces/:workspaceId/usage/ai-requests
+GET    /workspaces/:workspaceId/groups
+POST   /workspaces/:workspaceId/groups
+DELETE /workspaces/:workspaceId/groups/:groupId
+POST   /workspaces/:workspaceId/groups/:groupId/members/:targetUserId
+DELETE /workspaces/:workspaceId/groups/:groupId/members/:targetUserId
+PATCH  /projects/:projectId/group
 POST  /workspace-invitations/accept
 ```
 

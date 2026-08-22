@@ -17,3 +17,5 @@ export const formatPeriodLabel = (period: string, bucket: AnalyticsBucket) => {
 };
 
 export const formatDate = (value?: string | null) => (value ? dayjs(value).format("D MMM YYYY") : "-");
+
+export const formatDateTime = (value?: string | null) => (value ? dayjs(value).format("D MMM YYYY, HH:mm") : "-");

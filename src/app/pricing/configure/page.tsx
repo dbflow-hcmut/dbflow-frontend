@@ -14,7 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 
 type Cycle = "monthly" | "yearly";
 
-export default function ConfigureBusinessPlanPage() {
+export default function ConfigureTeamPlanPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedWorkspaceId = searchParams.get("workspaceId");
@@ -164,7 +164,7 @@ export default function ConfigureBusinessPlanPage() {
             </section>
 
             <aside className="rounded-3xl border border-gray-200 bg-white p-7 shadow-[0_18px_45px_-28px_rgba(31,41,55,.45)]">
-              <h2 className="text-2xl font-semibold text-gray-950">{plan?.name ?? "Business"} plan</h2>
+              <h2 className="text-2xl font-semibold text-gray-950">{plan?.name ?? "Team"} plan</h2>
               <p className="mt-2 text-sm text-gray-500">{plan?.description}</p>
               <ul className="mt-7 space-y-3 text-sm text-gray-700">
                 {(plan ? [`${plan.includedSeats} seats included`, `${plan.limits.projects ?? "Unlimited"} projects`, `${plan.limits.ai_requests_monthly ?? "Unlimited"} AI requests per month`, ...(plan.features.team_roles ? ["Team roles and permissions"] : []), ...(plan.features.export ? ["Schema and DDL exports"] : [])] : []).map((item) => <li key={item} className="flex gap-2"><Check className="h-4 w-4 text-primary-500" />{item}</li>)}

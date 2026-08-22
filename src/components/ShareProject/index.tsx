@@ -5,10 +5,13 @@ import {
   useFetchSharedPermission,
   useFetchUserPermission,
   useUpdateProjectVisibility,
+  useUpdateProjectGroup,
   useUpdateUserPermission,
   useRemoveUserAccess,
   useInviteUsers,
 } from "./api";
+import { getGroups, Group } from "@/api/groups/client";
+import { getWorkspaceMembers, WorkspaceMember } from "@/api/workspaces/client";
 import {
   API_AVATAR,
   ProjectInvitePermission,
@@ -49,16 +52,20 @@ export default function ShareProject(props: shareProjectProps) {
 
   const { updateVisibility, isLoading: isLoadingVisibility } =
     useUpdateProjectVisibility();
+  const { updateGroup, isLoading: isLoadingGroup } = useUpdateProjectGroup();
   const { updateUserPermission, isLoading: isLoadingUserPerm } =
     useUpdateUserPermission();
   const { removeAccess, isLoading: isLoadingRemove } = useRemoveUserAccess();
   const { invite, isLoading: isLoadingInvite } = useInviteUsers();
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [isLoadingGroups, setIsLoadingGroups] = useState(false);
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([]);
 
   const isUpdating =
     isLoadingVisibility || isLoadingUserPerm || isLoadingRemove || isLoadingInvite;
 
-  const currentUserCanEdit =
-    userPermissionData?.permission === ProjectPermission.OWNER;
+  const currentUserCanEdit = userPermissionData?.canManage ?? false;
+  const isTeamProject = sharedPermissionData?.workspace_type === "team";
 
   useEffect(() => {
     if (openShareProject) {
@@ -66,6 +73,45 @@ export default function ShareProject(props: shareProjectProps) {
       refetchUserPermission();
     }
   }, [openShareProject, refetchSharedPermission, refetchUserPermission]);
+
+  useEffect(() => {
+    if (!openShareProject || !isTeamProject || !sharedPermissionData?.workspace_id) {
+      return;
+    }
+    const workspaceId = sharedPermissionData.workspace_id;
+    setIsLoadingGroups(true);
+    Promise.all([getGroups(workspaceId), getWorkspaceMembers(workspaceId)])
+      .then(([groupData, memberData]) => {
+        setGroups(groupData);
+        setWorkspaceMembers(memberData);
+      })
+      .catch(() => {
+        setGroups([]);
+        setWorkspaceMembers([]);
+      })
+      .finally(() => setIsLoadingGroups(false));
+  }, [openShareProject, isTeamProject, sharedPermissionData?.workspace_id]);
+
+  const activeWorkspaceMembers = workspaceMembers.filter(
+    (member) => member.status === "active",
+  );
+  const selectedGroup = groups.find(
+    (group) => group.id === sharedPermissionData?.group_id,
+  );
+  const peopleWithAccess = selectedGroup
+    ? activeWorkspaceMembers.filter(
+        (member) =>
+          member.role === "owner" ||
+          member.role === "admin" ||
+          selectedGroup.members.some((groupMember) => groupMember.userId === member.userId),
+      )
+    : activeWorkspaceMembers;
+
+  const handleUpdateProjectGroup = async (groupId: string | null) => {
+    if (!projectId) return;
+    await updateGroup({ projectId, groupId });
+    refetchSharedPermission();
+  };
 
   const handleEmailChange = (values: string[]) => {
     const invalid = values.filter((email) => !isValidEmail(email));
@@ -151,6 +197,113 @@ export default function ShareProject(props: shareProjectProps) {
     setMessage("");
     setSendInvite(true);
   };
+
+  // Team-workspace projects don't use per-user invites/visibility — access is
+  // decided by workspace role + Group (see docs-v2/project-group-sharing-plan.md).
+  // Only surface a Group picker instead of the Personal-workspace invite UI.
+  if (isTeamProject) {
+    return (
+      <Modal
+        title={
+          <div className="overflow-hidden text-ellipsis whitespace-nowrap pr-4">
+            Share {projectName}
+          </div>
+        }
+        open={openShareProject}
+        onCancel={handleCancel}
+        footer={null}
+        width={550}
+        zIndex={2000}
+      >
+        <div className="loading-bar" hidden={!isLoadingGroup} />
+        <div className="pt-2">
+          <div className="font-semibold pb-2">Who can see this project</div>
+          {isLoadingSharedPermission || isLoadingGroups ? (
+            <Skeleton.Input active block size="large" className="mt-4 !h-10 !w-full" />
+          ) : (
+            <Select
+              className="mt-4 h-10! w-full"
+              value={sharedPermissionData?.group_id ?? undefined}
+              placeholder="Whole team (no group)"
+              allowClear
+              disabled={!currentUserCanEdit || isLoadingGroup}
+              options={groups.map((group) => ({
+                value: group.id,
+                label: group.name,
+              }))}
+              onChange={(groupId) =>
+                void handleUpdateProjectGroup(groupId ?? null)
+              }
+            />
+          )}
+
+          <div className="mt-6 font-semibold">
+            People with access ({peopleWithAccess.length})
+          </div>
+          {selectedGroup && (
+            <p className="mt-1 text-xs text-gray-500">
+              Members of &quot;{selectedGroup.name}&quot;, plus workspace Owner/Admin.
+            </p>
+          )}
+          <div className="mt-2 flex max-h-64 flex-col gap-4 overflow-y-auto py-2">
+            {isLoadingSharedPermission || isLoadingGroups ? (
+              <Skeleton />
+            ) : peopleWithAccess.length === 0 ? (
+              <div className="text-sm text-gray-500">No one else has access yet.</div>
+            ) : (
+              peopleWithAccess.map((member) => (
+                <div
+                  key={member.userId}
+                  className="flex items-center justify-between gap-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="h-8 w-8">
+                      <Image
+                        src={member.avatar}
+                        alt="avatar"
+                        width={32}
+                        height={32}
+                        className="h-8 w-8 rounded-full object-cover"
+                        unoptimized
+                      />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1 text-sm font-semibold text-gray-700 dark:text-gray-200">
+                        {member.fullName}
+                        {member.userId === userPermissionData?.userId && (
+                          <span> (You) </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-600">{member.email}</div>
+                    </div>
+                  </div>
+                  <span className="text-xs capitalize text-gray-500">
+                    {member.role}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+        <div className="flex w-full gap-2 pt-6">
+          <Button
+            type="default"
+            className="w-1/2 h-10!"
+            onClick={handleCopyLink}
+          >
+            Copy Link
+          </Button>
+          <Button
+            type="primary"
+            className="w-1/2 h-10!"
+            onClick={() => setOpenShareProject(false)}
+          >
+            Done
+          </Button>
+        </div>
+      </Modal>
+    );
+  }
 
   return (
     <Modal
@@ -307,7 +460,9 @@ export default function ShareProject(props: shareProjectProps) {
                                 <div>
                                   {user.permission ===
                                   ProjectPermission.OWNER ? (
-                                    <span className="text-gray-600">Owner</span>
+                                    <span className="text-gray-600">
+                                      {isTeamProject ? "Created by" : "Owner"}
+                                    </span>
                                   ) : user.permission ===
                                     ProjectPermission.EDITOR ? (
                                     <span className="text-gray-600">
@@ -427,17 +582,25 @@ export default function ShareProject(props: shareProjectProps) {
                           ProjectVisible.ANYONE_EDIT ||
                         sharedPermissionData?.project_mode ===
                           ProjectVisible.ANYONE_VIEW
-                          ? "Public"
+                          ? isTeamProject
+                            ? "Team"
+                            : "Public"
                           : "Private"}
                       </div>
                       <div className="text-xs">
                         {sharedPermissionData?.project_mode ===
                         ProjectVisible.OWNER_INVITED
-                          ? "Owner and invited can access"
+                          ? isTeamProject
+                            ? "Only invited teammates can access"
+                            : "Owner and invited can access"
                           : sharedPermissionData?.project_mode ===
                               ProjectVisible.ANYONE_VIEW
-                            ? "Any one can view"
-                            : "Any one can edit"}
+                            ? isTeamProject
+                              ? "Everyone in this workspace can view"
+                              : "Any one can view"
+                            : isTeamProject
+                              ? "Everyone in this workspace can edit"
+                              : "Any one can edit"}
                       </div>
                     </div>
                   </div>
@@ -454,13 +617,13 @@ export default function ShareProject(props: shareProjectProps) {
                       disabled={isUpdating}
                     >
                       <Option value={ProjectVisible.ANYONE_EDIT}>
-                        Any one can edit
+                        {isTeamProject ? "Everyone in workspace can edit" : "Any one can edit"}
                       </Option>
                       <Option value={ProjectVisible.ANYONE_VIEW}>
-                        Any one can view
+                        {isTeamProject ? "Everyone in workspace can view" : "Any one can view"}
                       </Option>
                       <Option value={ProjectVisible.OWNER_INVITED}>
-                        Owner and invited can access
+                        {isTeamProject ? "Only invited teammates" : "Owner and invited can access"}
                       </Option>
                     </Select>
                   )}

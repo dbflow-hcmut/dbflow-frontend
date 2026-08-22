@@ -16,7 +16,7 @@ import LoadingIndicator from "@/components/LoadingIndicator";
 import { useAuth } from "@/providers/AuthProvider";
 
 type BillingCycle = "monthly" | "yearly";
-type Audience = "personal" | "business";
+type Audience = "personal" | "team";
 
 const formatLimit = (value: number | null | undefined) =>
   value == null ? "Unlimited" : value.toLocaleString("en-US");
@@ -82,7 +82,7 @@ export default function PricingPage() {
 
         if (selected) {
           setWorkspaceId(selected.id);
-          setAudience(selected.type === "team" ? "business" : "personal");
+          setAudience(selected.type);
           setQuantity(Math.max(1, selected.type === "team" ? 5 : 1));
           localStorage.setItem("active_workspace_id", selected.id);
         }
@@ -123,7 +123,7 @@ export default function PricingPage() {
       });
   }, [baseDataLoaded, isAuthenticated, workspaceId]);
 
-  const workspaceType = audience === "business" ? "team" : "personal";
+  const workspaceType = audience;
   const selectedWorkspace = workspaces.find((item) => item.id === workspaceId);
   const availablePlans = plans.filter(
     (plan) => plan.workspaceType === workspaceType || plan.workspaceType === "any",
@@ -134,8 +134,7 @@ export default function PricingPage() {
 
   const switchAudience = (nextAudience: Audience) => {
     setAudience(nextAudience);
-    const nextType = nextAudience === "business" ? "team" : "personal";
-    const nextWorkspace = workspaces.find((item) => item.type === nextType);
+    const nextWorkspace = workspaces.find((item) => item.type === nextAudience);
     setWorkspaceId(nextWorkspace?.id);
     if (nextWorkspace) {
       localStorage.setItem("active_workspace_id", nextWorkspace.id);
@@ -214,10 +213,10 @@ export default function PricingPage() {
           </button>
           <button
             type="button"
-            onClick={() => switchAudience("business")}
-            className={`flex cursor-pointer items-center justify-center gap-2 rounded-3xl! px-4 py-2 text-sm font-medium transition ${audience === "business" ? "bg-white text-gray-950 shadow-sm" : "text-gray-500 hover:text-gray-800"}`}
+            onClick={() => switchAudience("team")}
+            className={`flex cursor-pointer items-center justify-center gap-2 rounded-3xl! px-4 py-2 text-sm font-medium transition ${audience === "team" ? "bg-white text-gray-950 shadow-sm" : "text-gray-500 hover:text-gray-800"}`}
           >
-            <Users className="h-4 w-4" /> Business
+            <Users className="h-4 w-4" /> Team
           </button>
         </div>
 

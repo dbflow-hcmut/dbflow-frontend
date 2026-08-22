@@ -30,6 +30,7 @@ export function useFetchUserPermission(projectId: string) {
     const { data, isLoading, error, mutate } = useSWR<{
         userId: string;
         permission: string;
+        canManage: boolean;
     }>(
         projectId ? `user-permission-${projectId}` : null,
         projectId
@@ -39,8 +40,13 @@ export function useFetchUserPermission(projectId: string) {
                       permission: string;
                       invitationId?: string;
                       invitePermission?: string;
+                      canManage?: boolean;
                   }>(url);
-                  return { userId: "", permission: res?.permission ?? "" };
+                  return {
+                      userId: "",
+                      permission: res?.permission ?? "",
+                      canManage: res?.canManage ?? false,
+                  };
               }
             : null,
         { revalidateOnFocus: false }
@@ -51,6 +57,27 @@ export function useFetchUserPermission(projectId: string) {
         isLoading,
         error: error as Error | undefined,
         refetch: mutate,
+    };
+}
+
+// Update project Group (Team workspace only — creator or workspace Owner/Admin)
+export function useUpdateProjectGroup() {
+    const { trigger, isMutating } = useSWRMutation(
+        "update-project-group",
+        async (
+            _key: string,
+            { arg }: { arg: { projectId: string; groupId: string | null } }
+        ) => {
+            const url = `${PROXY_PROJECT_DETAIL(arg.projectId)}/group`;
+            return await apiPatch<unknown, { groupId: string | null }>(url, {
+                groupId: arg.groupId,
+            });
+        }
+    );
+
+    return {
+        updateGroup: trigger,
+        isLoading: isMutating,
     };
 }
 

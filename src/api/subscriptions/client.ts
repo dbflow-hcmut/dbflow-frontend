@@ -1,6 +1,7 @@
 import {
   PROXY_PLANS,
   PROXY_WORKSPACE_ENTITLEMENTS,
+  PROXY_WORKSPACE_AI_USAGE_BREAKDOWN,
   PROXY_WORKSPACE_SUBSCRIPTION,
   PROXY_BILLING_CHECKOUT,
   PROXY_BILLING_ORDERS,
@@ -121,6 +122,22 @@ export function getWorkspaceSubscription(workspaceId: string) {
 export function getWorkspaceEntitlements(workspaceId: string) {
   return apiGet<WorkspaceEntitlements>(
     PROXY_WORKSPACE_ENTITLEMENTS(workspaceId),
+  );
+}
+
+export interface AiUsageBreakdownEntry {
+  userId: string;
+  fullName: string;
+  email: string;
+  used: number;
+  reserved: number;
+  limit: number | null;
+  periodKey: string;
+}
+
+export function getWorkspaceAiUsageBreakdown(workspaceId: string) {
+  return apiGet<AiUsageBreakdownEntry[]>(
+    PROXY_WORKSPACE_AI_USAGE_BREAKDOWN(workspaceId),
   );
 }
 

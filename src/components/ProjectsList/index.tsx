@@ -3,10 +3,12 @@
 import React, { useState, useMemo, useEffect, startTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Search, Grid3x3, List, Plus, Calendar, Trash2, Database, FileCode2, PlugZap, ChevronDown, MoreVertical } from "lucide-react";
-import { Input, Button, Avatar, Pagination, Skeleton, Modal, Dropdown } from "antd";
+import { Input, Button, Avatar, Pagination, Skeleton, Modal, Dropdown, Select } from "antd";
 import { formatDateTimeVN } from "@/utils/functions";
 import { useProjects, deleteProject } from "@/api/projects/client";
 import { getUserMe } from "@/api/users/client";
+import { getWorkspace, WorkspaceSummary } from "@/api/workspaces/client";
+import { getGroups, Group } from "@/api/groups/client";
 import { Project, ProjectsListProps } from "@/types/projects.type";
 import { UserResponse } from "@/types/user.type";
 import { notificationProvider } from "@/providers/notification";
@@ -35,6 +37,9 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
     const serverKeyword = searchParams.get("keyword") || "";
     const queryWorkspaceId = searchParams.get("workspaceId") || undefined;
     const [workspaceId, setWorkspaceId] = useState(queryWorkspaceId);
+    const [currentWorkspace, setCurrentWorkspace] = useState<WorkspaceSummary | null>(null);
+    const [groups, setGroups] = useState<Group[]>([]);
+    const [groupFilter, setGroupFilter] = useState<string | undefined>(undefined);
 
     useEffect(() => {
         if (queryWorkspaceId) {
@@ -51,6 +56,27 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
         params.set("page", "1");
         router.replace(`/projects?${params.toString()}`);
     }, [queryWorkspaceId, router, searchParams]);
+
+    useEffect(() => {
+        if (!workspaceId) {
+            setCurrentWorkspace(null);
+            return;
+        }
+        void getWorkspace(workspaceId)
+            .then(setCurrentWorkspace)
+            .catch(() => setCurrentWorkspace(null));
+    }, [workspaceId]);
+
+    useEffect(() => {
+        if (!workspaceId || currentWorkspace?.type !== "team") {
+            setGroups([]);
+            setGroupFilter(undefined);
+            return;
+        }
+        void getGroups(workspaceId)
+            .then(setGroups)
+            .catch(() => setGroups([]));
+    }, [workspaceId, currentWorkspace?.type]);
 
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -79,13 +105,14 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
     const shouldFetchFromClient = useMemo(() => {
         if (workspaceId && workspaceId !== queryWorkspaceId) return true;
         if (searchKeyword && searchKeyword !== serverKeyword) return true;
+        if (groupFilter) return true;
         if (initialPagination) {
             if (currentPage !== initialPagination.page || currentLimit !== initialPagination.limit) {
                 return true;
             }
         }
         return false;
-    }, [workspaceId, queryWorkspaceId, searchKeyword, serverKeyword, currentPage, currentLimit, initialPagination]);
+    }, [workspaceId, queryWorkspaceId, searchKeyword, serverKeyword, currentPage, currentLimit, initialPagination, groupFilter]);
 
     const { data: projectsData, isLoading } = useProjects(
         currentPage,
@@ -93,6 +120,7 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
         searchKeyword,
         shouldFetchFromClient,
         workspaceId,
+        groupFilter,
     );
 
     const apiProjects = useMemo(() => {
@@ -124,6 +152,22 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
         router.push(`/projects?${params.toString()}`);
     };
 
+    const handleGroupFilterChange = (value: string) => {
+        setGroupFilter(value === "all" ? undefined : value);
+        const params = new URLSearchParams(searchParams.toString());
+        params.set("page", "1");
+        params.set("limit", currentLimit.toString());
+        if (searchKeyword) {
+            params.set("keyword", searchKeyword);
+        } else {
+            params.delete("keyword");
+        }
+        if (workspaceId) {
+            params.set("workspaceId", workspaceId);
+        }
+        router.push(`/projects?${params.toString()}`);
+    };
+
     const projects: Project[] = useMemo(() => {
         if (!apiProjects || !Array.isArray(apiProjects)) return [];
         return apiProjects.map((apiProject) => ({
@@ -133,6 +177,7 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
             owner: apiProject.owner,
             createdAt: apiProject.createdAt,
             updatedAt: apiProject.updatedAt,
+            groupId: apiProject.groupId,
             status: apiProject.status,
         }));
     }, [apiProjects]);
@@ -177,8 +222,21 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
         });
     };
 
+    // Viewer role can't create projects or connect new databases — hide
+    // the actions instead of letting them hit a 403 after clicking.
+    const canCreateProjects =
+        !currentWorkspace || currentWorkspace.currentUserRole !== "viewer";
+
     const isOwner = (project: Project) => {
-        return currentUser?.id === project.owner.id;
+        if (currentUser?.id === project.owner.id) return true;
+        // Team workspace Owner/Admin can fully delete any project in the
+        // team, not just ones they personally created (D6).
+        return Boolean(
+            currentWorkspace &&
+                currentWorkspace.id === project.workspaceId &&
+                currentWorkspace.type === "team" &&
+                ["owner", "admin"].includes(currentWorkspace.currentUserRole),
+        );
     };
 
     return (
@@ -192,16 +250,29 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                         prefix={<Search className="w-4 h-4 text-gray-400" />}
                         value={searchValue}
                         onChange={(e) => setSearchValue(e.target.value)}
-                        className="w-full !rounded-xl !border-0 !bg-gray-100 !shadow-none lg:max-w-md"
+                        className="!h-10 w-full !rounded-xl !border-0 !bg-gray-100 !shadow-none lg:max-w-md"
                         allowClear
                     />
                 </div>
 
+                {currentWorkspace?.type === "team" && groups.length > 0 && (
+                    <Select
+                        value={groupFilter ?? "all"}
+                        onChange={handleGroupFilterChange}
+                        popupMatchSelectWidth={false}
+                        className="!h-10 w-full shrink-0 sm:w-48 [&_.ant-select-selector]:!h-10 [&_.ant-select-selector]:!rounded-xl [&_.ant-select-selector]:!border-0 [&_.ant-select-selector]:!bg-gray-100 [&_.ant-select-selector]:!shadow-none [&_.ant-select-selector]:!items-center"
+                        options={[
+                            { value: "all", label: "All groups" },
+                            ...groups.map((group) => ({ value: group.id, label: group.name })),
+                        ]}
+                    />
+                )}
+
                 <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex shrink-0 items-center overflow-hidden rounded-xl bg-gray-100 p-1">
+                    <div className="flex h-10 shrink-0 items-center gap-1 overflow-hidden rounded-xl bg-gray-100 p-1">
                         <button
                             onClick={() => setViewMode("grid")}
-                            className={`cursor-pointer rounded-lg p-2 ${viewMode === "grid"
+                            className={`flex h-full cursor-pointer items-center justify-center rounded-lg px-2 ${viewMode === "grid"
                                 ? "bg-white text-gray-900"
                                 : "text-gray-500 hover:bg-white/70"
                                 }`}
@@ -210,7 +281,7 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                         </button>
                         <button
                             onClick={() => setViewMode("list")}
-                            className={`cursor-pointer rounded-lg p-2 ${viewMode === "list"
+                            className={`flex h-full cursor-pointer items-center justify-center rounded-lg px-2 ${viewMode === "list"
                                 ? "bg-white text-gray-900"
                                 : "text-gray-500 hover:bg-white/70"
                                 }`}
@@ -219,66 +290,70 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                         </button>
                     </div>
 
-                    <Dropdown
-                        menu={{
-                            items: [
-                                {
-                                    key: "import-ddl",
-                                    icon: <FileCode2 className="w-4 h-4" />,
-                                    label: (
-                                        <div>
-                                            <div className="font-medium">Import from DDL</div>
-                                            <div className="text-xs text-gray-400 font-normal">Paste SQL and auto-create a project</div>
-                                        </div>
-                                    ),
-                                    onClick: () => setIsImportDDLOpen(true),
-                                },
-                                {
-                                    key: "connect-directly",
-                                    icon: <PlugZap className="w-4 h-4" />,
-                                    label: (
-                                        <div>
-                                            <div className="font-medium">Connect Directly</div>
-                                            <div className="text-xs text-gray-400 font-normal">TCP, SSH tunnel or local agent</div>
-                                        </div>
-                                    ),
-                                    onClick: () => setIsDBConnectionOpen(true),
-                                },
-                                {
-                                    key: "use-saved",
-                                    icon: <Database className="w-4 h-4" />,
-                                    label: (
-                                        <div>
-                                            <div className="font-medium">Use Saved Connection</div>
-                                            <div className="text-xs text-gray-400 font-normal">Import schema from an existing connection</div>
-                                        </div>
-                                    ),
-                                    onClick: () => { setPendingConnId(undefined); setIsIntrospectOpen(true); },
-                                },
-                            ],
-                        }}
-                        trigger={["click"]}
-                        placement="bottomRight"
-                    >
-                        <Button
-                            icon={<Database className="w-4 h-4" />}
-                            className="flex min-w-0 cursor-pointer items-center gap-1 !rounded-xl !border-0 !bg-gray-100 !shadow-none hover:!bg-gray-200"
+                    {canCreateProjects && (
+                        <Dropdown
+                            menu={{
+                                items: [
+                                    {
+                                        key: "import-ddl",
+                                        icon: <FileCode2 className="w-4 h-4" />,
+                                        label: (
+                                            <div>
+                                                <div className="font-medium">Import from DDL</div>
+                                                <div className="text-xs text-gray-400 font-normal">Paste SQL and auto-create a project</div>
+                                            </div>
+                                        ),
+                                        onClick: () => setIsImportDDLOpen(true),
+                                    },
+                                    {
+                                        key: "connect-directly",
+                                        icon: <PlugZap className="w-4 h-4" />,
+                                        label: (
+                                            <div>
+                                                <div className="font-medium">Connect Directly</div>
+                                                <div className="text-xs text-gray-400 font-normal">TCP, SSH tunnel or local agent</div>
+                                            </div>
+                                        ),
+                                        onClick: () => setIsDBConnectionOpen(true),
+                                    },
+                                    {
+                                        key: "use-saved",
+                                        icon: <Database className="w-4 h-4" />,
+                                        label: (
+                                            <div>
+                                                <div className="font-medium">Use Saved Connection</div>
+                                                <div className="text-xs text-gray-400 font-normal">Import schema from an existing connection</div>
+                                            </div>
+                                        ),
+                                        onClick: () => { setPendingConnId(undefined); setIsIntrospectOpen(true); },
+                                    },
+                                ],
+                            }}
+                            trigger={["click"]}
+                            placement="bottomRight"
                         >
-                            <span className="hidden sm:inline">Connect to Database</span>
-                            <span className="sm:hidden">Connect</span>
-                            <ChevronDown className="w-3 h-3" />
-                        </Button>
-                    </Dropdown>
+                            <Button
+                                icon={<Database className="w-4 h-4" />}
+                                className="!flex !h-10 min-w-0 cursor-pointer items-center gap-1 !rounded-xl !border-0 !bg-gray-100 !shadow-none hover:!bg-gray-200"
+                            >
+                                <span className="hidden sm:inline">Connect to Database</span>
+                                <span className="sm:hidden">Connect</span>
+                                <ChevronDown className="w-3 h-3" />
+                            </Button>
+                        </Dropdown>
+                    )}
 
-                    <Button
-                        type="primary"
-                        icon={<Plus className="w-4 h-4" />}
-                        onClick={() => router.push("/projects/new")}
-                        className="cursor-pointer !rounded-xl !border-0 !shadow-none"
-                    >
-                        <span className="hidden sm:inline">New project</span>
-                        <span className="sm:hidden">New</span>
-                    </Button>
+                    {canCreateProjects && (
+                        <Button
+                            type="primary"
+                            icon={<Plus className="w-4 h-4" />}
+                            onClick={() => router.push("/projects/new")}
+                            className="!flex !h-10 cursor-pointer items-center !rounded-xl !border-0 !shadow-none"
+                        >
+                            <span className="hidden sm:inline">New project</span>
+                            <span className="sm:hidden">New</span>
+                        </Button>
+                    )}
                 </div>
             </div>
 

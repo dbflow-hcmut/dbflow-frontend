@@ -2,6 +2,7 @@
 
 import {
   getWorkspace,
+  getWorkspaceAuditLogs,
   getWorkspaceInvitations,
   getWorkspaceMembers,
   inviteWorkspaceMember,
@@ -11,6 +12,7 @@ import {
   transferWorkspaceOwnership,
   updateWorkspace,
   updateWorkspaceMemberRole,
+  WorkspaceAuditLog,
   WorkspaceInvitation,
   WorkspaceMember,
   WorkspaceRole,
@@ -18,12 +20,22 @@ import {
 } from "@/api/workspaces/client";
 import { getUserMe } from "@/api/users/client";
 import {
+  AiUsageBreakdownEntry,
   BillingOrder,
   createStripeBillingPortal,
   getBillingOrders,
+  getWorkspaceAiUsageBreakdown,
   getWorkspaceEntitlements,
   WorkspaceEntitlements,
 } from "@/api/subscriptions/client";
+import {
+  addGroupMember,
+  createGroup,
+  deleteGroup,
+  getGroups,
+  Group,
+  removeGroupMember,
+} from "@/api/groups/client";
 import { notificationProvider } from "@/providers/notification";
 import {
   Button,
@@ -34,26 +46,36 @@ import {
   Space,
   Table,
   Tabs,
+  type TabsProps,
   Progress,
 } from "antd";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import dayjs from "dayjs";
 import { formatBytes } from "@/utils/functions";
 import LoadingIndicator from "@/components/LoadingIndicator";
 
 type Props = { workspaceId: string; embedded?: boolean };
-type WorkspaceTab = "general" | "plan" | "orders" | "members" | "invitations";
+type WorkspaceTab = "general" | "plan" | "orders" | "members" | "invitations" | "groups" | "activity";
 type InviteValues = {
   email: string;
   role: Exclude<WorkspaceRole, "owner">;
 };
 
-const ASSIGNABLE_ROLES: Exclude<WorkspaceRole, "owner">[] = [
+const ASSIGNABLE_ROLES: Exclude<WorkspaceRole, "owner" | "billing">[] = [
   "admin",
-  "billing",
   "member",
   "viewer",
 ];
+
+const ROLE_DESCRIPTIONS: Record<
+  Exclude<WorkspaceRole, "owner" | "billing">,
+  string
+> = {
+  admin: "Manages members, projects, and workspace settings.",
+  member: "Creates and edits projects, cannot manage members.",
+  viewer: "Read-only access to shared projects.",
+};
 
 function StatusPill({ value }: { value: string }) {
   const normalizedValue = value.toLowerCase();
@@ -70,6 +92,47 @@ function StatusPill({ value }: { value: string }) {
   );
 }
 
+function describeAuditTarget(log: WorkspaceAuditLog): string {
+  const data = (log.afterData ?? log.beforeData) as
+    | Record<string, unknown>
+    | null;
+  const str = (value: unknown) => (typeof value === "string" ? value : undefined);
+
+  if (data) {
+    switch (log.targetType) {
+      case "group_member": {
+        const userLabel = str(data.userName) ?? str(data.userEmail);
+        const groupLabel = str(data.groupName);
+        if (userLabel || groupLabel) {
+          return `${userLabel ?? "Unknown user"} in ${groupLabel ?? "Unknown group"}`;
+        }
+        break;
+      }
+      case "workspace_member": {
+        const userLabel = str(data.userName) ?? str(data.userEmail);
+        if (userLabel) return userLabel;
+        break;
+      }
+      case "group": {
+        const name = str(data.name);
+        if (name) return name;
+        break;
+      }
+      case "workspace_invitation": {
+        const email = str(data.email);
+        if (email) return email;
+        break;
+      }
+      case "workspace": {
+        const ownerLabel = str(data.ownerName) ?? str(data.ownerEmail);
+        if (ownerLabel) return `Owner → ${ownerLabel}`;
+        break;
+      }
+    }
+  }
+  return `${log.targetType} · ${log.targetId}`;
+}
+
 export default function WorkspaceSettings({ workspaceId, embedded = false }: Props) {
   const router = useRouter();
   const [workspace, setWorkspace] = useState<WorkspaceSummary>();
@@ -77,15 +140,21 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
   const [invitations, setInvitations] = useState<WorkspaceInvitation[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string>();
   const [entitlements, setEntitlements] = useState<WorkspaceEntitlements>();
+  const [aiUsageBreakdown, setAiUsageBreakdown] = useState<AiUsageBreakdownEntry[]>([]);
   const [orders, setOrders] = useState<BillingOrder[]>([]);
+  const [auditLogs, setAuditLogs] = useState<WorkspaceAuditLog[]>();
+  const [groups, setGroups] = useState<Group[]>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [memberActionId, setMemberActionId] = useState<string>();
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("general");
   const [inviteOpen, setInviteOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [createGroupOpen, setCreateGroupOpen] = useState(false);
   const [generalForm] = Form.useForm<{ name: string }>();
   const [inviteForm] = Form.useForm<InviteValues>();
   const [transferForm] = Form.useForm<{ targetUserId: string }>();
+  const [createGroupForm] = Form.useForm<{ name: string }>();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -101,11 +170,16 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
       const invitationData = entitlementData.access.restricted
         ? []
         : await getWorkspaceInvitations(workspaceId).catch(() => []);
+      const aiUsageData =
+        workspaceData.type === "team"
+          ? await getWorkspaceAiUsageBreakdown(workspaceId).catch(() => [])
+          : [];
       setWorkspace(workspaceData);
       setMembers(memberData);
       setInvitations(invitationData);
       setCurrentUserId(user.id);
       setEntitlements(entitlementData);
+      setAiUsageBreakdown(aiUsageData);
       setOrders(orderData);
       generalForm.setFieldsValue({ name: workspaceData.name });
     } catch (error) {
@@ -123,6 +197,11 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
     void load();
   }, [load]);
 
+  const refreshMembers = useCallback(async () => {
+    const memberData = await getWorkspaceMembers(workspaceId);
+    setMembers(memberData);
+  }, [workspaceId]);
+
   const canManageWorkspace = ["owner", "admin"].includes(
     workspace?.currentUserRole ?? "",
   );
@@ -134,6 +213,27 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
   useEffect(() => {
     if (!canViewBilling && activeTab === "orders") setActiveTab("general");
   }, [activeTab, canViewBilling]);
+  useEffect(() => {
+    if (activeTab === "activity" && canManageWorkspace && auditLogs === undefined) {
+      void getWorkspaceAuditLogs(workspaceId)
+        .then(setAuditLogs)
+        .catch(() => setAuditLogs([]));
+    }
+  }, [activeTab, canManageWorkspace, auditLogs, workspaceId]);
+
+  const loadGroups = useCallback(async () => {
+    try {
+      setGroups(await getGroups(workspaceId));
+    } catch {
+      setGroups([]);
+    }
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (activeTab === "groups" && canManageWorkspace && groups === undefined) {
+      void loadGroups();
+    }
+  }, [activeTab, canManageWorkspace, groups, loadGroups]);
   const showUpgrade =
     entitlements &&
     (entitlements.access.restricted ||
@@ -188,9 +288,10 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
     member: WorkspaceMember,
     role: Exclude<WorkspaceRole, "owner">,
   ) => {
+    setMemberActionId(member.userId);
     try {
       await updateWorkspaceMemberRole(workspaceId, member.userId, role);
-      await load();
+      await refreshMembers();
       notificationProvider.open({
         type: "success",
         message: "Member role updated",
@@ -201,6 +302,8 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
         message: "Failed to update role",
         description: error instanceof Error ? error.message : undefined,
       });
+    } finally {
+      setMemberActionId(undefined);
     }
   };
 
@@ -211,8 +314,13 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
       okText: "Remove",
       okButtonProps: { danger: true },
       async onOk() {
-        await removeWorkspaceMember(workspaceId, member.userId);
-        await load();
+        setMemberActionId(member.userId);
+        try {
+          await removeWorkspaceMember(workspaceId, member.userId);
+          await refreshMembers();
+        } finally {
+          setMemberActionId(undefined);
+        }
       },
     });
   };
@@ -229,6 +337,57 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
         router.push("/projects");
       },
     });
+  };
+
+  const handleCreateGroup = async (values: { name: string }) => {
+    setSaving(true);
+    try {
+      await createGroup(workspaceId, values.name);
+      setCreateGroupOpen(false);
+      createGroupForm.resetFields();
+      await loadGroups();
+      notificationProvider.open({ type: "success", message: "Group created" });
+    } catch (error) {
+      notificationProvider.open({
+        type: "error",
+        message: "Failed to create group",
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteGroup = (group: Group) => {
+    Modal.confirm({
+      title: `Delete "${group.name}"?`,
+      content:
+        "Projects scoped to this group become visible to the whole team again.",
+      okText: "Delete",
+      okButtonProps: { danger: true },
+      async onOk() {
+        await deleteGroup(workspaceId, group.id);
+        await loadGroups();
+      },
+    });
+  };
+
+  const handleAddGroupMember = async (group: Group, targetUserId: string) => {
+    try {
+      await addGroupMember(workspaceId, group.id, targetUserId);
+      await loadGroups();
+    } catch (error) {
+      notificationProvider.open({
+        type: "error",
+        message: "Failed to add member",
+        description: error instanceof Error ? error.message : undefined,
+      });
+    }
+  };
+
+  const handleRemoveGroupMember = async (group: Group, targetUserId: string) => {
+    await removeGroupMember(workspaceId, group.id, targetUserId);
+    await loadGroups();
   };
 
   const transferTargets = useMemo(
@@ -314,31 +473,46 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
           <Select
             size="small"
             value={member.role}
+            popupMatchSelectWidth={false}
+            loading={memberActionId === member.userId}
+            disabled={memberActionId === member.userId}
             className="!h-9 w-32 [&_.ant-select-arrow]:!translate-y-[1px] [&_.ant-select-selector]:!h-9 [&_.ant-select-selector]:!rounded-xl [&_.ant-select-selector]:!border-0 [&_.ant-select-selector]:!bg-gray-100 [&_.ant-select-selector]:!px-3 [&_.ant-select-selector]:!shadow-none [&_.ant-select-selection-item]:!flex [&_.ant-select-selection-item]:!items-center [&_.ant-select-selection-item]:!text-[13px] [&_.ant-select-selection-item]:!font-semibold"
             options={ASSIGNABLE_ROLES.map((role) => ({
               value: role,
               label: role.charAt(0).toUpperCase() + role.slice(1),
             }))}
+            optionRender={(option) => (
+              <div className="py-0.5">
+                <div className="font-medium">{option.label}</div>
+                <div className="text-xs text-gray-500">
+                  {ROLE_DESCRIPTIONS[option.value as keyof typeof ROLE_DESCRIPTIONS]}
+                </div>
+              </div>
+            )}
             onChange={(role) => void handleRoleChange(member, role)}
           />
         ),
     },
-    {
-      title: "Actions",
-      key: "actions",
-      render: (_: unknown, member: WorkspaceMember) =>
-        canManageTeam &&
-        member.role !== "owner" &&
-        member.userId !== currentUserId ? (
-          <Button
-            danger
-            className="!h-9 !rounded-xl !border-0 !bg-red-50 !px-4 !text-[13px] !font-semibold !shadow-none hover:!bg-red-100"
-            onClick={() => handleRemove(member)}
-          >
-            Remove
-          </Button>
-        ) : null,
-    },
+    ...(canManageTeam
+      ? [
+          {
+            title: "Actions",
+            key: "actions",
+            render: (_: unknown, member: WorkspaceMember) =>
+              member.role !== "owner" && member.userId !== currentUserId ? (
+                <Button
+                  danger
+                  loading={memberActionId === member.userId}
+                  disabled={memberActionId !== undefined && memberActionId !== member.userId}
+                  className="!h-9 !rounded-xl !border-0 !bg-red-50 !px-4 !text-[13px] !font-semibold !shadow-none hover:!bg-red-100"
+                  onClick={() => handleRemove(member)}
+                >
+                  Remove
+                </Button>
+              ) : null,
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -485,7 +659,7 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
                     entitlements?.usage.dbConnections.limit,
                   )}
                   {renderUsage(
-                    `AI requests (${entitlements?.usage.aiRequests.periodKey ?? "current month"})`,
+                    `AI requests${workspace.type === "team" ? " (your seat)" : ""} (${entitlements?.usage.aiRequests.periodKey ?? "current month"})`,
                     (entitlements?.usage.aiRequests.used ?? 0) +
                       (entitlements?.usage.aiRequests.reserved ?? 0),
                     entitlements?.usage.aiRequests.limit,
@@ -528,13 +702,60 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
                     </div>
                   </div>
                 </div>
+                {workspace.type === "team" && aiUsageBreakdown.length > 1 && (
+                  <div className="mt-8">
+                    <div className="mb-2 text-sm font-medium text-gray-700">
+                      AI requests by member
+                    </div>
+                    <div className="overflow-hidden rounded-lg border border-gray-100">
+                      <Table
+                        size="small"
+                        rowKey="userId"
+                        pagination={false}
+                        dataSource={aiUsageBreakdown}
+                        columns={[
+                          {
+                            title: "Member",
+                            key: "member",
+                            render: (_: unknown, row: AiUsageBreakdownEntry) => (
+                              <div>
+                                <div className="font-medium text-gray-900">{row.fullName}</div>
+                                <div className="text-xs text-gray-500">{row.email}</div>
+                              </div>
+                            ),
+                          },
+                          {
+                            title: "Used",
+                            key: "used",
+                            render: (_: unknown, row: AiUsageBreakdownEntry) =>
+                              `${(row.used + row.reserved).toLocaleString()}/${row.limit != null ? row.limit.toLocaleString() : "Unlimited"}`,
+                          },
+                          {
+                            title: "",
+                            key: "progress",
+                            render: (_: unknown, row: AiUsageBreakdownEntry) => (
+                              <Progress
+                                size="small"
+                                strokeColor="#42a5f5"
+                                percent={
+                                  row.limit
+                                    ? Math.min(100, Math.round(((row.used + row.reserved) / row.limit) * 100))
+                                    : 0
+                                }
+                              />
+                            ),
+                          },
+                        ]}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             ),
           },
-          {
+          canViewBilling && {
             key: "orders",
             label: `Billing history (${orders.length})`,
-            disabled: !canViewBilling,
             children: (
               <div>
                 {entitlements?.subscription.status === "active" &&
@@ -610,10 +831,9 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
               </div>
             ),
           },
-          {
+          workspace.type === "team" && {
             key: "members",
             label: `Members (${members.length})`,
-            disabled: workspace.type === "personal",
             children: (
               <div>
                 {canManageTeam && (
@@ -637,10 +857,9 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
               </div>
             ),
           },
-          {
+          workspace.type === "team" && canManageTeam && {
             key: "invitations",
             label: `Invitations (${invitations.length})`,
-            disabled: workspace.type === "personal" || !canManageTeam,
             children: (
               <div>
                 <Table
@@ -678,7 +897,179 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
               </div>
             ),
           },
-        ]}
+          workspace.type === "team" && canManageWorkspace && {
+            key: "groups",
+            label: `Groups (${groups?.length ?? 0})`,
+            children: (
+              <div>
+                <div className="mb-4 flex justify-end">
+                  <Button
+                    type="primary"
+                    className="!h-9 !rounded-xl !border-0 !px-4 !text-[13px] !font-semibold !shadow-none"
+                    onClick={() => setCreateGroupOpen(true)}
+                  >
+                    Create group
+                  </Button>
+                </div>
+                {groups === undefined ? (
+                  <LoadingIndicator label="Loading groups" />
+                ) : groups.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-sm text-gray-500">
+                    No groups yet — every project is visible to the whole team.
+                  </div>
+                ) : (
+                  <Table
+                    className="[&_.ant-table]:!overflow-hidden [&_.ant-table]:!rounded-2xl [&_.ant-table-thead>tr>th]:!border-b-0 [&_.ant-table-thead>tr>th]:!bg-gray-50 [&_.ant-table-thead>tr>th]:!text-xs [&_.ant-table-thead>tr>th]:!font-semibold [&_.ant-table-tbody>tr>td]:!py-4"
+                    rowKey="id"
+                    dataSource={groups}
+                    pagination={false}
+                    columns={[
+                      {
+                        title: "",
+                        dataIndex: "name",
+                        width: 260,
+                        render: (name: string) => (
+                          <span className="font-semibold text-gray-900">{name}</span>
+                        ),
+                      },
+                      {
+                        title: "Members",
+                        key: "members",
+                        width: 120,
+                        render: (_: unknown, group: Group) => group.members.length,
+                      },
+                      {
+                        title: "Actions",
+                        key: "actions",
+                        width: 100,
+                        render: (_: unknown, group: Group) => (
+                          <Button
+                            danger
+                            size="small"
+                            className="!rounded-lg !border-0 !bg-red-50 !text-xs !font-semibold !shadow-none hover:!bg-red-100"
+                            onClick={() => handleDeleteGroup(group)}
+                          >
+                            Delete
+                          </Button>
+                        ),
+                      },
+                    ]}
+                    expandable={{
+                      expandedRowRender: (group: Group) => {
+                        const memberIds = new Set(
+                          group.members.map((member) => member.userId),
+                        );
+                        const addableMembers = members.filter(
+                          (member) => !memberIds.has(member.userId),
+                        );
+                        return (
+                          <div>
+                            <div className="flex items-center justify-between border-b border-gray-100 py-3">
+                              <Select
+                                key={`${group.id}-${group.members.length}`}
+                                variant="borderless"
+                                size="small"
+                                className="w-64 [&_.ant-select-selector]:!p-0 [&_.ant-select-selection-placeholder]:!text-gray-900"
+                                placeholder="Add member"
+                                disabled={addableMembers.length === 0}
+                                options={addableMembers.map((addable) => ({
+                                  value: addable.userId,
+                                  label: addable.fullName || addable.email,
+                                }))}
+                                onChange={(targetUserId: string) =>
+                                  void handleAddGroupMember(group, targetUserId)
+                                }
+                              />
+                              <span className="w-[100px]" />
+                            </div>
+                            {group.members.map((member) => (
+                              <div
+                                key={member.userId}
+                                className="flex items-center justify-between border-b border-gray-50 py-3 last:border-b-0"
+                              >
+                                <div>
+                                  <div className="text-gray-900">{member.fullName || member.email}</div>
+                                  <div className="text-xs text-gray-500">{member.email}</div>
+                                </div>
+                                <Button
+                                  danger
+                                  type="link"
+                                  size="small"
+                                  className="w-[100px]"
+                                  onClick={() =>
+                                    void handleRemoveGroupMember(group, member.userId)
+                                  }
+                                >
+                                  Remove
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      },
+                    }}
+                  />
+                )}
+              </div>
+            ),
+          },
+          workspace.type === "team" && canManageWorkspace && {
+            key: "activity",
+            label: "Activity log",
+            children: (
+              <div>
+                <Table
+                  rowKey="id"
+                  loading={auditLogs === undefined}
+                  dataSource={auditLogs ?? []}
+                  pagination={{ pageSize: 20 }}
+                  scroll={{ x: "max-content" }}
+                  columns={[
+                    {
+                      title: "Time",
+                      dataIndex: "createdAt",
+                      width: 170,
+                      render: (createdAt: string) => dayjs(createdAt).format("D MMM YYYY, HH:mm"),
+                    },
+                    {
+                      title: "Actor",
+                      key: "actor",
+                      render: (_: unknown, log: WorkspaceAuditLog) => log.actor?.fullName ?? log.actorUserId,
+                    },
+                    {
+                      title: "Action",
+                      dataIndex: "action",
+                    },
+                    {
+                      title: "Target",
+                      key: "target",
+                      render: (_: unknown, log: WorkspaceAuditLog) => describeAuditTarget(log),
+                    },
+                  ]}
+                  expandable={{
+                    expandedRowRender: (log: WorkspaceAuditLog) => (
+                      <div className="flex gap-4">
+                        <div className="min-w-0 flex-1">
+                          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Before</div>
+                          <pre className="max-h-48 overflow-auto rounded-lg bg-gray-50 p-3 text-[12px] text-gray-700">
+                            {log.beforeData ? JSON.stringify(log.beforeData, null, 2) : "—"}
+                          </pre>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">After</div>
+                          <pre className="max-h-48 overflow-auto rounded-lg bg-gray-50 p-3 text-[12px] text-gray-700">
+                            {log.afterData ? JSON.stringify(log.afterData, null, 2) : "—"}
+                          </pre>
+                        </div>
+                      </div>
+                    ),
+                    rowExpandable: (log: WorkspaceAuditLog) => Boolean(log.beforeData || log.afterData),
+                  }}
+                />
+              </div>
+            ),
+          },
+        ].filter(Boolean) as TabsProps["items"]}
       />
 
       <Modal
@@ -703,10 +1094,19 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
           </Form.Item>
           <Form.Item name="role" label="Role" rules={[{ required: true }]}>
             <Select
+              className="h-9!"
               options={ASSIGNABLE_ROLES.map((role) => ({
                 value: role,
-                label: role,
+                label: role.charAt(0).toUpperCase() + role.slice(1),
               }))}
+              optionRender={(option) => (
+                <div className="py-0.5">
+                  <div className="font-medium">{option.label}</div>
+                  <div className="text-xs text-gray-500">
+                    {ROLE_DESCRIPTIONS[option.value as keyof typeof ROLE_DESCRIPTIONS]}
+                  </div>
+                </div>
+              )}
             />
           </Form.Item>
         </Form>
@@ -735,6 +1135,28 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
                 label: `${member.fullName} (${member.email})`,
               }))}
             />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="Create group"
+        open={createGroupOpen}
+        onCancel={() => setCreateGroupOpen(false)}
+        onOk={() => createGroupForm.submit()}
+        confirmLoading={saving}
+      >
+        <Form
+          form={createGroupForm}
+          layout="vertical"
+          onFinish={handleCreateGroup}
+        >
+          <Form.Item
+            name="name"
+            label="Group name"
+            rules={[{ required: true }]}
+          >
+            <Input placeholder="e.g. Backend Team" />
           </Form.Item>
         </Form>
       </Modal>

@@ -1,5 +1,6 @@
 import {
   PROXY_ACCEPT_WORKSPACE_INVITATION,
+  PROXY_WORKSPACE_AUDIT_LOGS,
   PROXY_WORKSPACE_DETAIL,
   PROXY_WORKSPACE_INVITATIONS,
   PROXY_WORKSPACE_LEAVE,
@@ -27,6 +28,7 @@ export interface WorkspaceMember {
   userId: string;
   email: string;
   fullName: string;
+  avatar: string;
   role: WorkspaceRole;
   status: "active" | "suspended";
   joinedAt: string;
@@ -39,6 +41,23 @@ export interface WorkspaceInvitation {
   status: "pending" | "accepted" | "revoked" | "expired";
   expiresAt: string;
   createdAt?: string;
+}
+
+export interface WorkspaceAuditLog {
+  id: string;
+  workspaceId: string;
+  actorUserId: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  beforeData: Record<string, unknown> | null;
+  afterData: Record<string, unknown> | null;
+  createdAt: string;
+  actor: { id: string; fullName: string; email: string } | null;
+}
+
+export function getWorkspaceAuditLogs(workspaceId: string) {
+  return apiGet<WorkspaceAuditLog[]>(PROXY_WORKSPACE_AUDIT_LOGS(workspaceId));
 }
 
 export function getWorkspaces() {

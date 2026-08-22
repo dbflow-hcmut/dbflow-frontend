@@ -13,6 +13,7 @@ import { CreateProjectFormValues } from "@/types/projects.type";
 import { useCreateProject } from "./api/client";
 import { getWorkspaces, WorkspaceSummary } from "@/api/workspaces/client";
 import { getActiveWorkspaceId, setActiveWorkspaceId } from "@/utils/active-workspace";
+import { getGroups, Group } from "@/api/groups/client";
 
 export default function CreateProject() {
     const router = useRouter();
@@ -20,10 +21,12 @@ export default function CreateProject() {
     const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
     const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
     const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState(true);
+    const [groups, setGroups] = useState<Group[]>([]);
     const { create, isLoading } = useCreateProject();
-    
+
     const projectName = Form.useWatch("name", form);
     const selectedWorkspaceId = Form.useWatch("workspaceId", form);
+    const selectedWorkspace = workspaces.find((item) => item.id === selectedWorkspaceId);
 
     useEffect(() => {
         void getWorkspaces()
@@ -44,12 +47,24 @@ export default function CreateProject() {
             .finally(() => setIsLoadingWorkspaces(false));
     }, [form]);
 
+    useEffect(() => {
+        if (!selectedWorkspaceId || selectedWorkspace?.type !== "team") {
+            setGroups([]);
+            form.setFieldValue("groupId", undefined);
+            return;
+        }
+        void getGroups(selectedWorkspaceId)
+            .then(setGroups)
+            .catch(() => setGroups([]));
+    }, [selectedWorkspaceId, selectedWorkspace?.type, form]);
+
     const handleSubmit = async (values: CreateProjectFormValues) => {
         try {
             const result = await create({
                 workspaceId: values.workspaceId,
                 name: values.name,
                 description: values.description,
+                groupId: values.groupId,
             });
 
             if (result) {
@@ -143,6 +158,29 @@ export default function CreateProject() {
                                     </div>
                                 </div>
                             </Form.Item>
+
+                            {selectedWorkspace?.type === "team" && groups.length > 0 && (
+                                <Form.Item label={null} name="groupId">
+                                    <div className="flex flex-col items-start gap-3 py-3 sm:flex-row sm:gap-4">
+                                        <div className="w-full sm:w-1/5 text-gray-900 font-semibold pt-0 sm:pt-2 text-sm">
+                                            Group
+                                        </div>
+                                        <div className="w-full sm:w-4/5">
+                                            <Select
+                                                allowClear
+                                                className="w-full [&_.ant-select-selector]:!h-11 [&_.ant-select-selector]:!rounded-xl [&_.ant-select-selector]:!border-0 [&_.ant-select-selector]:!bg-gray-100 [&_.ant-select-selector]:!px-4 [&_.ant-select-selector]:!shadow-none"
+                                                suffixIcon={<ChevronDown className="relative top-0.5 h-4 w-4 text-gray-400" />}
+                                                placeholder="No group (whole team can see it)"
+                                                options={groups.map((group) => ({
+                                                    value: group.id,
+                                                    label: group.name,
+                                                }))}
+                                                onChange={(groupId) => form.setFieldValue("groupId", groupId)}
+                                            />
+                                        </div>
+                                    </div>
+                                </Form.Item>
+                            )}
 
                             <Form.Item
                                 label={null}

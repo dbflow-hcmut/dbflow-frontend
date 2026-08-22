@@ -193,7 +193,7 @@ export function SettingsModal({
             </nav>
           </aside>
 
-          <main className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-10 sm:px-5 md:px-6 md:pb-6 md:pt-10">
+          <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-4 pb-6 pt-10 sm:px-5 md:px-6 md:pb-6 md:pt-10">
               {activeTab === 'profile' && <ProfileTab loading={loading} userData={userData} onSave={handleSaveProfile} onAvatarChange={handleAvatarChange} />}
               {activeTab === 'security' && <SecurityTab onSave={handleSaveSecurity} />}
               {activeTab === 'workspace' && (

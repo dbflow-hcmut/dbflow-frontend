@@ -6,6 +6,7 @@
 - `dbflow-backend/src/modules/usage/**`
 - `dbflow-backend/src/migrations/1778500000000-CreateUsageLedger.ts`
 - `dbflow-backend/src/migrations/1784764800000-AddTokenUsageToUsageEvents.ts`
+- `dbflow-backend/src/migrations/1784793600000-AddUserScopeToUsageCounters.ts`
 - `dbflow-backend/src/modules/db-connections/db-connections.service.ts`
 - `dbflow-frontend/src/api/ai/client.ts`
 - `dbflow-frontend/src/app/api/proxy/[...path]/route.ts`
@@ -54,26 +55,39 @@ Nếu upstream không nhận request hoặc trả non-2xx, reservation được 
 
 ### `usage_counters`
 
-- Primary key `(workspace_id, metric, period_key)`.
-- `used`: usage đã commit.
-- `reserved`: request đang thực thi.
+- Primary key `(workspace_id, user_id, metric, period_key)` — đổi từ
+  `(workspace_id, metric, period_key)` kể từ migration
+  `1784793600000-AddUserScopeToUsageCounters.ts`. Quota giờ là **per-seat**
+  (mỗi thành viên team có hạn mức riêng bằng nhau, mô hình giống Claude.ai
+  Team/Enterprise), không còn là 1 pool dùng chung cho cả workspace — 1 thành
+  viên dùng hết phần của mình không ảnh hưởng tới người khác. `plan.limits[metric]`
+  được hiểu là mức **cho mỗi seat**, không nhân theo `subscription.quantity`.
+- `used`: usage đã commit (của riêng user đó).
+- `reserved`: request đang thực thi (của riêng user đó).
 - Counter được lock bằng pessimistic transaction trước khi reserve/transition.
+- Migration rebuild counter từ `usage_events` (group theo `workspace_id, user_id,
+  metric, period_key`) thay vì reset về 0, để không "tặng" thêm quota khi migrate.
 
 ## 5. Quota algorithm
 
 ```text
-used + reserved + requested <= plan limit
+used + reserved + requested <= plan limit   (tính riêng theo từng user)
 ```
 
-1. Tạo counter nếu chưa tồn tại.
+1. Tạo counter (workspace, user, metric, period) nếu chưa tồn tại.
 2. Lock counter.
-3. Kiểm tra plan limit.
+3. Kiểm tra plan limit (per-seat).
 4. Tăng reserved và tạo event.
 5. Commit: giảm reserved, tăng used.
 6. Release: chỉ giảm reserved.
 
-Metric hiện tại: `ai_requests_monthly`.
+Metric hiện tại: `ai_requests_monthly` (và `exports_monthly`, dùng chung bảng
+`usage_counters` nên cũng tự động trở thành per-seat).
 Period key dùng UTC `YYYY-MM`.
+
+Per-member breakdown: `SubscriptionsService.getMemberUsageBreakdown(actorUserId,
+workspaceId, metric)` — Owner/Admin thấy toàn bộ member, người khác chỉ thấy
+chính mình. Expose qua `GET /workspaces/:workspaceId/usage/ai-requests`.
 
 ## 6. Streaming contract
 
