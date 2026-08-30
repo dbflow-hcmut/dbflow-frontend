@@ -54,6 +54,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import dayjs from "dayjs";
 import { formatBytes } from "@/utils/functions";
 import LoadingIndicator from "@/components/LoadingIndicator";
+import { clearActiveWorkspaceId } from "@/utils/active-workspace";
 
 type Props = { workspaceId: string; embedded?: boolean };
 type WorkspaceTab = "general" | "plan" | "orders" | "members" | "invitations" | "groups" | "activity";
@@ -333,7 +334,7 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
       okButtonProps: { danger: true },
       async onOk() {
         await leaveWorkspace(workspaceId);
-        localStorage.removeItem("active_workspace_id");
+        clearActiveWorkspaceId();
         router.push("/projects");
       },
     });

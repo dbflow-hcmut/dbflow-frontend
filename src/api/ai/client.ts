@@ -7,6 +7,7 @@ import {
   PROXY_S3_AI_ATTACHMENT_PRESIGNED_UPLOAD,
 } from "@/api";
 import { apiPost } from "@/lib/clientFetch";
+import { getActiveWorkspaceId } from "@/utils/active-workspace";
 
 // ── Attachment types ──────────────────────────────────────────────────────────
 
@@ -512,6 +513,9 @@ export async function cancelRun(threadId: string, runId: string): Promise<void> 
  * @param currentLevel - Optional current schema level hint
  * @param currentModel - Optional current schema model (for forward/reverse engineering)
  * @param inputIntent - Optional explicit intent override (e.g. "text_to_sql"), skips LLM classification
+ * @param workspaceId - Workspace to attribute usage to when no projectId is available yet
+ *   (e.g. a brand-new AI chat that hasn't created a project). Takes priority over the
+ *   localStorage fallback below.
  * @returns The run_id if captured from metadata event, or null
  */
 export async function streamChatToLangGraph(
@@ -528,6 +532,7 @@ export async function streamChatToLangGraph(
   currentModel?: Record<string, unknown> | null,
   projectId?: string,
   inputIntent?: string,
+  workspaceId?: string,
 ): Promise<string | null> {
   let runId: string | null = null;
   try {
@@ -564,10 +569,7 @@ export async function streamChatToLangGraph(
     };
 
     if (!projectId) {
-      const activeWorkspaceId =
-        typeof window !== "undefined"
-          ? localStorage.getItem("active_workspace_id")
-          : null;
+      const activeWorkspaceId = workspaceId ?? getActiveWorkspaceId();
       if (activeWorkspaceId) {
         requestBody.input.workspace_id = activeWorkspaceId;
       }

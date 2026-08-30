@@ -29,9 +29,10 @@ const DBMS_LABELS: Record<string, string> = {
 interface ImportDDLModalProps {
     open: boolean;
     onClose: () => void;
+    workspaceId?: string;
 }
 
-export default function ImportDDLModal({ open, onClose }: ImportDDLModalProps) {
+export default function ImportDDLModal({ open, onClose, workspaceId }: ImportDDLModalProps) {
     const router = useRouter();
     const [form] = Form.useForm<{ name: string; description?: string }>();
     const { create, isLoading: isCreating } = useCreateProject();
@@ -137,6 +138,7 @@ export default function ImportDDLModal({ open, onClose }: ImportDDLModalProps) {
                     name: values.name,
                     description: values.description,
                     skipDefaultSchema: true,
+                    workspaceId,
                 });
                 if (!project) return;
 
@@ -165,7 +167,7 @@ export default function ImportDDLModal({ open, onClose }: ImportDDLModalProps) {
                 });
             }
         },
-        [canImport, parseResult, create, dbms, tableCount, router, onClose]
+        [canImport, parseResult, create, dbms, tableCount, router, onClose, workspaceId]
     );
 
     return (

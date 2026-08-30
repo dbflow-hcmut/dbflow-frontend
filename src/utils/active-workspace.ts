@@ -12,3 +12,11 @@ export function setActiveWorkspaceId(workspaceId: string): void {
     new CustomEvent("dbflow:workspace-changed", { detail: { workspaceId } }),
   );
 }
+
+export function clearActiveWorkspaceId(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(ACTIVE_WORKSPACE_STORAGE_KEY);
+  window.dispatchEvent(
+    new CustomEvent("dbflow:workspace-changed", { detail: { workspaceId: undefined } }),
+  );
+}

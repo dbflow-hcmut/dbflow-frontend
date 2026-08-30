@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import LoadingIndicator from "@/components/LoadingIndicator";
 import { useAuth } from "@/providers/AuthProvider";
+import { getActiveWorkspaceId, setActiveWorkspaceId } from "@/utils/active-workspace";
 
 type BillingCycle = "monthly" | "yearly";
 type Audience = "personal" | "team";
@@ -73,7 +74,7 @@ export default function PricingPage() {
         setWorkspaces(workspaceData);
 
         const requestedWorkspace = new URLSearchParams(window.location.search).get("workspaceId");
-        const storedWorkspace = localStorage.getItem("active_workspace_id");
+        const storedWorkspace = getActiveWorkspaceId();
         const selected =
           workspaceData.find((item) => item.id === requestedWorkspace) ??
           workspaceData.find((item) => item.id === storedWorkspace) ??
@@ -84,7 +85,7 @@ export default function PricingPage() {
           setWorkspaceId(selected.id);
           setAudience(selected.type);
           setQuantity(Math.max(1, selected.type === "team" ? 5 : 1));
-          localStorage.setItem("active_workspace_id", selected.id);
+          setActiveWorkspaceId(selected.id);
         }
       })
       .catch((error) => {
@@ -137,7 +138,7 @@ export default function PricingPage() {
     const nextWorkspace = workspaces.find((item) => item.type === nextAudience);
     setWorkspaceId(nextWorkspace?.id);
     if (nextWorkspace) {
-      localStorage.setItem("active_workspace_id", nextWorkspace.id);
+      setActiveWorkspaceId(nextWorkspace.id);
       setQuantity(Math.max(1, nextWorkspace.type === "team" ? 5 : 1));
     }
   };

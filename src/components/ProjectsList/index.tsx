@@ -360,6 +360,7 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
             <DBConnectionModal
                 open={isDBConnectionOpen}
                 onClose={() => setIsDBConnectionOpen(false)}
+                workspaceId={workspaceId}
                 onSaved={(conn: DBConnection) => {
                     setIsDBConnectionOpen(false);
                     setPendingConnId(conn.id);
@@ -370,10 +371,12 @@ export default function ProjectsList({ initialProjects = [], initialPagination }
                 open={isIntrospectOpen}
                 onClose={() => { setIsIntrospectOpen(false); setPendingConnId(undefined); }}
                 initialConnectionId={pendingConnId}
+                workspaceId={workspaceId}
             />
             <ImportDDLModal
                 open={isImportDDLOpen}
                 onClose={() => setIsImportDDLOpen(false)}
+                workspaceId={workspaceId}
             />
 
             {isLoading ? (

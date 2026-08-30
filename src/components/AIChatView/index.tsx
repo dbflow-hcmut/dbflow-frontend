@@ -30,6 +30,7 @@ import {
   linkConversationToProject,
 } from "@/api/chat/client";
 import { createProject } from "@/components/CreateProject/api/client";
+import { useWorkspace } from "@/context/WorkspaceContext";
 import { createSchema, saveSchemaModel } from "@/components/EditProject/api/client";
 import { AttachmentPreviews } from "@/components/AttachmentPreviews";
 import { SchemaType } from "@/utils/constants";
@@ -149,6 +150,7 @@ function buildRandomGreeting(): string {
 export default function AIChatView({ threadId: initialThreadId }: AIChatViewProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const { workspaceId } = useWorkspace();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -489,10 +491,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
 
           const project = await createProject({
             name: `AI: ${projectName}`,
-            workspaceId:
-              typeof window !== "undefined"
-                ? localStorage.getItem("active_workspace_id") ?? undefined
-                : undefined,
+            workspaceId,
             skipDefaultSchema: true,
           });
           if (!project) throw new Error("Failed to create project");
@@ -690,10 +689,13 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
       abortController.signal,
       undefined,
       modelOverride ?? undefined,
+      undefined,
+      undefined,
+      workspaceId,
     );
     if (returnedRunId) runIdRef.current = returnedRunId;
     abortControllerRef.current = null;
-  }, [inputValue, attachments, isLoading, isUploading, threadId, conversationCreated, router, createdProjectId]);
+  }, [inputValue, attachments, isLoading, isUploading, threadId, conversationCreated, router, createdProjectId, workspaceId]);
 
   const handleRetry = useCallback(() => {
     if (lastUserMessageRef.current) {

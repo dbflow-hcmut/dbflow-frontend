@@ -47,12 +47,14 @@ interface IntrospectSchemaModalProps {
     onClose: () => void;
     /** Pre-select a connection (e.g. just saved from DBConnectionModal) */
     initialConnectionId?: string;
+    workspaceId?: string;
 }
 
 export default function IntrospectSchemaModal({
     open,
     onClose,
     initialConnectionId,
+    workspaceId,
 }: IntrospectSchemaModalProps) {
     const router = useRouter();
     const { data: connections } = useMyDbConnections();
@@ -229,6 +231,7 @@ export default function IntrospectSchemaModal({
                 const project = await createProject({
                     name: projectName,
                     skipDefaultSchema: true,
+                    workspaceId,
                 });
                 if (!project?.id) throw new Error("Failed to create project");
 
@@ -265,7 +268,7 @@ export default function IntrospectSchemaModal({
                 setImporting(false);
             }
         },
-        [selectedTables, selectedConn, onClose, router],
+        [selectedTables, selectedConn, onClose, router, workspaceId],
     );
 
     const connOptions = useMemo(

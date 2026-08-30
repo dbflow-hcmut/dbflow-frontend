@@ -10,6 +10,7 @@ import { UserResponse } from '@/types/user.type';
 import { notificationProvider } from '@/providers/notification';
 import WorkspaceSettings from '@/components/WorkspaceSettings';
 import LoadingIndicator from '@/components/LoadingIndicator';
+import { getActiveWorkspaceId, setActiveWorkspaceId as persistActiveWorkspaceId } from '@/utils/active-workspace';
 
 const { TextArea } = Input;
 const { Password } = Input;
@@ -60,7 +61,7 @@ export function SettingsModal({
     loadUserData();
     void getWorkspaces()
       .then((workspaces) => {
-        const storedWorkspaceId = localStorage.getItem('active_workspace_id');
+        const storedWorkspaceId = getActiveWorkspaceId();
         const selectedWorkspace =
           workspaces.find((workspace) => workspace.id === storedWorkspaceId) ??
           workspaces.find((workspace) => workspace.type === 'personal') ??
@@ -68,7 +69,7 @@ export function SettingsModal({
 
         if (selectedWorkspace) {
           setActiveWorkspaceId(selectedWorkspace.id);
-          localStorage.setItem('active_workspace_id', selectedWorkspace.id);
+          persistActiveWorkspaceId(selectedWorkspace.id);
         }
       })
       .catch(() => {

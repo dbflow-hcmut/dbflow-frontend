@@ -10,6 +10,7 @@ import SplashScreen from "@/components/SplashScreen";
 import Sidebar from "@/components/Sidebar";
 import { shouldShowLayout } from "@/utils/functions";
 import { SettingsModal } from "@/components/SettingsModal";
+import { WorkspaceProvider } from "@/context/WorkspaceContext";
 
 export default function AppShell({ children }: PropsWithChildren): React.JSX.Element {
   const { resolvedTheme } = useTheme();
@@ -47,10 +48,11 @@ export default function AppShell({ children }: PropsWithChildren): React.JSX.Ele
   const showLayout = shouldShowLayout(pathname);
 
   if (!showLayout) {
-    return <>{children}</>;
+    return <WorkspaceProvider>{children}</WorkspaceProvider>;
   }
 
   return (
+    <WorkspaceProvider>
     <div className="flex flex-col h-screen">
       <header className="flex h-14 items-center gap-3 bg-white px-4 lg:hidden">
         <button
@@ -81,5 +83,6 @@ export default function AppShell({ children }: PropsWithChildren): React.JSX.Ele
       </div>
       {settingsOpen && <SettingsModal initialTab={settingsInitialTab} onClose={() => setSettingsOpen(false)} />}
     </div>
+    </WorkspaceProvider>
   );
 }

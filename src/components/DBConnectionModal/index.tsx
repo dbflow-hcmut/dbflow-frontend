@@ -42,6 +42,7 @@ interface DBConnectionModalProps {
     open: boolean;
     onClose: () => void;
     projectId?: string;
+    workspaceId?: string;
     onSaved?: (conn: DBConnection) => void;
     onBack?: () => void;
 }
@@ -102,6 +103,7 @@ export default function DBConnectionModal({
     open,
     onClose,
     projectId,
+    workspaceId,
     onSaved,
     onBack,
 }: DBConnectionModalProps) {
@@ -225,6 +227,7 @@ export default function DBConnectionModal({
                     method,
                     ssl: sslEnabled,
                     projectId,
+                    workspaceId,
                 });
                 await mutate("my-db-connections");
                 form.resetFields();
@@ -243,7 +246,7 @@ export default function DBConnectionModal({
                 setIsSaving(false);
             }
         },
-        [form, onClose, onSaved, dbms, method, sslEnabled, projectId]
+        [form, onClose, onSaved, dbms, method, sslEnabled, projectId, workspaceId]
     );
 
     const handleClose = useCallback(() => {

@@ -75,7 +75,7 @@ export interface IntrospectedTable {
 // ─── CRUD ───────────────────────────────────────────────
 
 export async function createDbConnection(
-    values: DBConnectionFormValues & { projectId?: string },
+    values: DBConnectionFormValues & { projectId?: string; workspaceId?: string },
 ): Promise<DBConnection> {
     return apiPost<DBConnection, typeof values>(PROXY_DB_CONNECTIONS, values);
 }

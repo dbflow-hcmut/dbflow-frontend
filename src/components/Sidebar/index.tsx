@@ -433,9 +433,6 @@ export default function Sidebar({ mobileOpen = false, onMobileClose, mobile = fa
             persistActiveWorkspaceId(workspace.id);
             setCreateTeamOpen(false);
             setTeamName("");
-            window.dispatchEvent(new CustomEvent("dbflow:workspace-changed", {
-              detail: { workspaceId: workspace.id },
-            }));
             window.dispatchEvent(new CustomEvent("dbflow:open-settings", {
               detail: { tab: "workspace" },
             }));
