@@ -93,9 +93,13 @@ const SchemaExportModal: React.FC<Props> = ({ isOpen, onClose, model, projectId,
     const topSectionRef = useRef<HTMLDivElement>(null);
     const dragStartY = useRef(0);
     const dragStartVal = useRef(0);
+    // Set right before clearing selectedConnId via the "Change" button, so the
+    // auto-select effect below doesn't immediately re-pick the same (only)
+    // connection and defeat the user's action.
+    const manualClearRef = useRef(false);
 
     const { data: connections, isLoading: loadingConns } = useProjectDbConnections(isOpen ? projectId : null);
-    const { matrix, loading: permLoading, check: checkPermissions } = usePermissionDetector();
+    const { matrix, loading: permLoading, error: permError, check: checkPermissions } = usePermissionDetector();
     const { addRecord } = useExportHistory(projectId);
 
     const selectedConn = useMemo(
@@ -103,9 +107,10 @@ const SchemaExportModal: React.FC<Props> = ({ isOpen, onClose, model, projectId,
         [connections, selectedConnId],
     );
 
-    // Auto-select first connection if only one
+    // Auto-select first connection if only one — but not right after the user
+    // explicitly cleared it via "Change".
     useEffect(() => {
-        if (isOpen && connections?.length === 1 && !selectedConnId) {
+        if (isOpen && connections?.length === 1 && !selectedConnId && !manualClearRef.current) {
             setSelectedConnId(connections[0].id);
         }
     }, [isOpen, connections, selectedConnId]);
@@ -151,6 +156,7 @@ const SchemaExportModal: React.FC<Props> = ({ isOpen, onClose, model, projectId,
     // Reset on close
     useEffect(() => {
         if (!isOpen) {
+            manualClearRef.current = false;
             setSelectedConnId(null);
             setLog([]);
             setDone(false);
@@ -321,7 +327,10 @@ const SchemaExportModal: React.FC<Props> = ({ isOpen, onClose, model, projectId,
                             placeholder="Select a database connection"
                             loading={loadingConns}
                             value={selectedConnId ?? undefined}
-                            onChange={(v) => setSelectedConnId(v)}
+                            onChange={(v) => {
+                                manualClearRef.current = false;
+                                setSelectedConnId(v);
+                            }}
                             style={{ width: "100%" }}
                             options={connections?.map((c) => ({
                                 value: c.id,
@@ -369,7 +378,10 @@ const SchemaExportModal: React.FC<Props> = ({ isOpen, onClose, model, projectId,
                             <Button
                                 size="small"
                                 icon={<ArrowLeftRight size={11} />}
-                                onClick={() => setSelectedConnId(null)}
+                                onClick={() => {
+                                    manualClearRef.current = true;
+                                    setSelectedConnId(null);
+                                }}
                                 className="!text-xs !h-7 !px-2.5 !font-medium"
                             >
                                 Change
@@ -426,6 +438,10 @@ const SchemaExportModal: React.FC<Props> = ({ isOpen, onClose, model, projectId,
                                         <AlertTriangle size={14} /> {`Missing permissions: ${missingPerms.join(", ")}`}
                                     </div>
                                 )
+                            ) : permError ? (
+                                <div className="flex items-center gap-1 text-red-600 text-xs">
+                                    <AlertTriangle size={14} /> {permError}
+                                </div>
                             ) : null}
                         </div>
                     )}
