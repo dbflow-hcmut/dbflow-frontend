@@ -93,10 +93,6 @@ const SchemaExportModal: React.FC<Props> = ({ isOpen, onClose, model, projectId,
     const topSectionRef = useRef<HTMLDivElement>(null);
     const dragStartY = useRef(0);
     const dragStartVal = useRef(0);
-    // Set right before clearing selectedConnId via the "Change" button, so the
-    // auto-select effect below doesn't immediately re-pick the same (only)
-    // connection and defeat the user's action.
-    const manualClearRef = useRef(false);
 
     const { data: connections, isLoading: loadingConns } = useProjectDbConnections(isOpen ? projectId : null);
     const { matrix, loading: permLoading, error: permError, check: checkPermissions } = usePermissionDetector();
@@ -107,10 +103,9 @@ const SchemaExportModal: React.FC<Props> = ({ isOpen, onClose, model, projectId,
         [connections, selectedConnId],
     );
 
-    // Auto-select first connection if only one — but not right after the user
-    // explicitly cleared it via "Change".
+    // Auto-select first connection if only one
     useEffect(() => {
-        if (isOpen && connections?.length === 1 && !selectedConnId && !manualClearRef.current) {
+        if (isOpen && connections?.length === 1 && !selectedConnId) {
             setSelectedConnId(connections[0].id);
         }
     }, [isOpen, connections, selectedConnId]);
@@ -156,7 +151,6 @@ const SchemaExportModal: React.FC<Props> = ({ isOpen, onClose, model, projectId,
     // Reset on close
     useEffect(() => {
         if (!isOpen) {
-            manualClearRef.current = false;
             setSelectedConnId(null);
             setLog([]);
             setDone(false);
@@ -327,10 +321,7 @@ const SchemaExportModal: React.FC<Props> = ({ isOpen, onClose, model, projectId,
                             placeholder="Select a database connection"
                             loading={loadingConns}
                             value={selectedConnId ?? undefined}
-                            onChange={(v) => {
-                                manualClearRef.current = false;
-                                setSelectedConnId(v);
-                            }}
+                            onChange={(v) => setSelectedConnId(v)}
                             style={{ width: "100%" }}
                             options={connections?.map((c) => ({
                                 value: c.id,
@@ -379,8 +370,11 @@ const SchemaExportModal: React.FC<Props> = ({ isOpen, onClose, model, projectId,
                                 size="small"
                                 icon={<ArrowLeftRight size={11} />}
                                 onClick={() => {
-                                    manualClearRef.current = true;
-                                    setSelectedConnId(null);
+                                    if (onNeedConnection) {
+                                        onNeedConnection();
+                                    } else {
+                                        setSelectedConnId(null);
+                                    }
                                 }}
                                 className="!text-xs !h-7 !px-2.5 !font-medium"
                             >
