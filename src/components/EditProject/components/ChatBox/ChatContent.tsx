@@ -177,69 +177,77 @@ export const ChatContent: React.FC<ChatContentProps> = ({
                                 </div>
                             )}
                             <div className="max-w-[80%]">
-                                <div
-                                    className={`rounded-lg px-4 py-2 ${
-                                        message.sender === "user"
-                                            ? "bg-primary-500 text-white"
-                                            : message.isError
-                                                ? "bg-red-50 text-red-700 border border-red-200"
-                                                : "bg-white text-gray-800 border border-gray-200"
-                                    }`}
-                                >
-                                    {message.sender === "user" ? (
-                                        <p className="text-sm whitespace-pre-wrap">{message.text}</p>
-                                    ) : (
-                                        <div className="text-sm prose prose-sm max-w-none
-                                            prose-p:my-1 prose-headings:my-1 prose-ul:my-1 prose-ol:my-1
-                                            prose-li:my-0 prose-pre:my-1 prose-blockquote:my-1
-                                            prose-code:text-primary-700 prose-code:bg-primary-50
-                                            prose-code:px-1 prose-code:rounded prose-code:text-xs
-                                            prose-pre:bg-gray-900 prose-pre:text-gray-100
-                                            prose-a:text-primary-600 prose-strong:text-gray-900
-                                            prose-table:text-xs prose-th:bg-gray-100">
-                                            <ReactMarkdown
-                                                remarkPlugins={[remarkGfm]}
-                                                components={{
-                                                    a: ({ href, children }) => {
-                                                        const isInternal = href?.startsWith("/");
-                                                        if (isInternal && href) {
-                                                            return (
-                                                                <a
-                                                                    href={href}
-                                                                    onClick={(e) => {
-                                                                        e.preventDefault();
-                                                                        router.push(href);
-                                                                    }}
-                                                                    className="cursor-pointer"
-                                                                >
-                                                                    {children}
-                                                                </a>
-                                                            );
-                                                        }
-                                                        return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
-                                                    },
-                                                }}
+                                {message.isError ? (
+                                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                        <span className="text-sm text-red-600 whitespace-pre-wrap">{message.text}</span>
+                                        {index === messages.length - 1 && !isLoading && onRetry && (
+                                            <button
+                                                onClick={onRetry}
+                                                className="flex items-center gap-1 text-xs text-red-600 hover:text-red-700 cursor-pointer transition-colors shrink-0"
                                             >
-                                                {message.text}
-                                            </ReactMarkdown>
-                                        </div>
-                                    )}
-                                    <p className={`text-xs mt-1 ${message.isError ? "text-red-400" : "opacity-70"}`}>
-                                        {message.timestamp.toLocaleTimeString([], {
-                                            hour: "2-digit",
-                                            minute: "2-digit",
-                                        })}
-                                    </p>
-                                </div>
-                                {message.isError && index === messages.length - 1 && !isLoading && onRetry && (
-                                    <div className="pt-4">
-                                        <button
-                                            onClick={onRetry}
-                                            className="mt-1 flex items-center gap-1 text-xs text-red-600 hover:text-red-700 cursor-pointer transition-colors"
-                                        >
-                                            <RefreshCw className="w-3 h-3" />
-                                            Try again
-                                        </button>
+                                                <RefreshCw className="w-3 h-3" />
+                                                Try again
+                                            </button>
+                                        )}
+                                        <span className="text-xs text-red-400 shrink-0">
+                                            {message.timestamp.toLocaleTimeString([], {
+                                                hour: "2-digit",
+                                                minute: "2-digit",
+                                            })}
+                                        </span>
+                                    </div>
+                                ) : (
+                                    <div
+                                        className={`rounded-lg px-4 py-2 ${
+                                            message.sender === "user"
+                                                ? "bg-primary-500 text-white"
+                                                : "bg-white text-gray-800 border border-gray-200"
+                                        }`}
+                                    >
+                                        {message.sender === "user" ? (
+                                            <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+                                        ) : (
+                                            <div className="text-sm prose prose-sm max-w-none
+                                                prose-p:my-1 prose-headings:my-1 prose-headings:text-sm prose-ul:my-1 prose-ol:my-1
+                                                prose-li:my-0 prose-pre:my-1 prose-blockquote:my-1
+                                                prose-code:text-primary-700 prose-code:bg-primary-50
+                                                prose-code:px-1 prose-code:rounded prose-code:text-xs
+                                                prose-pre:bg-gray-900 prose-pre:text-gray-100
+                                                prose-a:text-primary-600 prose-strong:text-gray-900
+                                                prose-table:text-xs prose-th:bg-gray-100">
+                                                <ReactMarkdown
+                                                    remarkPlugins={[remarkGfm]}
+                                                    components={{
+                                                        a: ({ href, children }) => {
+                                                            const isInternal = href?.startsWith("/");
+                                                            if (isInternal && href) {
+                                                                return (
+                                                                    <a
+                                                                        href={href}
+                                                                        onClick={(e) => {
+                                                                            e.preventDefault();
+                                                                            router.push(href);
+                                                                        }}
+                                                                        className="cursor-pointer"
+                                                                    >
+                                                                        {children}
+                                                                    </a>
+                                                                );
+                                                            }
+                                                            return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
+                                                        },
+                                                    }}
+                                                >
+                                                    {message.text}
+                                                </ReactMarkdown>
+                                            </div>
+                                        )}
+                                        <p className="text-xs mt-1 opacity-70">
+                                            {message.timestamp.toLocaleTimeString([], {
+                                                hour: "2-digit",
+                                                minute: "2-digit",
+                                            })}
+                                        </p>
                                     </div>
                                 )}
                             </div>

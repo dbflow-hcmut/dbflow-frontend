@@ -44,7 +44,7 @@ export default function RootLayout({
       <body className="antialiased min-h-screen bg-bg-light text-text-light" suppressHydrationWarning>
         <SessionProvider>
           <AuthProvider>
-            <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
+            <ThemeProvider attribute="class" forcedTheme="light" enableSystem={false} disableTransitionOnChange>
               <AntdRegistry>
                 <AntdThemeProvider>
                   <NotificationRoot />

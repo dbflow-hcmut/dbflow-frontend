@@ -72,6 +72,11 @@ export default function SqlWorkbenchModal({
     const [sql, setSql] = useState(defaultSql);
     const [nlInput, setNlInput] = useState("");
     const [generating, setGenerating] = useState(false);
+    /** "normalizing" is a cosmetic-only sub-phase for seed_data: the backend
+     * already reorders INSERTs for FK consistency before the final message
+     * arrives, so there's no real work left to wait for — this just gives
+     * that step a visible moment instead of flashing by unnoticed. */
+    const [genPhase, setGenPhase] = useState<"generating" | "normalizing">("generating");
     const [running, setRunning] = useState(false);
     const [resetting, setResetting] = useState(false);
     const [result, setResult] = useState<QueryResultDto | null>(null);
@@ -164,6 +169,8 @@ export default function SqlWorkbenchModal({
             return;
         }
         setGenerating(true);
+        setGenPhase("generating");
+        setSql("");
         addLog("info", `Generating from: "${nlInput}"`);
         let finalContent = "";
         let streamError: Error | null = null;
@@ -172,7 +179,14 @@ export default function SqlWorkbenchModal({
                 DBFLOW_ASSISTANT_ID,
                 generateThreadId(), // fresh, ephemeral thread per Generate click — not persisted to chat history
                 [{ role: "user", content: nlInput }],
-                (chunk) => { finalContent = chunk; },
+                (chunk) => {
+                    finalContent = chunk;
+                    // Stream the SQL fence's contents into the editor live —
+                    // extractSqlFromContent already handles an unclosed
+                    // (in-progress) fence, returning whatever's been typed so far.
+                    const partial = extractSqlFromContent(chunk);
+                    if (partial.sql) setSql(partial.sql);
+                },
                 () => {},
                 (err) => { streamError = err; },
                 true,
@@ -189,6 +203,12 @@ export default function SqlWorkbenchModal({
                 const preview = finalContent.trim().slice(0, 500) || "(empty response)";
                 throw new Error(`Could not parse SQL from the AI response. Raw response: ${preview}`);
             }
+
+            if (inputIntent === "seed_data") {
+                setGenPhase("normalizing");
+                await new Promise((resolve) => setTimeout(resolve, 700));
+            }
+
             setSql(extracted.sql);
             // Surface schema-level warnings the backend attaches around the SQL
             // fence (e.g. an unresolvable circular FK dependency) — everything
@@ -203,6 +223,7 @@ export default function SqlWorkbenchModal({
             addLog("error", `Generation failed: ${msg}`);
         } finally {
             setGenerating(false);
+            setGenPhase("generating");
         }
     }, [nlInput, generating, addLog, model, projectId, inputIntent]);
 
@@ -329,7 +350,7 @@ export default function SqlWorkbenchModal({
 
             {/* SQL Editor — flex-1 when no results, fixed height when results are shown */}
             <div
-                className={hasQueried ? "flex-shrink-0" : "flex-1 min-h-0"}
+                className={`relative ${hasQueried ? "flex-shrink-0" : "flex-1 min-h-0"}`}
                 style={hasQueried ? { height: editorHeight } : undefined}
             >
                 <Editor
@@ -349,9 +370,17 @@ export default function SqlWorkbenchModal({
                         renderLineHighlight: "none",
                         scrollbar: { vertical: "hidden", horizontal: "hidden" },
                         overviewRulerLanes: 0,
+                        readOnly: generating,
                     }}
                     theme="light"
                 />
+                {generating && (
+                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/55 cursor-not-allowed">
+                        <span className="text-[11px] font-medium text-gray-500">
+                            {genPhase === "normalizing" ? "Normalizing data…" : "AI is generating SQL…"}
+                        </span>
+                    </div>
+                )}
             </div>
 
             {/* Toolbar */}
@@ -376,6 +405,7 @@ export default function SqlWorkbenchModal({
                         className="!h-6 !text-[11px] !px-2"
                         icon={<Wand2 size={11} />}
                         onClick={handleBeautify}
+                        disabled={generating}
                     >
                         Beautify
                     </Button>
@@ -386,7 +416,7 @@ export default function SqlWorkbenchModal({
                         icon={<Play size={11} />}
                         loading={running}
                         onClick={handleRun}
-                        disabled={!sql.trim()}
+                        disabled={!sql.trim() || generating}
                     >
                         Run
                     </Button>

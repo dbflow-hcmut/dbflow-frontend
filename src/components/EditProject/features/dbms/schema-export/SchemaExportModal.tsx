@@ -366,6 +366,14 @@ const SchemaExportModal: React.FC<Props> = ({ isOpen, onClose, model, projectId,
                                     </div>
                                 </div>
                             </div>
+                            <Button
+                                size="small"
+                                icon={<ArrowLeftRight size={11} />}
+                                onClick={() => setSelectedConnId(null)}
+                                className="!text-xs !h-7 !px-2.5 !font-medium"
+                            >
+                                Change
+                            </Button>
                         </div>
                     )}
 

@@ -253,10 +253,13 @@ export interface LangGraphStreamEvent {
  * Matches both complete and partial JSON that starts with routing-like keys.
  */
 function isRoutingJson(text: string): boolean {
+  const trimmed = text.replace(/^\s+/, "");
+  if (!trimmed.startsWith("{")) return false;
+
   // Check for complete JSON with routing keys
-  if (text.startsWith("{") && text.endsWith("}")) {
+  if (trimmed.endsWith("}")) {
     try {
-      const parsed = JSON.parse(text);
+      const parsed = JSON.parse(trimmed);
       if (parsed.intent !== undefined || parsed.reasoning !== undefined || parsed.detected_level !== undefined || parsed.effective_level !== undefined) {
         return true;
       }
@@ -267,11 +270,18 @@ function isRoutingJson(text: string): boolean {
 
   // Check for partial/streaming JSON that looks like routing output
   // e.g. '{ "intent"', '{ "intent": "chat",\n  "detected_level"', etc.
-  if (text.startsWith("{")) {
-    const routingPattern = /^\s*\{\s*"(intent|detected_level|effective_level|reasoning)"/;
-    if (routingPattern.test(text)) {
-      return true;
-    }
+  const routingPattern = /^\{\s*"(intent|detected_level|effective_level|reasoning)"/;
+  if (routingPattern.test(trimmed)) {
+    return true;
+  }
+
+  // Bootstrap case: the very first sliver of the stream ('{', '{"', '{"i', ...)
+  // arrives before enough of the key name has streamed in to match the
+  // pattern above. router_node's message always opens with "intent" (see
+  // router.py), so treat any strict prefix of that opening as routing JSON
+  // still forming, not real content to show the user.
+  if ('{"intent'.startsWith(trimmed)) {
+    return true;
   }
 
   return false;
