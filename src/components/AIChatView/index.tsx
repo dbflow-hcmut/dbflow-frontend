@@ -464,9 +464,22 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
 
       const extracted = extractModelJsonFromContent(fullContent);
       if (!extracted.isJsonComplete || !extracted.modelJson) {
-        // JSON extraction failed — show error, don't redirect
+        // No schema yet — the AI proposed a plan / asked a clarifying
+        // question instead of generating (see the two-phase schema-design
+        // flow). Nothing to redirect on; just stop loading and persist the
+        // exchange like a normal chat turn.
         redirectTriggeredRef.current = false;
         setIsRedirecting(false);
+        setIsLoading(false);
+        try {
+          await ensureConversationReady();
+          await saveMessages(threadId, [
+            { role: "user", content: encodeAttachmentMetadata(userMsg, currentAttachments) },
+            { role: "assistant", content: fullContent },
+          ]);
+        } catch (error) {
+          console.error("Failed to save messages:", error);
+        }
         return;
       }
 
@@ -842,56 +855,64 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
                     </div>
                   )}
                   <div className="max-w-[80%]">
+                    {message.isError ? (
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span className="text-sm leading-relaxed text-red-600 whitespace-pre-wrap">
+                          {message.content}
+                        </span>
+                        {isLastMessage && !isLoading && (
+                          <button
+                            onClick={handleRetry}
+                            className="flex items-center gap-1.5 text-sm text-red-600 hover:text-red-700 cursor-pointer transition-colors shrink-0"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            Try again
+                          </button>
+                        )}
+                        <span className="text-xs text-red-400 shrink-0">
+                          {message.timestamp.toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
+                    ) : (
                       <div className={`${
                         message.role === "user"
                           ? "bg-primary-500 text-white rounded-2xl rounded-tr-sm"
-                          : message.isError
-                            ? "bg-red-50 text-red-700 border border-red-200 rounded-2xl rounded-tl-sm"
-                            : "bg-gray-100 text-gray-900 rounded-2xl rounded-tl-sm"
+                          : "bg-gray-100 text-gray-900 rounded-2xl rounded-tl-sm"
                       } px-5 py-3`}
-                    >
-                      {message.role === "user" ? (
-                        <div className="text-sm leading-relaxed whitespace-pre-wrap">
-                          {message.content}
-                        </div>
-                      ) : (
-                        <div className="text-sm leading-relaxed prose prose-sm max-w-none
-                          prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1
-                          prose-li:my-0 prose-pre:my-2 prose-blockquote:my-1
-                          prose-code:text-primary-700 prose-code:bg-primary-50
-                          prose-code:px-1 prose-code:rounded prose-code:text-xs
-                          prose-pre:bg-gray-900 prose-pre:text-gray-100
-                          prose-a:text-primary-600 prose-strong:text-gray-900
-                          prose-table:text-xs prose-th:bg-gray-200">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {message.content}
-                          </ReactMarkdown>
-                        </div>
-                      )}
-                      <div
-                        className={`text-xs mt-2 ${
-                          message.role === "user"
-                            ? "text-primary-100"
-                            : message.isError
-                              ? "text-red-400"
-                              : "text-gray-500"
-                        }`}
                       >
-                        {message.timestamp.toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </div>
-                    </div>
-                    {message.isError && isLastMessage && !isLoading && (
-                      <div className="pt-4">
-                        <button
-                          onClick={handleRetry}
-                          className="mt-2 flex items-center gap-1.5 text-sm text-red-600 hover:text-red-700 cursor-pointer transition-colors"
+                        {message.role === "user" ? (
+                          <div className="text-sm leading-relaxed whitespace-pre-wrap">
+                            {message.content}
+                          </div>
+                        ) : (
+                          <div className="text-sm leading-relaxed prose prose-sm max-w-none
+                            prose-p:my-1 prose-headings:my-2 prose-headings:text-sm prose-ul:my-1 prose-ol:my-1
+                            prose-li:my-0 prose-pre:my-2 prose-blockquote:my-1
+                            prose-code:text-primary-700 prose-code:bg-primary-50
+                            prose-code:px-1 prose-code:rounded prose-code:text-xs
+                            prose-pre:bg-gray-900 prose-pre:text-gray-100
+                            prose-a:text-primary-600 prose-strong:text-gray-900
+                            prose-table:text-xs prose-th:bg-gray-200">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {message.content}
+                            </ReactMarkdown>
+                          </div>
+                        )}
+                        <div
+                          className={`text-xs mt-2 ${
+                            message.role === "user"
+                              ? "text-primary-100"
+                              : "text-gray-500"
+                          }`}
                         >
-                          <RefreshCw className="w-3.5 h-3.5" />
-                          Try again
-                        </button>
+                          {message.timestamp.toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </div>
                       </div>
                     )}
                   </div>

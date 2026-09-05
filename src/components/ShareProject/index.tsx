@@ -268,7 +268,7 @@ export default function ShareProject(props: shareProjectProps) {
                       />
                     </div>
                     <div>
-                      <div className="flex items-center gap-1 text-sm font-semibold text-gray-700 dark:text-gray-200">
+                      <div className="flex items-center gap-1 text-sm font-semibold text-gray-700">
                         {member.fullName}
                         {member.userId === userPermissionData?.userId && (
                           <span> (You) </span>
@@ -435,7 +435,7 @@ export default function ShareProject(props: shareProjectProps) {
                                 />
                               </div>
                               <div>
-                                <div className="text-sm font-semibold text-gray-700 dark:text-gray-200 flex gap-1 items-center">
+                                <div className="text-sm font-semibold text-gray-700 flex gap-1 items-center">
                                   {user.fullName}{" "}
                                   {user?.isVerified && (
                                     <BadgeCheck
