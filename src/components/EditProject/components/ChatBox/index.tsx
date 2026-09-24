@@ -21,6 +21,7 @@ import {
     getConversation,
     getProjectConversations,
     linkConversationToProject,
+    updateConversationTitle,
 } from "@/api/chat/client";
 
 interface ChatBoxProps {
@@ -284,6 +285,8 @@ const ChatBox: React.FC<ChatBoxProps> = ({
         if (!trimmed && atts.length === 0) return;
         if (isLoading) return;
 
+        const shouldApplySuggestedTitle = !conversationCreated;
+        let suggestedTitle = "";
         lastUserMessageRef.current = trimmed;
 
         const { message: enrichedMessage, modelOverride } = buildChatInputFromAttachments(trimmed, atts);
@@ -461,6 +464,9 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                             { role: "user", content: encodeAttachmentMetadata(trimmed, atts) },
                             { role: "assistant", content: assistantContentToSave || finalContent },
                         ]);
+                        if (shouldApplySuggestedTitle && suggestedTitle) {
+                            await updateConversationTitle(threadId, suggestedTitle);
+                        }
                     } catch (error) {
                         console.error("Failed to save messages:", error);
                     }
@@ -495,6 +501,9 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                     detectedLevelRef.current = info.effective_level;
                 } else if (info.detected_level) {
                     detectedLevelRef.current = info.detected_level;
+                }
+                if (shouldApplySuggestedTitle && info.suggested_title) {
+                    suggestedTitle = info.suggested_title;
                 }
             },
             abortController.signal,

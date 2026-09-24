@@ -28,6 +28,7 @@ import {
   saveMessages,
   getConversation,
   linkConversationToProject,
+  updateConversationTitle,
 } from "@/api/chat/client";
 import { createProject } from "@/components/CreateProject/api/client";
 import { useWorkspace } from "@/context/WorkspaceContext";
@@ -368,10 +369,15 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
     setAttachments((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
-  const isUploading = attachments.some((a) => a.uploading);  const handleSend = useCallback(async (retryMessage?: string) => {
+  const isUploading = attachments.some((a) => a.uploading);
+
+  const handleSend = useCallback(async (retryMessage?: string) => {
     const messageToSend = retryMessage || inputValue.trim();
     if ((!messageToSend && attachments.length === 0) || isLoading || isUploading) return;
 
+    const shouldApplySuggestedTitle = !conversationCreated && !retryMessage;
+    let suggestedTitle = "";
+    let suggestedTitlePersisted = false;
     const userMessageContent = messageToSend || "(attached files)";
     if (!retryMessage) setInputValue("");
     const currentAttachments = retryMessage ? [] : attachments;
@@ -447,6 +453,17 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
       if (conversationPromise) await conversationPromise;
     };
 
+    const persistSuggestedTitle = async () => {
+      if (!shouldApplySuggestedTitle || !suggestedTitle || suggestedTitlePersisted) return;
+      try {
+        await ensureConversationReady();
+        await updateConversationTitle(threadId, suggestedTitle);
+        suggestedTitlePersisted = true;
+      } catch (error) {
+        console.error("Failed to update conversation title:", error);
+      }
+    };
+
     /**
      * After stream completes with a create/edit intent:
      * 1. Extract model JSON from the full response
@@ -477,6 +494,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
             { role: "user", content: encodeAttachmentMetadata(userMsg, currentAttachments) },
             { role: "assistant", content: fullContent },
           ]);
+          await persistSuggestedTitle();
         } catch (error) {
           console.error("Failed to save messages:", error);
         }
@@ -499,11 +517,11 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
 
         // Only create a new project if we don't already have one from this conversation
         if (!projectIdToUse) {
-          const projectName =
+          const fallbackProjectName =
             userMsg.length > 50 ? userMsg.substring(0, 50) + "..." : userMsg;
 
           const project = await createProject({
-            name: `AI: ${projectName}`,
+            name: suggestedTitle || fallbackProjectName,
             workspaceId,
             skipDefaultSchema: true,
           });
@@ -588,6 +606,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
           { role: "user", content: encodeAttachmentMetadata(userMsg, currentAttachments) },
           { role: "assistant", content: assistantContentWithLink },
         ]);
+        await persistSuggestedTitle();
         await linkConversationToProject(threadId, projectIdToUse, schema.id);
 
         // Navigate to editor with ChatBox auto-opened showing this conversation
@@ -667,6 +686,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
               { role: "user", content: encodeAttachmentMetadata(userMessageContent, currentAttachments) },
               { role: "assistant", content: finalAssistantContent },
             ]);
+            await persistSuggestedTitle();
           } catch (error) {
             console.error("Failed to save messages:", error);
           }
@@ -697,6 +717,9 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
           detectedLevelRef.current = info.effective_level;
         } else if (info.detected_level) {
           detectedLevelRef.current = info.detected_level;
+        }
+        if (shouldApplySuggestedTitle && info.suggested_title) {
+          suggestedTitle = info.suggested_title;
         }
       },
       abortController.signal,

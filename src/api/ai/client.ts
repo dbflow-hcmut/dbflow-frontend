@@ -260,7 +260,13 @@ function isRoutingJson(text: string): boolean {
   if (trimmed.endsWith("}")) {
     try {
       const parsed = JSON.parse(trimmed);
-      if (parsed.intent !== undefined || parsed.reasoning !== undefined || parsed.detected_level !== undefined || parsed.effective_level !== undefined) {
+      if (
+        parsed.intent !== undefined ||
+        parsed.reasoning !== undefined ||
+        parsed.detected_level !== undefined ||
+        parsed.effective_level !== undefined ||
+        parsed.suggested_title !== undefined
+      ) {
         return true;
       }
     } catch {
@@ -270,7 +276,8 @@ function isRoutingJson(text: string): boolean {
 
   // Check for partial/streaming JSON that looks like routing output
   // e.g. '{ "intent"', '{ "intent": "chat",\n  "detected_level"', etc.
-  const routingPattern = /^\{\s*"(intent|detected_level|effective_level|reasoning)"/;
+  const routingPattern =
+    /^\{\s*"(intent|detected_level|effective_level|reasoning|suggested_title)"/;
   if (routingPattern.test(trimmed)) {
     return true;
   }
@@ -292,6 +299,7 @@ export interface RoutingInfo {
   detected_level?: string | null;
   effective_level?: string | null;
   reasoning?: string;
+  suggested_title?: string;
 }
 
 /**
