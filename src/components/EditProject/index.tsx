@@ -1817,7 +1817,7 @@ const EditProject = (props: IPropsEditProject) => {
     }, []);
 
     // Callback for ChatBox: when AI generates a model JSON, apply it to the diagram
-    const handleChatModelGenerated = useCallback(async (modelJson: Record<string, unknown>, detectedLevel?: string, intent?: string) => {
+    const handleChatModelGenerated = useCallback(async (modelJson: Record<string, unknown>, detectedLevel?: string, intent?: string, schemaTitle?: string) => {
         const currentLevel = isConceptualSchema ? "conceptual" : isLogicalSchema ? "logical" : isPhysicalSchema ? "physical" : undefined;
 
         // Create a new schema when: different level OR intent is explicitly "create"
@@ -1833,7 +1833,7 @@ const EditProject = (props: IPropsEditProject) => {
                 };
                 const aiDbms = detectedLevel === "physical" ? (modelJson as any)?.model?.dbms : undefined;
                 const newSchema = await createSchema(projectData.id, {
-                    name: levelLabels[detectedLevel] || `${detectedLevel} Schema`,
+                    name: schemaTitle || levelLabels[detectedLevel] || `${detectedLevel} Schema`,
                     type: detectedLevel,
                     ...(aiDbms ? { dbms: aiDbms } : {}),
                 });
