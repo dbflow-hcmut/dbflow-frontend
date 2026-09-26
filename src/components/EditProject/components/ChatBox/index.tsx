@@ -40,6 +40,8 @@ interface ChatBoxProps {
         modelJson: Record<string, unknown>,
         detectedLevel?: string,
         intent?: string,
+        /** Router-generated title of the current turn, used to name a newly created schema */
+        schemaTitle?: string,
     ) => Promise<{ projectId: string; schemaId: string; label?: string } | void> | { projectId: string; schemaId: string; label?: string } | void;
 }
 
@@ -287,6 +289,8 @@ const ChatBox: React.FC<ChatBoxProps> = ({
 
         const shouldApplySuggestedTitle = !conversationCreated;
         let suggestedTitle = "";
+        // Title of THIS turn (not only the first one), used to name a new schema.
+        let latestRoutedTitle = "";
         lastUserMessageRef.current = trimmed;
 
         const { message: enrichedMessage, modelOverride } = buildChatInputFromAttachments(trimmed, atts);
@@ -421,7 +425,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                     // schema that the validator will reject and retry.
                     if (extracted.modelJson && onModelGenerated && !modelAlreadyApplied) {
                         const effectiveTargetLevel = detectedLevelRef.current ?? undefined;
-                        const openLink = await onModelGenerated(extracted.modelJson, effectiveTargetLevel, currentIntentRef.current ?? undefined);
+                        const openLink = await onModelGenerated(extracted.modelJson, effectiveTargetLevel, currentIntentRef.current ?? undefined, latestRoutedTitle || undefined);
                         if (openLink) {
                             const linkMarkdown = buildOpenSchemaLink(openLink);
                             finalDisplayText = `${finalDisplayText}\n\n${linkMarkdown}`;
@@ -502,8 +506,9 @@ const ChatBox: React.FC<ChatBoxProps> = ({
                 } else if (info.detected_level) {
                     detectedLevelRef.current = info.detected_level;
                 }
-                if (shouldApplySuggestedTitle && info.suggested_title) {
-                    suggestedTitle = info.suggested_title;
+                if (info.suggested_title) {
+                    latestRoutedTitle = info.suggested_title;
+                    if (shouldApplySuggestedTitle) suggestedTitle = info.suggested_title;
                 }
             },
             abortController.signal,

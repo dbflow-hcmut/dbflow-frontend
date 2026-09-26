@@ -377,6 +377,9 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
 
     const shouldApplySuggestedTitle = !conversationCreated && !retryMessage;
     let suggestedTitle = "";
+    // Router title of THIS turn, always captured. Used to name a project/schema
+    // created on this turn, even if it is not the first message of the chat.
+    let latestRoutedTitle = "";
     let suggestedTitlePersisted = false;
     const userMessageContent = messageToSend || "(attached files)";
     if (!retryMessage) setInputValue("");
@@ -521,7 +524,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
             userMsg.length > 50 ? userMsg.substring(0, 50) + "..." : userMsg;
 
           const project = await createProject({
-            name: suggestedTitle || fallbackProjectName,
+            name: latestRoutedTitle || fallbackProjectName,
             workspaceId,
             skipDefaultSchema: true,
           });
@@ -581,7 +584,7 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
               : "Conceptual Schema";
 
         const schema = await createSchema(projectIdToUse, {
-          name: schemaName,
+          name: latestRoutedTitle || schemaName,
           type: schemaType,
         });
 
@@ -718,8 +721,9 @@ export default function AIChatView({ threadId: initialThreadId }: AIChatViewProp
         } else if (info.detected_level) {
           detectedLevelRef.current = info.detected_level;
         }
-        if (shouldApplySuggestedTitle && info.suggested_title) {
-          suggestedTitle = info.suggested_title;
+        if (info.suggested_title) {
+          latestRoutedTitle = info.suggested_title;
+          if (shouldApplySuggestedTitle) suggestedTitle = info.suggested_title;
         }
       },
       abortController.signal,
