@@ -2,12 +2,13 @@
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { Modal, Button, Input, Tooltip, Tag } from "antd";
-import { Play, Clock, Rows3, Sparkles, RotateCcw, CheckCircle, XCircle, Info, AlertTriangle, GripHorizontal, Wand2 } from "lucide-react";
+import { Play, Clock, Rows3, Sparkles, RotateCcw, CheckCircle, XCircle, Info, AlertTriangle, GripHorizontal, Wand2, Copy } from "lucide-react";
 import Editor from "@monaco-editor/react";
 import type { QueryResultDto } from "@/api/db-connections/client";
 import { executeSandboxQuery, resetSandbox, type SandboxSyncReportEntry } from "@/api/sandbox/client";
 import { streamChatToLangGraph, extractSqlFromContent, generateThreadId, DBFLOW_ASSISTANT_ID } from "@/api/ai/client";
 import type { PhysicalModelPayload } from "@/components/EditProject/utils/physical-model.builder";
+import { notificationProvider } from "@/providers/notification";
 
 const { TextArea } = Input;
 
@@ -280,6 +281,13 @@ export default function SqlWorkbenchModal({
         editorRef.current?.getAction("editor.action.formatDocument")?.run();
     }, []);
 
+    const handleCopy = useCallback(() => {
+        if (!sqlRef.current.trim()) return;
+        navigator.clipboard.writeText(sqlRef.current).then(() => {
+            notificationProvider.open({ type: "success", message: "Copied to clipboard" });
+        });
+    }, []);
+
     const handleEditorMount = useCallback((editor: unknown) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const e = editor as any;
@@ -409,6 +417,17 @@ export default function SqlWorkbenchModal({
                     >
                         Beautify
                     </Button>
+                    <Tooltip title="Copy editor content">
+                        <Button
+                            size="small"
+                            className="!h-6 !text-[11px] !px-2"
+                            icon={<Copy size={11} />}
+                            onClick={handleCopy}
+                            disabled={!sql.trim()}
+                        >
+                            Copy
+                        </Button>
+                    </Tooltip>
                     <Button
                         type="primary"
                         size="small"
