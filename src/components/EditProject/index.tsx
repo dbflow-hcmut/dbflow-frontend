@@ -81,6 +81,7 @@ import { createSchema, saveSchemaModel, updateSchema } from "./api/client";
 import { revalidateProjectSchemas } from "@/app/projects/actions";
 import { getFkSourceCardinality, isColumnAloneUnique } from "./utils/edge-cardinality";
 import { findColumnIndexByHandle } from "./utils/logical-column-handle";
+import { collectReferencingColumns, getReferencingColumnType } from "./utils/physical-column-type";
 import { convertLogicalToPhysical, convertPhysicalToLogical, convertLogicalToConceptual, convertConceptualToLogical, convertPhysicalToConceptual, convertConceptualToPhysical } from "./utils/schema-conversion";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import { useCopyPasteSchema } from "./hooks/useCopyPasteSchema";
@@ -950,6 +951,39 @@ const EditProject = (props: IPropsEditProject) => {
 
         const tableData = selectedNode.data as RelationTableData;
         const column = tableData.columns?.[columnIndex];
+
+        // a primary key column can never be NULL
+        if (updates.isPrimary) updates = { ...updates, isNullable: false };
+
+        // applies the update, then copies a type/length change to the columns that reference this column
+        const applyColumnUpdate = () => {
+            updateRelationTableColumn(columnIndex, updates);
+            if (!column || (updates.type === undefined && !('length' in updates))) return;
+
+            const referencing = collectReferencingColumns(edges, selectedNode.id, column.name);
+            if (referencing.length === 0) return;
+            const nextType = updates.type ?? column.type;
+            const nextLength = 'length' in updates ? updates.length : column.length;
+            setNodes((existingNodes) =>
+                existingNodes.map((node) => {
+                    if (node.type !== 'relation') return node;
+                    const names = new Set(referencing.filter((ref) => ref.tableId === node.id).map((ref) => ref.columnName));
+                    if (names.size === 0) return node;
+                    const data = node.data as RelationTableData;
+                    return {
+                        ...node,
+                        data: {
+                            ...data,
+                            columns: data.columns?.map((col) =>
+                                names.has(col.name)
+                                    ? { ...col, type: getReferencingColumnType(nextType), length: nextLength }
+                                    : col
+                            ) ?? [],
+                        },
+                    };
+                })
+            );
+        };
         const nextColumn = { ...column, ...updates };
         const changesKeyState =
             (updates.isPrimary !== undefined && updates.isPrimary !== Boolean(column?.isPrimary)) ||
@@ -957,7 +991,7 @@ const EditProject = (props: IPropsEditProject) => {
             (updates.isUnique !== undefined && updates.isUnique !== Boolean(column?.isUnique));
 
         if (!changesKeyState || !column || !isPhysicalColumnConnectedToRelationship(selectedNode.id, column.name)) {
-            updateRelationTableColumn(columnIndex, updates);
+            applyColumnUpdate();
             return;
         }
 
@@ -973,11 +1007,11 @@ const EditProject = (props: IPropsEditProject) => {
             okText: invalidReferencedEdgeIds.length > 0 ? "Apply and remove edges" : "Apply change",
             cancelText: "Cancel",
             onOk: () => {
-                updateRelationTableColumn(columnIndex, updates);
+                applyColumnUpdate();
                 refreshPhysicalEdgeCardinalities(selectedNode.id, column.name, updates, invalidReferencedEdgeIds);
             },
         });
-    }, [getPhysicalReferencedEdgeIds, isPhysicalColumnConnectedToRelationship, refreshPhysicalEdgeCardinalities, selectedNode, updateRelationTableColumn]);
+    }, [edges, setNodes, getPhysicalReferencedEdgeIds, isPhysicalColumnConnectedToRelationship, refreshPhysicalEdgeCardinalities, selectedNode, updateRelationTableColumn]);
 
     const nodeTypes = useMemo(
         () => ({

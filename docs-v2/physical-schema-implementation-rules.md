@@ -364,7 +364,7 @@ Nếu có `tableData.columns`, mỗi UI column được map sang model column:
     name: actualCol.name || `column_${idx}`,
     dataType: actualCol.type,
     length: actualCol.length,
-    nullable: actualCol.isNullable ?? true,
+    nullable: isPrimaryKey ? false : (actualCol.isNullable ?? true),
     unique: actualCol.isUnique ?? false,
     autoIncrement: actualCol.isAutoIncrement,
     defaultValue: actualCol.defaultValue,
@@ -381,7 +381,7 @@ Rule đáng chú ý:
 - Column id được generate lại theo index, không lấy id cũ từ UI column.
 - PK và candidate key nằm trong `roles`.
 - FK không lấy từ column data, mà lấy từ edge-derived `fkMap`.
-- Nếu thiếu `nullable`, mặc định là `true`.
+- Nếu thiếu `nullable`, mặc định là `true`; cột PK luôn có `nullable = false` (UI: checkbox Nullable bị tắt và disabled khi tick PK, `updateRelationTableColumnWithWarning` set `isNullable = false` khi bật PK).
 - Nếu thiếu `unique`, mặc định là `false`.
 
 ### 8.6. Step 6: fallback columns từ stored columns
@@ -596,6 +596,11 @@ PropertiesPanel cho chỉnh:
 Physical edge handles dùng column name, nên reorder không cần đổi `sourceHandle/targetHandle` như logical. Sau khi reorder vẫn phải refresh node internals để ReactFlow tính lại vị trí handle theo row mới.
 
 Các update này hiện mutate ReactFlow node data trước. Khi cần mutate model, `usePhysicalCollaboration.mutateModel` sẽ rebuild model từ diagram hiện tại để không làm mất diagram-only edits.
+
+### 11.3b. Kiểu dữ liệu, length và FK column
+
+- Ô length chỉ nhận chữ số (hoặc `max`, và `p,s` với `decimal`/`numeric`) qua `isTypingValidLength`; giá trị chưa hợp lệ hiển thị trạng thái lỗi và bị Linter `P027` báo (`utils/physical-column-type.ts`).
+- Khi đổi `type`/`length` của một cột, `updateRelationTableColumnWithWarning` đi theo các physical edge (source = FK column, target = cột được tham chiếu, `collectReferencingColumns`, theo chuỗi FK, chống vòng lặp) và gán cùng `type`/`length` cho mọi cột tham chiếu. Cột được tham chiếu là `serial`/`bigserial`/`smallserial` thì cột FK nhận `integer`/`bigint`/`smallint` (`getReferencingColumnType`). `autoIncrement`, `nullable`, `default` của cột FK không bị đổi.
 
 ### 11.4. Chỉnh index
 
