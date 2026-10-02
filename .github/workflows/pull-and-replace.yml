@@ -15,10 +15,14 @@ jobs:
         run: |
           cd source
           git checkout main
-          
+
           git remote remove origin
           git remote add origin https://x-access-token:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/thnhtai19/dbflow-fontend-bot
-          
+
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+
           git push origin main:backup-main
 
+          git commit --allow-empty -m "Replace code"
           git push --force origin main
