@@ -4,7 +4,7 @@
 >
 > Scope: DBFlow frontend, NestJS backend, PostgreSQL database, LangGraph AI service, admin portal, personal/team subscriptions, usage metering, and payment integration.
 
-## 1. Mục tiêu
+## 1. Mục tiêu 
 
 Xây dựng DBFlow thành sản phẩm SaaS có thể:
 
