@@ -960,6 +960,16 @@ PropertiesPanel cho conceptual edge:
 - Chọn edge line style: single, double, identifying/bracket.
 - Entity - relationship, constraint, và entity - entity edge được phép chọn identifying/bracket.
 - Entity - entity edge chỉ có option identifying/bracket; không cho đổi sang single/double.
+- Nhãn của option bracket phụ thuộc loại edge (`bracketEdgeLabel` trong PropertiesPanel): edge constraint (vòng tròn d/o/u) và entity - entity là "Subclass (child link)" vì bracket đánh dấu lớp con (`isaChild`/`categoryLink`); edge relationship - entity vẫn là "Identifying". Chiều bracket của entity - entity hiển thị là "Subclass Direction".
+- Mọi edge nối vòng tròn d/o với entity mặc định là `isaParent`; chỉ edge có `lineStyle = "bracket"` mới được lưu thành `isaChild`, nên muốn khai báo lớp con phải chọn option bracket ("Subclass (child link)").
+
+### Phím tắt xóa
+
+- `<ReactFlow deleteKeyCode={["Backspace", "Delete"]}>`: cả Backspace và Delete đều xóa node/edge đang chọn. Với viewer, handler `keydown` ở EditProject vẫn chặn cả hai phím (trừ khi đang gõ trong input).
+
+### Fit view khi mở schema chưa có viewport
+
+- `useDiagramViewport`: nếu schema chưa có viewport lưu sẵn, hook gọi `fitView({ padding: 0.2 })` đúng một lần. Vì ReactFlow đo kích thước node sau khi nodes được set (đặc biệt khi diagram sinh từ model lần đầu), hook thăm dò mỗi 100ms (tối đa 30 lần ≈ 3s) cho tới khi mọi node có `width`/`height`, rồi mới `fitView`. Trước đây fitView chạy sớm một lần khi node chưa đo nên viewport ở `translate(0,0) scale(1)` và một phần sơ đồ nằm ngoài khung nhìn.
 - Nếu bracket trên entity - relationship hoặc entity - entity thì chọn direction `from` hoặc `to`.
 - Entity - entity bracket direction default là `from`.
 - Nếu edge là participation/identifying thì có label.

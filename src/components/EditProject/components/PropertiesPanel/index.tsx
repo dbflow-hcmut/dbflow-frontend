@@ -111,6 +111,10 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
         selectedEdgeHasConstraint || selectedEdgeIsRelationshipEntity || selectedEdgeIsEntityEntity;
     const selectedEdgeCanChooseBracketDirection =
         selectedEdge?.data?.lineStyle === "bracket" && (selectedEdgeIsRelationshipEntity || selectedEdgeIsEntityEntity);
+    // The bracket line style marks a subclass link on generalization (ISA) / category edges and a
+    // direct entity–entity link, and the identifying link on a relationship–entity edge.
+    const bracketEdgeLabel =
+        selectedEdgeHasConstraint || selectedEdgeIsEntityEntity ? "Subclass (child link)" : "Identifying";
 
     const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
     const connectedEnds = useMemo(() => {
@@ -979,12 +983,12 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                         className="w-full"
                                         options={
                                             selectedEdgeIsEntityEntity
-                                                ? [{ label: 'Identifying', value: 'bracket' as const }]
+                                                ? [{ label: bracketEdgeLabel, value: 'bracket' as const }]
                                                 : [
                                                     { label: 'Single line', value: 'single' },
                                                     { label: 'Double line', value: 'double' },
                                                     ...(selectedEdgeCanUseBracket
-                                                        ? [{ label: 'Identifying', value: 'bracket' as const }]
+                                                        ? [{ label: bracketEdgeLabel, value: 'bracket' as const }]
                                                         : []),
                                                 ]
                                         }
@@ -992,7 +996,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                 </div>
                                 {selectedEdgeCanChooseBracketDirection && (
                                     <div>
-                                        <label className="block text-sm font-medium mb-2">Identifying Direction</label>
+                                        <label className="block text-sm font-medium mb-2">{selectedEdgeIsEntityEntity ? "Subclass Direction" : "Identifying Direction"}</label>
                                         <Select
                                             value={selectedEdge.data?.bracketDirection || (selectedEdgeIsEntityEntity ? 'from' : 'to')}
                                             onChange={(value) => onUpdateEdgeBracketDirection(value)}
