@@ -649,6 +649,13 @@ PropertiesPanel cho:
 
 Khi reorder logical column, ReactFlow edge handles phải được remap theo old index -> new index để edge vẫn trỏ đúng logical column. Vì logical handle id có format `lid_${tableId}_col_${idx}-{side}`, nếu chỉ đổi `data.columns` mà không đổi `sourceHandle/targetHandle` thì edge sẽ bám nhầm row sau reorder.
 
+Quy tắc tra cột theo handle (`utils/logical-column-handle.ts`, `findColumnIndexByHandle`):
+
+- Handle của mỗi cột có id `<columnId>-left|right`, với `columnId` chính là `column.id`. Phần số `N` trong `lid_${tableId}_col_N` chỉ là **bộ đếm lúc tạo cột** (`addLogicalTableAttribute` lấy `max(N) + 1`), không phải vị trí trong `columns`.
+- Sau khi xóa một cột (hoặc reorder), `N` không còn bằng vị trí. Vì vậy vị trí cột phải được tra bằng cách so `column.id` với phần `columnId` của handle (cột không có `id` dùng id vị trí `lid_${tableId}_col_${index}`), tuyệt đối không parse `N` rồi dùng làm index.
+- Mọi nơi trong `EditProject/index.tsx` cần biết cột của một handle (`onConnect` -> `resolveLogicalColumn`, `refreshLogicalEdgeCardinalities`) đều dùng helper này. Trước đây parse bằng regex `/_col_(\d+)/`, nên sau khi xóa cột thì `resolveLogicalColumn` trả `null` và `onConnect` bỏ qua im lặng (không tạo cạnh FK, không báo lỗi).
+- `reorderLogicalTableAttributes` chỉ đổi thứ tự `columns`, giữ nguyên `column.id`, nên edge tự bám đúng cột nhờ handle id theo `column.id`; không cần remap handle.
+
 Các update này mutate ReactFlow node data trước. Khi gọi `mutateModel`, hook rebuild model từ diagram để capture các diagram-only edits.
 
 ### 13.4. Chỉnh FD

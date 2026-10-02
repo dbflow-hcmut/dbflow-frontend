@@ -80,6 +80,7 @@ import { checkSchemaExistence, getProjectPermissions } from "@/api/projects/clie
 import { createSchema, saveSchemaModel, updateSchema } from "./api/client";
 import { revalidateProjectSchemas } from "@/app/projects/actions";
 import { getFkSourceCardinality, isColumnAloneUnique } from "./utils/edge-cardinality";
+import { findColumnIndexByHandle } from "./utils/logical-column-handle";
 import { convertLogicalToPhysical, convertPhysicalToLogical, convertLogicalToConceptual, convertConceptualToLogical, convertPhysicalToConceptual, convertConceptualToPhysical } from "./utils/schema-conversion";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import { useCopyPasteSchema } from "./hooks/useCopyPasteSchema";
@@ -814,11 +815,6 @@ const EditProject = (props: IPropsEditProject) => {
                 .map((edge) => {
                     if (edge.type !== 'logical-table-edge') return edge;
 
-                    const parseColumnIndex = (handle?: string | null) => {
-                        const match = handle?.match(/_col_(\d+)/);
-                        return match ? parseInt(match[1], 10) : -1;
-                    };
-
                     // columns of an edge endpoint's table; the column being edited uses its pending `updates`
                     const getTableColumns = (edgeTableId: string): LogicalTableData['columns'] | undefined => {
                         const nodeColumns = (nodes.find((node) =>
@@ -834,10 +830,12 @@ const EditProject = (props: IPropsEditProject) => {
                         );
                     };
 
-                    const sourceColumnIndex = parseColumnIndex(edge.sourceHandle);
-                    const targetColumnIndex = parseColumnIndex(edge.targetHandle);
+                    // the position of a column is looked up by id: the `_col_N` suffix of the id is only a
+                    // creation counter and stops matching the position once a column has been deleted
                     const sourceColumns = getTableColumns(edge.source);
-                    const targetColumn = getTableColumns(edge.target)?.[targetColumnIndex];
+                    const targetColumns = getTableColumns(edge.target);
+                    const sourceColumnIndex = findColumnIndexByHandle(sourceColumns, edge.sourceHandle, edge.source);
+                    const targetColumn = targetColumns?.[findColumnIndexByHandle(targetColumns, edge.targetHandle, edge.target)];
                     // 1–1 only when the FK column ALONE is unique; a column that is just part of a
                     // composite PK (e.g. journal_id in issue's PK) keeps the edge 1–N
                     const sourceCardinality = getFkSourceCardinality(sourceColumns, sourceColumnIndex, targetColumn);
@@ -1022,15 +1020,10 @@ const EditProject = (props: IPropsEditProject) => {
         const isRelationTableEdge = sourceNode?.type === 'relation' || targetNode?.type === 'relation';
         const isLogicalTableEdge = sourceNode?.type === 'logical-table' || targetNode?.type === 'logical-table';
 
-        const parseLogicalColumnIndex = (handle?: string | null) => {
-            const match = handle?.match(/_col_(\d+)/);
-            return match ? parseInt(match[1], 10) : -1;
-        };
-
         const resolveLogicalColumn = (node: Node<NodeData> | undefined, handle?: string | null) => {
             if (node?.type !== 'logical-table') return null;
-            const columnIndex = parseLogicalColumnIndex(handle);
             const tableData = node.data as LogicalTableData;
+            const columnIndex = findColumnIndexByHandle(tableData.columns, handle, node.id);
             const column = tableData.columns?.[columnIndex];
             if (!column) return null;
             return {
@@ -1334,16 +1327,13 @@ const EditProject = (props: IPropsEditProject) => {
                     // Auto-detect cardinality from column isKey
                     const srcData = sourceNode?.data as LogicalTableData | undefined;
                     const tgtData = targetNode?.data as LogicalTableData | undefined;
-                    const parseColIdx = (handle?: string | null) => {
-                        const m = handle?.match(/_col_(\d+)/);
-                        return m ? parseInt(m[1], 10) : -1;
-                    };
-                    const srcCol = srcData?.columns?.[parseColIdx(connection.sourceHandle)];
-                    const tgtCol = tgtData?.columns?.[parseColIdx(connection.targetHandle)];
+                    const srcColIdx = findColumnIndexByHandle(srcData?.columns, connection.sourceHandle, connection.source ?? undefined);
+                    const tgtColIdx = findColumnIndexByHandle(tgtData?.columns, connection.targetHandle, connection.target ?? undefined);
+                    const tgtCol = tgtData?.columns?.[tgtColIdx];
                     // 1:1 only when the FK column alone is unique, otherwise default N:1
                     const sourceCardinality = getFkSourceCardinality(
                         srcData?.columns,
-                        parseColIdx(connection.sourceHandle),
+                        srcColIdx,
                         tgtCol,
                     );
                     const targetCardinality = '1';
