@@ -254,9 +254,19 @@ lid_cid_xxx_col_1-left
 
 - PK/CK -> Normal: Normal trở thành FK, PK/CK là referenced column.
 - Normal -> PK/CK: Normal trở thành FK, PK/CK là referenced column.
-- PK/CK -> PK/CK: target user kéo tới trở thành FK, source là referenced column; dùng cho 1-1.
+- PK/CK -> PK/CK: nếu một cột chỉ là một phần của key tổ hợp (không duy nhất riêng) thì cột đó là FK; ngược lại target user kéo tới trở thành FK, source là referenced column. Edge là 1-1 chỉ khi cột FK tự nó duy nhất (xem quy tắc cardinality bên dưới).
 - Normal -> Normal: mở dialog chọn column nào là FK; referenced column còn lại được set `isCandidateKey = true`.
 - Properties panel không cho chỉnh cardinality/FK direction sau khi tạo edge.
+
+Quy tắc cardinality của FK edge (`utils/edge-cardinality.ts`, `getFkSourceCardinality`):
+
+- Phía target (referenced key) luôn là `1`.
+- Phía source (FK) là `1` (edge 1-1) **chỉ khi cột FK tự nó là duy nhất**: cột `UNIQUE`/candidate key, hoặc là cột PK **duy nhất** của bảng (ví dụ child của ISA, quan hệ 1-1).
+- Cột chỉ là **một phần** của PK tổ hợp (ví dụ `journal_id` trong `issue(journal_id, issue_number, date_issued)`) không đủ để là 1-1, edge giữ `N` (nhiều issue cùng một journal).
+- Cột referenced phải là key (PK/CK/UNIQUE), nếu không edge là `N`.
+
+Quy tắc này được dùng ở mọi nơi tự động đặt cardinality: tính lại khi bật/tắt key của cột (`refreshLogicalEdgeCardinalities`, `refreshPhysicalEdgeCardinalities`) và khi user kéo edge giữa 2 cột đều là key (`onConnect`). Khi cả 2 cột đều là key, FK là cột chỉ là một phần của key tổ hợp (không duy nhất riêng), cột còn lại là referenced; nếu cả hai đều duy nhất thì target user kéo tới là FK và edge là 1-1.
+
 - Nếu column đã tham gia `logical-table-edge`, thao tác đổi PK/CK trong Properties panel phải hiện confirm modal trước khi apply. Nếu column đó là target/referenced side và sau update không còn PK/CK, các FK edge invalid trỏ tới column đó bị xoá.
 
 ## 8. Thuật toán map stored diagram -> ReactFlow
