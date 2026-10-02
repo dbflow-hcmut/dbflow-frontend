@@ -701,7 +701,8 @@ export const convertLogicalToConceptual = (
             name: relName,
             type: "identifying" as const,
             ends: [
-                { entityId: cls.weakOwnerId, cardinality: "1", optional: false },
+                // the owner can exist without weak entities; the weak entity always depends on its owner
+                { entityId: cls.weakOwnerId, cardinality: "1", optional: true },
                 { entityId: cls.table.id,     cardinality: "N", optional: false },
             ],
         });
@@ -754,12 +755,15 @@ export const convertLogicalToConceptual = (
                     {
                         entityId: table.id,
                         cardinality: "N",
-                        optional: col.nullable !== false,
+                        // a key column can never be NULL -> mandatory; otherwise follow the column's nullability
+                        // (the logical diagram stores no nullability, so only PK membership is known there)
+                        optional: col.roles?.primaryKey ? false : col.nullable !== false,
                     },
                     {
                         entityId: fk.refTableId,
                         cardinality: "1",
-                        optional: false,
+                        // a FK does not force the referenced entity to have referencing rows
+                        optional: true,
                     },
                 ],
             });

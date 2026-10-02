@@ -556,7 +556,7 @@ Với mỗi classification `WEAK`:
 
 ```ts
 [
-    { entityId: ownerId, cardinality: "1", optional: false },
+    { entityId: ownerId, cardinality: "1", optional: true },
     { entityId: weakId,  cardinality: "N", optional: false },
 ]
 ```
@@ -587,16 +587,18 @@ Nếu không skip, tạo association:
         {
             entityId: sourceTable.id,
             cardinality: "N",
-            optional: col.nullable !== false,
+            optional: col.roles?.primaryKey ? false : col.nullable !== false,
         },
         {
             entityId: fk.refTableId,
             cardinality: "1",
-            optional: false,
+            optional: true,
         },
     ],
 }
 ```
+
+Participation khi reverse: đầu phía N (chứa FK) là `optional: false` nếu cột FK thuộc PK hoặc `nullable === false`, ngược lại `optional: true`. Model logical dựng từ diagram không lưu nullability (`logical-model.builder.ts` luôn `nullable: true`) nên với lược đồ logical chỉ biết được cột FK nằm trong PK hay không; đầu phía 1 luôn `optional: true` (FK không buộc bảng được tham chiếu phải có dòng con) và owner của weak entity cũng `optional: true`, khớp với chiều xuôi (chiều xuôi chỉ đọc `optional` của đầu phía N).
 
 Dedup pair không phân biệt hướng:
 
