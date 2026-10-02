@@ -735,6 +735,12 @@ Giống logical `L014`:
 - Nếu `roles.candidateKey === true`, không phải `roles.primaryKey`, và `col.unique !== true`.
 - Push `warning`.
 
+### 7.29. P027 - Invalid length/precision
+
+- Áp dụng cho cột có `length`.
+- Hợp lệ khi là số nguyên dương, `max` (SQL Server) hoặc `p,s` cho `decimal`/`numeric` (`0 < s <= p`); kiểm bằng `isValidTypeLength` (`utils/physical-column-type.ts`).
+- Giá trị khác (vd `abc`, `-5`, `0`) -> push `error`.
+
 ## 8. UI LinterPanel
 
 Component: `src/components/EditProject/components/LinterPanel/index.tsx`.
@@ -842,6 +848,7 @@ Safety warnings đáng chú ý:
 - `P022`: nhiều hơn 1 AUTO_INCREMENT column trong cùng table.
 - `P024`: FK tự trỏ vào chính cột đó.
 - `P025`: circular FK reference giữa nhiều table.
+- `P027`: length/precision không hợp lệ.
 
 ## 10. Bảng tóm tắt rule
 
@@ -915,6 +922,7 @@ Safety warnings đáng chú ý:
 | P024 | error | FK column tự trỏ vào chính nó |
 | P025 | warning | Circular FK reference giữa nhiều table |
 | P026 | warning | Candidate key column không được đánh dấu unique |
+| P027 | error | Length/precision của kiểu dữ liệu không hợp lệ |
 
 ## 11. Cách thêm rule mới
 

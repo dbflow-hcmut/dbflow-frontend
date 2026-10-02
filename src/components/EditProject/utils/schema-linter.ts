@@ -7,6 +7,8 @@
  * LintIssue entries that the UI renders in the LinterPanel.
  */
 
+import { isValidTypeLength } from "./physical-column-type";
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type LintSeverity = "error" | "warning" | "info";
@@ -1193,6 +1195,23 @@ function lintPhysical(payload: PhysicalLintPayload): LintIssue[] {
                     ruleId: "P026",
                     severity: "warning",
                     message: `Table "${table.name}", column "${col.name}": candidate key should typically also be marked unique.`,
+                    target: table.name,
+                    targetId: table.id,
+                });
+            }
+        }
+    }
+
+    // P027 — Invalid length/precision (not a positive integer, `max`, or `p,s` for DECIMAL/NUMERIC)
+    for (const table of tables) {
+        for (const col of table.columns ?? []) {
+            const dt = col.dataType?.trim().toLowerCase() ?? "";
+            const hasPrecision = dt === "decimal" || dt === "numeric";
+            if (col.length && !isValidTypeLength(col.length, hasPrecision)) {
+                issues.push({
+                    ruleId: "P027",
+                    severity: "error",
+                    message: `Table "${table.name}", column "${col.name}": length "${col.length}" of ${col.dataType} is invalid. Use a positive integer${hasPrecision ? " or precision,scale (e.g. 10,2)" : " (or MAX where supported)"}.`,
                     target: table.name,
                     targetId: table.id,
                 });

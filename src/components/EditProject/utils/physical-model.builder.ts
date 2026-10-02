@@ -212,7 +212,7 @@ const buildPhysicalModel = ({
                       name: columnName,
                       dataType: actualCol.type,
                       length: actualCol.length,
-                      nullable: actualCol.isNullable ?? true,
+                      nullable: isPrimaryKey ? false : (actualCol.isNullable ?? true), // PK columns must NOT be nullable
                       unique: actualCol.isUnique ?? false,
                       autoIncrement: actualCol.isAutoIncrement,
                       defaultValue: actualCol.defaultValue,

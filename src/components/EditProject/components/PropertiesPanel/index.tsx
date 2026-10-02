@@ -7,6 +7,7 @@ import type { RelationTableData, RelationColumn, TableIndex, PhysicalFD } from "
 import type { LogicalTableData, LogicalFD } from "@/components/erds-notations/logical-table";
 import type { ErdEdgeData } from "../../utils/functions";
 import { GENERIC_DATA_TYPES, type FKAction, type DataTypeOption } from "../../utils/dbms-config";
+import { isTypingValidLength, isValidTypeLength } from "../../utils/physical-column-type";
 
 type PropertiesPanelProps = {
     isOpen: boolean;
@@ -496,9 +497,12 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                                         {(selectedTypeConfig?.hasLength || selectedTypeConfig?.hasPrecision) && (
                                                             <Input
                                                                 value={col.length || ''}
-                                                                onChange={(e) =>
-                                                                    onUpdateRelationTableColumn?.(idx, { length: e.target.value || undefined })
-                                                                }
+                                                                onChange={(e) => {
+                                                                    // only digits (or `max`, `p,s`) can be typed as a length
+                                                                    if (!isTypingValidLength(e.target.value, Boolean(selectedTypeConfig.hasPrecision))) return;
+                                                                    onUpdateRelationTableColumn?.(idx, { length: e.target.value || undefined });
+                                                                }}
+                                                                status={isValidTypeLength(col.length, Boolean(selectedTypeConfig.hasPrecision)) ? undefined : 'error'}
                                                                 placeholder={selectedTypeConfig.hasPrecision ? '10,2' : '255'}
                                                                 style={{ width: 70 }}
                                                             />
@@ -523,7 +527,8 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                                             CK
                                                         </Checkbox>
                                                         <Checkbox
-                                                            checked={col.isNullable !== false}
+                                                            checked={!col.isPrimary && col.isNullable !== false}
+                                                            disabled={col.isPrimary || false}
                                                             onChange={(e) =>
                                                                 onUpdateRelationTableColumn?.(idx, { isNullable: e.target.checked })
                                                             }
