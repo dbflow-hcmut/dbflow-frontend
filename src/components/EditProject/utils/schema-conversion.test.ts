@@ -4,7 +4,7 @@
  * Run with: npx tsx src/components/EditProject/utils/schema-conversion.test.ts
  */
 
-import { convertConceptualToLogical } from "./schema-conversion";
+import { convertConceptualToLogical, convertLogicalToConceptual } from "./schema-conversion";
 import type { ConceptualModelPayload } from "./conceptual-model.builder";
 
 let passed = 0;
@@ -251,6 +251,42 @@ console.log("\n[9] 1:N with single-column PK keeps existing naming");
     const emp = tableOf(convertConceptualToLogical(m), "employee");
     const fk = emp.columns.find((c) => c.roles?.foreignKey);
     assert(fk?.name === "department_id" && fk.nullable === false, "FK column department_id, NOT NULL");
+}
+
+console.log("\n[reverse] DEF-021: participation when converting logical -> conceptual");
+{
+    const col = (id: string, name: string, extra: Record<string, unknown> = {}, roles: Record<string, unknown> = {}) => ({
+        id, name, nullable: true, unique: false, roles, ...extra,
+    });
+    const logical = (fkNullable: boolean, fkInPk: boolean) => ({
+        model: { id: "lid_m", name: "L", version: 1 },
+        tables: [
+            { id: "lid_issue", name: "ISSUE", columns: [col("i1", "issue_id", { nullable: false }, { primaryKey: true }), col("i2", "title")] },
+            {
+                id: "lid_article", name: "ARTICLE",
+                columns: [
+                    col("a1", "article_id", { nullable: false }, { primaryKey: true }),
+                    col("a2", "issue_id", { nullable: fkNullable }, { foreignKey: { refTableId: "lid_issue", refColumnId: "i1" }, ...(fkInPk ? { primaryKey: true } : {}) }),
+                    col("a3", "summary"),
+                ],
+            },
+        ],
+    });
+    const endOf = (m: ReturnType<typeof convertLogicalToConceptual>, tableName: string) => {
+        const rel = m.relationships[0];
+        const entity = m.entities.find((e) => e.name === tableName)!;
+        return rel.ends.find((e) => e.entityId === entity.id)!;
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const notNull = convertLogicalToConceptual(logical(false, false) as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const nullable = convertLogicalToConceptual(logical(true, false) as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const keyFk = convertLogicalToConceptual(logical(true, true) as any);
+    assert(endOf(notNull, "ARTICLE").optional === false, "NOT NULL FK -> child (N) end mandatory");
+    assert(endOf(nullable, "ARTICLE").optional === true, "nullable FK -> child (N) end optional");
+    assert(endOf(keyFk, "ARTICLE").optional === false, "FK that is part of the PK -> child end mandatory");
+    assert(endOf(notNull, "ISSUE").optional === true && endOf(nullable, "ISSUE").optional === true, "referenced (1) end always optional");
 }
 
 console.log(`\nPassed: ${passed}, Failed: ${failed}`);
