@@ -287,6 +287,24 @@ Giống C013 nhưng kiểm tra `gen.childEntityIds`:
 - Nếu `childId` không nằm trong `entityIdSet`.
 - Push `error`, không có `target`.
 
+### 5.15. C015 - Empty name
+
+Với mỗi entity, attribute của entity và relationship:
+
+- Nếu `name` rỗng hoặc chỉ gồm khoảng trắng (`!name.trim()`).
+- Push `error`, `message: "A <entity|attribute|relationship> has an empty name. Give it a name."`, `targetId` là id của phần tử.
+
+Ý nghĩa: editor cho phép xóa trắng tên ở Properties panel; tên rỗng làm convert/DDL sinh bảng không tên, nên được báo lỗi ngay trên Linter.
+
+### 5.16. C016 - Entity name with special characters
+
+Với mỗi entity có tên không rỗng:
+
+- Nếu tên không khớp `/^[\p{L}\p{N}_ -]+$/u`, tức có ký tự khác chữ cái (mọi ngôn ngữ), chữ số, khoảng trắng, `_` hoặc `-`.
+- Push `warning`, `message: Entity name "<name>" contains special characters. Use only letters, digits, spaces, "_" or "-".`, có `target` và `targetId`.
+
+Tên rỗng chỉ bị C015 báo, không bị C016. Tên tiếng Việt có dấu hợp lệ.
+
 ## 6. Thuật toán Logical Linter
 
 Payload tối thiểu:
@@ -845,6 +863,8 @@ Safety warnings đáng chú ý:
 | C012 | error | Duplicate attribute name trong cùng entity |
 | C013 | error | Generalization trỏ parent entity id không tồn tại |
 | C014 | error | Generalization trỏ child entity id không tồn tại |
+| C015 | error | Entity, attribute hoặc relationship có tên rỗng |
+| C016 | warning | Tên entity chứa ký tự đặc biệt ngoài chữ, số, khoảng trắng, `_`, `-` |
 
 ### 10.2. Logical
 

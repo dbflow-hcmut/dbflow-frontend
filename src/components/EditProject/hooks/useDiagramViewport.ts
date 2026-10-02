@@ -77,23 +77,34 @@ export const useDiagramViewport = ({
         if (hasAppliedInitialViewportRef.current) return;
         if (nodes.length === 0) return;
 
-        // Delay fitView so ReactFlow has time to measure newly-added nodes.
-        // Without this, fitView fires before internal node dimensions are
-        // available (e.g. when a diagram is generated from a model on first
-        // load) and the viewport ends up empty.
-        // Use both rAF + a short timeout as a safety net.
+        // fitView needs the measured size of every node. When a diagram is generated from a
+        // model on first load, ReactFlow measures the nodes after this effect first runs, so a
+        // single fitView at a fixed delay can fire too early and leave the viewport at the origin
+        // (nodes partly off-screen). Poll until every node has a measured size (max ~3s), then fit.
         let cancelled = false;
-        const apply = () => {
+        let attempts = 0;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const MAX_ATTEMPTS = 30;
+        const tryFit = () => {
             if (cancelled || hasAppliedInitialViewportRef.current) return;
-            reactFlowInstanceRef.current?.fitView({ padding: 0.2 });
-            hasAppliedInitialViewportRef.current = true;
+            const instance = reactFlowInstanceRef.current;
+            if (!instance) return;
+            attempts += 1;
+            const flowNodes = instance.getNodes();
+            const measured =
+                flowNodes.length > 0 && flowNodes.every((node) => node.width && node.height);
+            if (measured || attempts >= MAX_ATTEMPTS) {
+                instance.fitView({ padding: 0.2 });
+                hasAppliedInitialViewportRef.current = true;
+                return;
+            }
+            timer = setTimeout(tryFit, 100);
         };
-        const raf = requestAnimationFrame(apply);
-        const timer = setTimeout(apply, 200);
+        const raf = requestAnimationFrame(tryFit);
         return () => {
             cancelled = true;
             cancelAnimationFrame(raf);
-            clearTimeout(timer);
+            if (timer) clearTimeout(timer);
         };
     }, [nodes, viewport, isReactFlowReady, reactFlowInstanceRef]);
 

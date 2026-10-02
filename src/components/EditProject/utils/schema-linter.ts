@@ -161,6 +161,9 @@ export type PhysicalLintPayload = {
 
 // ─── CONCEPTUAL RULES ─────────────────────────────────────────────────────────
 
+/** Letters (any language), digits, spaces, underscore and hyphen. */
+const VALID_NAME_PATTERN = /^[\p{L}\p{N}_ -]+$/u;
+
 function lintConceptual(payload: ConceptualLintPayload): LintIssue[] {
     const issues: LintIssue[] = [];
     const entities = payload.entities ?? [];
@@ -360,6 +363,39 @@ function lintConceptual(payload: ConceptualLintPayload): LintIssue[] {
                 });
             }
             seenAttrNames.add(key);
+        }
+    }
+
+    // C015 — Entity, relationship or attribute with an empty name
+    const pushEmptyName = (kind: string, id: string) => {
+        issues.push({
+            ruleId: "C015",
+            severity: "error",
+            message: `A ${kind} has an empty name. Give it a name.`,
+            targetId: id,
+        });
+    };
+    for (const entity of entities) {
+        if (!entity.name?.trim()) pushEmptyName("entity", entity.id);
+        for (const attr of entity.attributes ?? []) {
+            if (!attr.name?.trim()) pushEmptyName("attribute", attr.id);
+        }
+    }
+    for (const rel of relationships) {
+        if (!rel.name?.trim()) pushEmptyName("relationship", rel.id);
+    }
+
+    // C016 — Entity name with characters that cannot become a table name
+    for (const entity of entities) {
+        const name = entity.name?.trim();
+        if (name && !VALID_NAME_PATTERN.test(name)) {
+            issues.push({
+                ruleId: "C016",
+                severity: "warning",
+                message: `Entity name "${entity.name}" contains special characters. Use only letters, digits, spaces, "_" or "-".`,
+                target: entity.name,
+                targetId: entity.id,
+            });
         }
     }
 

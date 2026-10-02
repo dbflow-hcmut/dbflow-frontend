@@ -3271,6 +3271,7 @@ const EditProject = (props: IPropsEditProject) => {
                             panOnScroll={true}
                             selectionMode={SelectionMode.Partial}
                             multiSelectionKeyCode={["Shift", "Meta"]}
+                            deleteKeyCode={["Backspace", "Delete"]}
                             autoPanOnNodeDrag
                             
                             elementsSelectable={interactionMode === 'default' && activeToolMode === 'none'}
