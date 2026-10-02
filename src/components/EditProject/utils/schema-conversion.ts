@@ -793,27 +793,38 @@ export interface ConvertConceptualToLogicalOptions {
 /**
  * Converts a `ConceptualModelPayload` into a `LogicalModelPayload`.
  *
+ * Follows the ER/EER-to-relational mapping of Elmasri & Navathe,
+ * "Fundamentals of Database Systems", Chapter 9:
+ *
  * Mapping rules:
- *  Entities -> Tables (ids preserved).
- *  Attributes:
- *   - isKey -> PK column (nullable: false, unique: true).
+ *  Step 1 – Regular entities -> tables (ids preserved).
+ *   - isKey -> PK column (nullable: false). The columns of a composite key
+ *     (several key attributes) form ONE composite PK, so they are not
+ *     individually `unique`.
  *   - composite with components -> flattened into one column per leaf component.
- *   - multi_valued -> separate table with composite PK (FK to parent + value col).
+ *   - multi_valued -> separate table (Step 6).
  *   - derived -> skipped (not stored in relational schema).
- *   - all others -> regular column.
  *   - entity with no key attribute -> auto-prepend `id` PK column.
  *
- *  Generalizations (ISA / class table inheritance):
- *   - Child entity's existing PK column gets an additional FK -> parent PK; or
- *     a new PK+FK column is prepended if the child has no PK of its own.
+ *  Step 2 – Weak entities (entity.kind = "weak" + identifying relationship):
+ *   - Table gets, as FK columns, the PK column(s) of every owner entity.
+ *   - PK = owner PK column(s) + partial key (own key attributes), if any.
+ *   - Owners are mapped first (weak entity owned by a weak entity).
+ *   - Relationship attributes of the identifying relationship -> columns.
  *
- *  Relationships:
- *   - N:1 / 1:N  -> FK column on the N side.
- *   - 1:1        -> FK column on the mandatory side (first end used as tiebreaker).
- *   - N:M        -> junction table with two composite PK+FK columns.
- *   - N-ary (3+) -> junction table with one PK+FK column per participant.
+ *  Step 3 – Generalizations (ISA / class table inheritance):
+ *   - Child table's PK = parent PK column(s), each also an FK -> parent.
+ *
+ *  Step 4/5 – Relationships (FK always includes ALL columns of the referenced PK):
+ *   - N:1 / 1:N  -> FK column(s) on the N side. NOT NULL when the N-side end is
+ *                   total participation (`optional === false`).
+ *   - 1:1        -> FK column(s) on the mandatory side (first end as tiebreaker).
+ *   - N:M        -> junction table; all FK columns of both sides form its PK.
+ *   - N-ary (3+) -> junction table with the FK columns of every participant as PK.
  *   - Relationship attributes -> columns on the FK table (1:N/1:1) or
  *     junction table (N:M / N-ary).
+ *
+ *  Step 6 – Multi-valued attributes -> table (owner PK as FK + value column = PK).
  *
  *  Not representable:
  *   - Categories (union/category types) -> plain tables with no FK.
@@ -868,15 +879,120 @@ export const convertConceptualToLogical = (
         return [attr];
     };
 
-    // ── Step 1: Entities -> Tables with attribute columns ────────────────
+    const getPKCols = (tableId: string): MutCol[] =>
+        tableMap.get(tableId)?.columns.filter((c) => c.roles?.primaryKey) ?? [];
+
+    const hasColumnName = (cols: MutCol[], name: string): boolean =>
+        cols.some((c) => c.name.toLowerCase() === name.toLowerCase());
+
+    /**
+     * Build the FK column(s) that reference ALL columns of `refTableId`'s PK
+     * (Elmasri & Navathe: "include as foreign key the primary key of ...").
+     *  - Single-column PK -> `<refTable>_id` (existing naming convention).
+     *  - Composite PK     -> one column per PK column, keeping the PK column name.
+     * Names are made unique against `existing` (and the columns built here).
+     */
+    const makeFkCols = (
+        existing: MutCol[],
+        refTableId: string,
+        o: { primaryKey: boolean; nullable: boolean; unique?: boolean; selfRef?: boolean },
+    ): MutCol[] => {
+        const refTable = tableMap.get(refTableId);
+        const refPK = getPKCols(refTableId);
+        if (!refTable || refPK.length === 0) return [];
+
+        const built: MutCol[] = [];
+        for (const pk of refPK) {
+            let name =
+                refPK.length === 1
+                    ? o.selfRef
+                        ? `parent_${refTable.name}_id`
+                        : `${refTable.name}_id`
+                    : o.selfRef
+                      ? `parent_${pk.name}`
+                      : pk.name;
+            if (hasColumnName([...existing, ...built], name)) {
+                name = `${refTable.name}_${name}`;
+            }
+            const baseName = name;
+            for (let i = 2; hasColumnName([...existing, ...built], name); i++) {
+                name = `${baseName}_${i}`;
+            }
+            built.push({
+                id: generateLid(),
+                name,
+                nullable: o.primaryKey ? false : o.nullable,
+                // a UNIQUE constraint per column is only meaningful for single-column FK
+                unique: refPK.length === 1 ? (o.unique ?? false) : false,
+                roles: {
+                    ...(o.primaryKey ? { primaryKey: true } : {}),
+                    foreignKey: { refTableId, refColumnId: pk.id },
+                },
+            });
+        }
+        return built;
+    };
+
+    // ── Pre-scan: weak entities and their owners (identifying relationships) ─
+    const entityById = new Map(entities.map((e) => [e.id, e]));
+    const isManyEnd = (e: { cardinality?: string }) =>
+        e.cardinality === "N" || e.cardinality === "M";
+    const weakInfo = new Map<
+        string,
+        { ownerIds: string[]; relAttributes: ConceptualAttribute[] }
+    >();
+    const identifyingRelIds = new Set<string>();
+    for (const rel of relationships) {
+        if (rel.type !== "identifying") continue;
+        const rEnds = (rel.ends ?? []).filter((e) => entityById.has(e.entityId));
+        if (rEnds.length !== 2) continue;
+        const [a, b] = rEnds;
+        if (a.entityId === b.entityId) continue;
+        const aWeak = entityById.get(a.entityId)?.kind === "weak";
+        const bWeak = entityById.get(b.entityId)?.kind === "weak";
+        let weakEnd: typeof a | undefined;
+        let ownerEnd: typeof a | undefined;
+        if (isManyEnd(a) && !isManyEnd(b)) {
+            weakEnd = a;
+            ownerEnd = b;
+        } else if (!isManyEnd(a) && isManyEnd(b)) {
+            weakEnd = b;
+            ownerEnd = a;
+        } else if (aWeak && !bWeak) {
+            weakEnd = a;
+            ownerEnd = b;
+        } else if (bWeak && !aWeak) {
+            weakEnd = b;
+            ownerEnd = a;
+        }
+        if (!weakEnd || !ownerEnd) continue;
+        if (entityById.get(weakEnd.entityId)?.kind !== "weak") continue;
+
+        const info = weakInfo.get(weakEnd.entityId) ?? { ownerIds: [], relAttributes: [] };
+        if (!info.ownerIds.includes(ownerEnd.entityId)) info.ownerIds.push(ownerEnd.entityId);
+        info.relAttributes.push(...(rel.attributes ?? []));
+        weakInfo.set(weakEnd.entityId, info);
+        identifyingRelIds.add(rel.id);
+    }
+
+    // ── Step 1: Regular entities -> Tables with attribute columns ────────
     for (const entity of entities) {
         const columns: MutCol[] = [];
+        const isOwnedWeak = weakInfo.has(entity.id);
+        // key attributes of one entity together form ONE (composite) key
+        const storedKeyCount = (entity.attributes ?? []).filter(
+            (a) =>
+                a.isKey &&
+                a.kind !== "derived" &&
+                a.kind !== "multi_valued" &&
+                !((a.kind === "composite" || a.kind === "complex") && a.components?.length),
+        ).length;
 
         for (const attr of entity.attributes ?? []) {
             // Derived attributes are not stored
             if (attr.kind === "derived") continue;
 
-            // Multi-valued attributes become separate tables (handled in Step 4)
+            // Multi-valued attributes become separate tables (handled in Step 6)
             if (attr.kind === "multi_valued") continue;
 
             if ((attr.kind === "composite" || attr.kind === "complex") && attr.components?.length) {
@@ -894,7 +1010,8 @@ export const convertConceptualToLogical = (
                     id: generateLid(),
                     name: attr.name,
                     nullable: attr.isKey ? false : true,
-                    unique: attr.isKey ? true : false,
+                    // partial key / composite key columns are not unique on their own
+                    unique: attr.isKey && storedKeyCount === 1 && !isOwnedWeak,
                     roles: attr.isKey ? { primaryKey: true } : undefined,
                     notes: (attr as { notes?: string }).notes,
                 });
@@ -902,7 +1019,8 @@ export const convertConceptualToLogical = (
         }
 
         // Auto-add id PK if the entity has no key attribute
-        if (!columns.some((c) => c.roles?.primaryKey)) {
+        // (an owned weak entity takes its PK from its owner(s), Step 2)
+        if (!isOwnedWeak && !columns.some((c) => c.roles?.primaryKey)) {
             columns.unshift({
                 id: generateLid(),
                 name: "id",
@@ -920,10 +1038,43 @@ export const convertConceptualToLogical = (
         });
     }
 
-    // ── Step 2: Generalizations -> class table inheritance ──────────────
-    const getPKCol = (tableId: string): MutCol | undefined =>
-        tableMap.get(tableId)?.columns.find((c) => c.roles?.primaryKey);
+    // ── Step 2: Weak entities -> PK = owner PK(s) + partial key ──────────
+    const mappedWeak = new Set<string>();
+    const visitingWeak = new Set<string>();
+    const mapWeakEntity = (weakId: string) => {
+        if (mappedWeak.has(weakId) || visitingWeak.has(weakId)) return;
+        const info = weakInfo.get(weakId);
+        const weakTable = tableMap.get(weakId);
+        if (!info || !weakTable) return;
 
+        visitingWeak.add(weakId);
+        // a weak entity owned by another weak entity: map the owner first
+        for (const ownerId of info.ownerIds) mapWeakEntity(ownerId);
+        visitingWeak.delete(weakId);
+
+        const ownerFkCols: MutCol[] = [];
+        for (const ownerId of info.ownerIds) {
+            ownerFkCols.push(
+                ...makeFkCols([...ownerFkCols, ...weakTable.columns], ownerId, {
+                    primaryKey: true,
+                    nullable: false,
+                }),
+            );
+        }
+        weakTable.columns.unshift(...ownerFkCols);
+        for (const rAttr of info.relAttributes) {
+            weakTable.columns.push({
+                id: generateLid(),
+                name: rAttr.name,
+                nullable: true,
+                unique: false,
+            });
+        }
+        mappedWeak.add(weakId);
+    };
+    for (const weakId of weakInfo.keys()) mapWeakEntity(weakId);
+
+    // ── Step 3: Generalizations -> class table inheritance ──────────────
     for (const gen of generalizations) {
         const parentEntityIds = gen.parentEntityIds?.length
             ? gen.parentEntityIds
@@ -933,9 +1084,9 @@ export const convertConceptualToLogical = (
         const parentEntityId = parentEntityIds[0];
         if (!parentEntityId) continue;
 
-        const parentPK = getPKCol(parentEntityId);
+        const parentPKs = getPKCols(parentEntityId);
         const parentTable = tableMap.get(parentEntityId);
-        if (!parentPK || !parentTable) continue;
+        if (parentPKs.length === 0 || !parentTable) continue;
 
         for (const childId of gen.childEntityIds) {
             const childTable = tableMap.get(childId);
@@ -944,16 +1095,28 @@ export const convertConceptualToLogical = (
             const existingPK = childTable.columns.find(
                 (c) => c.roles?.primaryKey,
             );
-            if (existingPK) {
+            if (parentPKs.length > 1) {
+                // composite parent PK: child PK = all parent PK columns (each also FK)
+                for (const c of childTable.columns) {
+                    if (c.roles?.primaryKey) {
+                        c.roles = { ...c.roles, primaryKey: false };
+                    }
+                }
+                const inherited = makeFkCols(childTable.columns, parentEntityId, {
+                    primaryKey: true,
+                    nullable: false,
+                });
+                childTable.columns.unshift(...inherited);
+            } else if (existingPK) {
                 existingPK.roles = {
                     ...existingPK.roles,
                     primaryKey: true,
                     foreignKey: {
                         refTableId: parentEntityId,
-                        refColumnId: parentPK.id,
+                        refColumnId: parentPKs[0].id,
                     },
                 };
-                existingPK.name = parentPK.name;
+                existingPK.name = parentPKs[0].name;
             } else {
                 childTable.columns.unshift({
                     id: generateLid(),
@@ -964,7 +1127,7 @@ export const convertConceptualToLogical = (
                         primaryKey: true,
                         foreignKey: {
                             refTableId: parentEntityId,
-                            refColumnId: parentPK.id,
+                            refColumnId: parentPKs[0].id,
                         },
                     },
                 });
@@ -972,11 +1135,11 @@ export const convertConceptualToLogical = (
         }
     }
 
-    // ── Step 3: Relationships -> FK columns / junction tables ───────────
-    const getPKColId = (tableId: string): string | undefined =>
-        getPKCol(tableId)?.id;
-
+    // ── Step 4/5: Relationships -> FK columns / junction tables ─────────
     for (const rel of relationships) {
+        // identifying relationships were mapped in Step 2
+        if (identifyingRelIds.has(rel.id)) continue;
+
         const ends = (rel.ends ?? []).filter((e) => tableMap.has(e.entityId));
         if (ends.length < 2) continue;
 
@@ -990,21 +1153,9 @@ export const convertConceptualToLogical = (
                 ends.map((e) => tableMap.get(e.entityId)!.name).join("_");
             const cols: MutCol[] = [];
             for (const end of ends) {
-                const pkId = getPKColId(end.entityId);
-                if (!pkId) continue;
-                cols.push({
-                    id: generateLid(),
-                    name: `${tableMap.get(end.entityId)!.name}_id`,
-                    nullable: false,
-                    unique: false,
-                    roles: {
-                        primaryKey: true,
-                        foreignKey: {
-                            refTableId: end.entityId,
-                            refColumnId: pkId,
-                        },
-                    },
-                });
+                cols.push(
+                    ...makeFkCols(cols, end.entityId, { primaryKey: true, nullable: false }),
+                );
             }
             for (const rAttr of relAttributes) {
                 cols.push({
@@ -1026,49 +1177,26 @@ export const convertConceptualToLogical = (
 
         // Binary relationship
         const [endA, endB] = ends;
-        const isAMany =
-            endA.cardinality === "N" || endA.cardinality === "M";
-        const isBMany =
-            endB.cardinality === "N" || endB.cardinality === "M";
+        const isAMany = isManyEnd(endA);
+        const isBMany = isManyEnd(endB);
 
         if (isAMany && isBMany) {
-            // N:M -> junction table
-            const pkA = getPKColId(endA.entityId);
-            const pkB = getPKColId(endB.entityId);
-            if (!pkA || !pkB) continue;
+            // N:M -> junction table (FK columns of both sides form the PK)
+            if (getPKCols(endA.entityId).length === 0 || getPKCols(endB.entityId).length === 0) continue;
             const tableA = tableMap.get(endA.entityId)!;
             const tableB = tableMap.get(endB.entityId)!;
             const junctionId = `tbl_${rel.id}`;
             const junctionName =
                 rel.name || `${tableA.name}_${tableB.name}`;
-            const cols: MutCol[] = [
-                {
-                    id: generateLid(),
-                    name: `${tableA.name}_id`,
+            const cols: MutCol[] = [];
+            cols.push(...makeFkCols(cols, endA.entityId, { primaryKey: true, nullable: false }));
+            cols.push(
+                ...makeFkCols(cols, endB.entityId, {
+                    primaryKey: true,
                     nullable: false,
-                    unique: false,
-                    roles: {
-                        primaryKey: true,
-                        foreignKey: {
-                            refTableId: endA.entityId,
-                            refColumnId: pkA,
-                        },
-                    },
-                },
-                {
-                    id: generateLid(),
-                    name: `${tableB.name}_id`,
-                    nullable: false,
-                    unique: false,
-                    roles: {
-                        primaryKey: true,
-                        foreignKey: {
-                            refTableId: endB.entityId,
-                            refColumnId: pkB,
-                        },
-                    },
-                },
-            ];
+                    selfRef: endA.entityId === endB.entityId,
+                }),
+            );
             for (const rAttr of relAttributes) {
                 cols.push({
                     id: generateLid(),
@@ -1083,7 +1211,7 @@ export const convertConceptualToLogical = (
                 columns: cols,
             });
         } else {
-            // 1:N, N:1, or 1:1 -> FK on the N-side (or optional side for 1:1)
+            // 1:N, N:1, or 1:1 -> FK on the N-side (or mandatory side for 1:1)
             let fkEnd: (typeof ends)[number];
             let refEnd: (typeof ends)[number];
 
@@ -1104,29 +1232,18 @@ export const convertConceptualToLogical = (
                 refEnd = fkEnd === endA ? endB : endA;
             }
 
-            const pkRef = getPKColId(refEnd.entityId);
-            const refTable = tableMap.get(refEnd.entityId);
             const fkTable = tableMap.get(fkEnd.entityId);
-            if (!pkRef || !refTable || !fkTable) continue;
+            if (!fkTable || !tableMap.get(refEnd.entityId)) continue;
 
             // Self-referential: use "parent_" prefix to avoid name collision
-            const colName =
-                endA.entityId === endB.entityId
-                    ? `parent_${refTable.name}_id`
-                    : `${refTable.name}_id`;
-
-            fkTable.columns.push({
-                id: generateLid(),
-                name: colName,
+            const fkCols = makeFkCols(fkTable.columns, refEnd.entityId, {
+                primaryKey: false,
                 nullable: fkEnd.optional !== false,
                 unique: !isAMany && !isBMany, // 1:1 -> unique
-                roles: {
-                    foreignKey: {
-                        refTableId: refEnd.entityId,
-                        refColumnId: pkRef,
-                    },
-                },
+                selfRef: endA.entityId === endB.entityId,
             });
+            if (fkCols.length === 0) continue;
+            fkTable.columns.push(...fkCols);
             for (const rAttr of relAttributes) {
                 fkTable.columns.push({
                     id: generateLid(),
@@ -1138,42 +1255,28 @@ export const convertConceptualToLogical = (
         }
     }
 
-    // ── Step 4: Multi-valued attributes -> separate tables ──────────────
+    // ── Step 6: Multi-valued attributes -> separate tables ──────────────
     for (const entity of entities) {
         for (const attr of entity.attributes ?? []) {
             if (attr.kind !== "multi_valued") continue;
 
             const parentTable = tableMap.get(entity.id);
             if (!parentTable) continue;
-            const parentPK = parentTable.columns.find(
-                (c) => c.roles?.primaryKey,
-            );
-            if (!parentPK) continue;
 
             const mvTableId = `tbl_mv_${entity.id}_${attr.id}`;
             const mvTableName = `${entity.name}_${attr.name}`;
-            const cols: MutCol[] = [
-                {
-                    id: generateLid(),
-                    name: `${entity.name}_id`,
-                    nullable: false,
-                    unique: false,
-                    roles: {
-                        primaryKey: true,
-                        foreignKey: {
-                            refTableId: entity.id,
-                            refColumnId: parentPK.id,
-                        },
-                    },
-                },
-                {
-                    id: generateLid(),
-                    name: attr.name,
-                    nullable: false,
-                    unique: false,
-                    roles: { primaryKey: true },
-                },
-            ];
+            const cols: MutCol[] = makeFkCols([], entity.id, {
+                primaryKey: true,
+                nullable: false,
+            });
+            if (cols.length === 0) continue;
+            cols.push({
+                id: generateLid(),
+                name: attr.name,
+                nullable: false,
+                unique: false,
+                roles: { primaryKey: true },
+            });
             tableMap.set(mvTableId, {
                 id: mvTableId,
                 name: mvTableName,

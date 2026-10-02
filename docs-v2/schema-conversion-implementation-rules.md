@@ -624,7 +624,49 @@ Output conceptual:
 
 Hàm: `convertConceptualToLogical(conceptualModel, opts)`.
 
-Đây là forward-engineering từ conceptual model sang relational logical model.
+Đây là forward-engineering từ conceptual model sang relational logical model. Thuật toán bám theo quy tắc ánh xạ ER/EER-to-relational của sách *Fundamentals of Database Systems* (Elmasri & Navathe), Chapter 9. Hàm này cũng là hàm được dùng cho **Sync schema** (Conceptual -> Logical), nên mọi thay đổi ở đây ảnh hưởng cả convert lẫn sync.
+
+Thứ tự bước trong code:
+
+```text
+Pre-scan  tìm weak entity + owner qua identifying relationship
+Step 1    entity thường -> table + cột thuộc tính
+Step 2    weak entity   -> PK = PK của owner + partial key
+Step 3    generalization -> class table inheritance
+Step 4/5  relationship  -> FK hoặc junction table
+Step 6    multi-valued attribute -> table riêng
+```
+
+### 9.0. Helper dùng chung
+
+`getPKCols(tableId)`: trả về **tất cả** cột PK của table (trước đây chỉ lấy PK đầu tiên, nên không hỗ trợ khóa tổ hợp).
+
+`makeFkCols(existing, refTableId, opts)`: tạo các cột FK tham chiếu **toàn bộ** cột PK của `refTableId` (sách: "include as foreign key the primary key of ..."):
+
+| PK của bảng được tham chiếu | Tên cột FK |
+|---|---|
+| 1 cột | `<refTable.name>_id` (convention cũ); self-reference: `parent_<refTable.name>_id` |
+| Nhiều cột | Mỗi cột PK sinh một cột FK, giữ tên cột PK; self-reference: `parent_<pkName>` |
+
+Tên được làm duy nhất so với các cột đã có: nếu trùng thì thêm tiền tố `<refTable.name>_`, nếu vẫn trùng thì thêm hậu tố `_2`, `_3`...
+
+Opts:
+
+- `primaryKey`: FK cũng là một phần PK (weak entity, junction, generalization, multi-valued).
+- `nullable`: bị ép `false` khi `primaryKey = true`.
+- `unique`: chỉ áp dụng khi FK có đúng 1 cột; FK nhiều cột luôn `unique: false` (không biểu diễn được UNIQUE tổ hợp trên từng cột).
+- `selfRef`: dùng tiền tố `parent_`.
+
+### 9.0.1. Pre-scan: weak entity và owner
+
+Duyệt các relationship có `type = "identifying"` và đúng 2 end hợp lệ. Xác định:
+
+1. Phía N (`cardinality` là `N` hoặc `M`) là weak entity, phía còn lại là owner.
+2. Nếu không phân biệt được bằng cardinality thì dùng `entity.kind === "weak"`: end nào weak mà end kia không weak là weak end.
+3. Bắt buộc `weakEnd` có `entity.kind === "weak"`, nếu không thì bỏ qua relationship này (nó được xử lý như relationship thường).
+4. Một weak entity có thể có nhiều owner (nhiều identifying relationship). `rel.attributes` của các identifying relationship được gom lại để thêm vào bảng của weak entity.
+
+Kết quả: `weakInfo: Map<weakEntityId, { ownerIds, relAttributes }>` và `identifyingRelIds` (các relationship đã được xử lý ở Step 2, bị bỏ qua ở Step 4/5).
 
 ### 9.1. Step 1: entities -> base tables
 
@@ -644,8 +686,8 @@ Mỗi entity tạo một table:
 Với từng attribute:
 
 - `derived`: bỏ qua, không lưu relational.
-- `multi_valued`: bỏ qua ở step này, xử lý riêng ở Step 4.
-- `composite` có components: flatten thành một column cho mỗi component.
+- `multi_valued`: bỏ qua ở step này, xử lý riêng ở Step 6.
+- `composite` có components: flatten thành một column cho mỗi component (không có role key).
 - Attribute thường:
 
 ```ts
@@ -653,28 +695,17 @@ Với từng attribute:
     id: generateLid(),
     name: attr.name,
     nullable: attr.isKey ? false : true,
-    unique: attr.isKey ? true : false,
+    unique: attr.isKey && storedKeyCount === 1 && !isOwnedWeak,
     roles: attr.isKey ? { primaryKey: true } : undefined,
     notes: attr.notes,
 }
 ```
 
-Composite component hiện được map đơn giản:
-
-```ts
-{
-    id: generateLid(),
-    name: component.name,
-    nullable: true,
-    unique: false,
-}
-```
-
-Nó không giữ metadata rằng component từng thuộc composite attribute nào.
+Quy tắc `unique` (khác phiên bản cũ): các thuộc tính key của một entity **cùng nhau** tạo thành **một** khóa. Vì vậy chỉ khi entity có đúng 1 thuộc tính key (và không phải weak entity có owner) thì cột mới `unique: true`. Với khóa tổ hợp hoặc partial key, từng cột không UNIQUE riêng lẻ (theo sách: "the set of simple attributes that form it will together form the primary key").
 
 ### 9.1.2. Auto-add primary key
 
-Nếu entity không có key attribute sau khi map:
+Nếu entity **không phải weak entity có owner** và không có key attribute sau khi map:
 
 ```ts
 {
@@ -686,209 +717,126 @@ Nếu entity không có key attribute sau khi map:
 }
 ```
 
-Column này được unshift vào đầu table.
+Column này được unshift vào đầu table. Weak entity có owner không được thêm `id`, vì PK của nó lấy từ owner (Step 2). Weak entity **không** có identifying relationship hợp lệ được coi như entity thường (có auto `id` nếu thiếu key).
 
-### 9.2. Step 2: generalizations -> class table inheritance
+### 9.2. Step 2: weak entities -> PK = PK owner + partial key
+
+Theo sách (Chapter 9, Step 2): *"The primary key of R is the combination of the primary key(s) of the owner(s) and the partial key of the weak entity type W, if any."*
+
+Với mỗi weak entity (duyệt DFS để **owner được ánh xạ trước**: weak entity có owner cũng là weak entity thì owner xử lý trước; có chống vòng lặp bằng `visitingWeak`):
+
+1. Với từng owner, `makeFkCols(..., { primaryKey: true, nullable: false })` tạo các cột FK tham chiếu toàn bộ PK của owner.
+2. Các cột FK này được `unshift` vào đầu bảng của weak entity.
+3. Partial key (các thuộc tính `isKey` của chính weak entity, đã map ở Step 1 với `primaryKey: true`) giữ nguyên.
+4. Kết quả: PK của weak entity = (các cột FK của owner) + (partial key).
+5. `rel.attributes` của identifying relationship thành cột thường (`nullable: true`) trong bảng weak entity.
+
+Ví dụ (bài Journal): `issue` là weak entity của `journal`, partial key = `{issue_number, date_issued}` thì:
+
+```text
+issue(journal_id PK/FK -> journal.journal_id, issue_number PK, date_issued PK)
+```
+
+Nếu `issue` có thêm một weak entity `section` (partial key `section_no`) thì:
+
+```text
+section(journal_id PK/FK, issue_number PK/FK, date_issued PK/FK, section_no PK)
+```
+
+(các cột FK tham chiếu từng cột PK của `issue`).
+
+Sách còn khuyến nghị `ON DELETE/UPDATE CASCADE` cho FK của weak entity. Model Logical không có `onDelete/onUpdate` (xem 6.4), nên điểm này chưa được thể hiện ở Logical; Logical -> Physical hiện luôn dùng `NO ACTION`.
+
+### 9.3. Step 3: generalizations -> class table inheritance
 
 Với mỗi generalization:
 
-1. Tìm parent table.
-2. Tìm parent PK.
-3. Với mỗi child entity:
-   - Tìm child table.
-   - Tìm existing child PK.
+1. Tìm parent table và **toàn bộ PK cols** của parent.
+2. Với mỗi child entity:
 
-Nếu child đã có PK:
+**Parent có PK 1 cột** (hành vi cũ, giữ nguyên):
 
-- Giữ column đó là PK.
-- Thêm FK trỏ parent PK.
-- Đổi tên child PK thành `parentPK.name`.
+- Child đã có PK: giữ column đó là PK, thêm FK trỏ parent PK, đổi tên child PK thành `parentPK.name`.
+- Child chưa có PK: thêm column `${parentTable.name}_id` vào đầu (PK + FK, `unique: true`).
 
-```ts
-existingPK.roles = {
-    ...existingPK.roles,
-    primaryKey: true,
-    foreignKey: {
-        refTableId: parentEntityId,
-        refColumnId: parentPK.id,
-    },
-}
-existingPK.name = parentPK.name
-```
+**Parent có PK nhiều cột** (mới):
 
-Nếu child chưa có PK:
+- Bỏ cờ `primaryKey` của các cột PK riêng của child (chúng thành cột thường).
+- Thêm vào đầu child các cột FK sao chép toàn bộ PK parent (`makeFkCols` với `primaryKey: true`), nên PK child = PK parent.
 
-- Thêm column mới vào đầu:
+Lưu ý: class table inheritance luôn dùng child PK làm FK về parent. Step 3 chạy **sau** Step 2, nên parent là weak entity vẫn có PK đầy đủ; ngược lại, nếu một weak entity có owner là child của generalization thì PK của owner có thể chưa phản ánh phép kế thừa (giới hạn, xem mục 14).
 
-```ts
-{
-    id: generateLid(),
-    name: `${parentTable.name}_id`,
-    nullable: false,
-    unique: true,
-    roles: {
-        primaryKey: true,
-        foreignKey: {
-            refTableId: parentEntityId,
-            refColumnId: parentPK.id,
-        },
-    },
-}
-```
+### 9.4. Step 4/5: relationships -> FK hoặc junction table
 
-Lưu ý: class table inheritance luôn dùng child PK làm FK về parent.
+Bỏ qua các identifying relationship đã xử lý ở Step 2. Code chỉ xử lý relationship có ít nhất 2 ends hợp lệ trong `tableMap`.
 
-### 9.3. Step 3: relationships -> FK hoặc junction table
-
-Code chỉ xử lý relationship có ít nhất 2 ends hợp lệ trong `tableMap`.
-
-`rel.attributes` sẽ được map thành columns:
+`rel.attributes` được map thành columns:
 
 - Với N:M/N-ary: thêm vào junction table.
 - Với 1:N/N:1/1:1: thêm vào table chứa FK.
 
-### 9.3.1. N-ary relationship
+Mọi FK đều dùng `makeFkCols`, tức luôn tham chiếu **toàn bộ PK** của bảng được tham chiếu (kể cả PK tổ hợp, ví dụ `article` -> `issue` sinh 3 cột FK).
+
+### 9.4.1. N-ary relationship
 
 Điều kiện: `ends.length > 2`.
 
-Rule:
+1. Tạo junction table `tbl_${rel.id}`, tên `rel.name || participantNames.join("_")`.
+2. Mỗi participant sinh các cột FK (`primaryKey: true`, `nullable: false`) tham chiếu toàn bộ PK của participant; các cột này cùng tạo PK của junction.
+3. `rel.attributes` thành cột thường (`nullable: true`).
 
-1. Tạo junction table.
-2. `junctionId = tbl_${rel.id}`.
-3. `junctionName = rel.name || participantNames.join("_")`.
-4. Mỗi participant tạo 1 column:
+### 9.4.2. Binary N:M
+
+Điều kiện: cả 2 end có `cardinality` `N` hoặc `M`, và cả hai table đều có PK.
+
+1. Tạo junction table `tbl_${rel.id}`, tên `rel.name || "${A.name}_${B.name}"`.
+2. Cột FK của phía A, rồi của phía B (`primaryKey: true`, `nullable: false`); tất cả cùng tạo PK của junction.
+3. N:M self-relationship: phía B dùng tiền tố `parent_` để không trùng tên.
+4. `rel.attributes` thành cột thường.
+
+### 9.4.3. Binary 1:N, N:1, 1:1
+
+- `isAMany && !isBMany`: FK ở end A, ref là end B.
+- `!isAMany && isBMany`: FK ở end B, ref là end A.
+- Còn lại (1:1): ưu tiên end có `optional === false` làm phía chứa FK, fallback end A.
+
+FK cột:
+
+```ts
+makeFkCols(fkTable.columns, refEnd.entityId, {
+    primaryKey: false,
+    nullable: fkEnd.optional !== false,   // total participation -> NOT NULL
+    unique: !isAMany && !isBMany,         // chỉ áp dụng khi FK 1 cột (1:1)
+    selfRef: endA.entityId === endB.entityId,
+})
+```
+
+Participation: nullable của FK phụ thuộc `optional` của end chứa FK (end phía N). `optional: false` (tham gia bắt buộc) -> `NOT NULL`; `optional: true` hoặc không khai báo -> cho phép `NULL`.
+
+### 9.5. Step 6: multi-valued attributes -> separate tables
+
+Mỗi attribute `multi_valued`:
+
+1. Tạo table `tbl_mv_${entity.id}_${attr.id}`, tên `${entity.name}_${attr.name}`.
+2. Các cột FK tham chiếu **toàn bộ PK** của entity sở hữu (`primaryKey: true`, `nullable: false`).
+3. Cột giá trị `attr.name` (`nullable: false`, `primaryKey: true`).
+4. PK của table = (PK owner) + (cột giá trị).
+
+### 9.6. Output
 
 ```ts
 {
-    id: generateLid(),
-    name: `${participantTable.name}_id`,
-    nullable: false,
-    unique: false,
-    roles: {
-        primaryKey: true,
-        foreignKey: {
-            refTableId: participantEntityId,
-            refColumnId: participantPKId,
-        },
+    model: {
+        id: opts.newModelId ?? generateLid(),
+        name: modelName,
+        version: 1,
+        notes: conceptualModel.model.notes,
     },
+    tables: Array.from(tableMap.values()),
 }
 ```
 
-5. Relationship attributes thành nullable non-unique columns.
-6. Chỉ set table nếu `cols.length > 0`.
-
-### 9.3.2. Binary N:M
-
-Điều kiện:
-
-- Có đúng 2 ends.
-- End A many và end B many.
-- Many nghĩa là `cardinality === "N"` hoặc `"M"`.
-
-Rule:
-
-1. Tạo junction table `tbl_${rel.id}`.
-2. Name: `rel.name || ${tableA.name}_${tableB.name}`.
-3. Tạo 2 columns:
-   - `${tableA.name}_id` PK+FK trỏ PK table A.
-   - `${tableB.name}_id` PK+FK trỏ PK table B.
-4. Relationship attributes thành nullable non-unique columns.
-
-### 9.3.3. Binary 1:N, N:1, 1:1
-
-Nếu không phải N:M:
-
-1. Xác định many side:
-   - A many, B not many -> FK đặt ở A.
-   - B many, A not many -> FK đặt ở B.
-2. Nếu 1:1:
-   - Ưu tiên optional side làm FK side.
-   - Nếu A optional thì A làm FK side.
-   - Else nếu B optional thì B làm FK side.
-   - Else fallback A làm FK side.
-3. Referenced side là side còn lại.
-4. FK column name:
-   - Self-referential: `parent_${refTable.name}_id`.
-   - Không self-ref: `${refTable.name}_id`.
-5. FK column:
-
-```ts
-{
-    id: generateLid(),
-    name: colName,
-    nullable: fkEnd.optional !== false,
-    unique: !isAMany && !isBMany,
-    roles: {
-        foreignKey: {
-            refTableId: refEnd.entityId,
-            refColumnId: pkRef,
-        },
-    },
-}
-```
-
-6. Relationship attributes thêm vào FK table.
-
-Lưu ý:
-
-- FK column cho relationship không được set `primaryKey`.
-- 1:1 được encode bằng `unique: true` trên FK column.
-- Optionality được encode bằng nullable.
-
-### 9.4. Step 4: multi-valued attributes -> separate tables
-
-Với mỗi entity attribute `kind === "multi_valued"`:
-
-1. Tìm parent table.
-2. Tìm parent PK.
-3. Tạo table:
-
-```ts
-mvTableId = `tbl_mv_${entity.id}_${attr.id}`
-mvTableName = `${entity.name}_${attr.name}`
-```
-
-4. Tạo 2 columns:
-
-Parent FK column:
-
-```ts
-{
-    id: generateLid(),
-    name: `${entity.name}_id`,
-    nullable: false,
-    unique: false,
-    roles: {
-        primaryKey: true,
-        foreignKey: {
-            refTableId: entity.id,
-            refColumnId: parentPK.id,
-        },
-    },
-}
-```
-
-Value column:
-
-```ts
-{
-    id: generateLid(),
-    name: attr.name,
-    nullable: false,
-    unique: false,
-    roles: { primaryKey: true },
-}
-```
-
-### 9.5. Output
-
-Logical output:
-
-- `model.id`: `opts.newModelId` hoặc `generateLid()`.
-- `model.name`: tên derived.
-- `model.version = 1`.
-- `model.notes = conceptualModel.model.notes`.
-- `tables = Array.from(tableMap.values())`.
+Kiểm thử: `src/components/EditProject/utils/schema-conversion.test.ts` (chạy bằng `npx tsx src/components/EditProject/utils/schema-conversion.test.ts`), gồm bài Journal (weak entity `issue`, composite FK, junction `writes`), weak entity lồng nhau, participation -> nullability, khóa tổ hợp của strong entity.
 
 ## 10. Physical -> Conceptual
 
@@ -998,8 +946,13 @@ Khác biệt quan trọng:
 9. Multi-valued detection rất chặt: đúng 2 columns, cả 2 PK, đúng 1 FK, không có non-PK.
 10. Conceptual derived attributes bị bỏ khi sang Logical.
 11. Composite attributes bị flatten, không có metadata để reverse lại composite.
-12. Conceptual -> Logical relationship attributes trong 1:N/1:1 được đặt vào table chứa FK.
+12. Conceptual -> Logical relationship attributes trong 1:N/1:1 được đặt vào table chứa FK; attributes của identifying relationship được đặt vào bảng weak entity.
 13. Conceptual -> Logical self relationship dùng prefix `parent_` để tránh trùng tên FK column.
+    FK tới bảng có PK tổ hợp sinh một cột FK cho mỗi cột PK, giữ tên cột PK (đã đảm bảo duy nhất bằng tiền tố `<refTable>_` / hậu tố số); FK nhiều cột luôn `unique: false`.
+    Weak entity chỉ được nhận diện khi `entity.kind = "weak"` và có identifying relationship hợp lệ (2 ends, weak ở phía N, hoặc phân biệt bằng `kind`). Nếu không, entity được ánh xạ như entity thường.
+    Weak entity có owner là child của generalization: PK của owner có thể chưa gồm phần kế thừa vì Step 2 chạy trước Step 3.
+    Logical không có `onDelete/onUpdate`; khuyến nghị CASCADE cho FK của weak entity (sách) chưa được áp dụng, Logical -> Physical luôn `NO ACTION`.
+    Logical -> Conceptual chỉ nhận diện weak entity khi bảng còn ít nhất 1 cột non-PK (xem mục 8.1.4). Bảng `issue(journal_id PK/FK, issue_number PK, date_issued PK)` không có cột thường sẽ không được reverse thành weak entity.
 14. Logical -> Physical không tạo indexes từ keys hoặc FK; `indexes` luôn khởi tạo rỗng.
 15. Logical -> Physical infer type dựa trên tên cột, nên có thể sai nếu tên không theo convention.
 16. Physical -> Logical bỏ `defaultValue`, `dataType`, `length`, `autoIncrement`, `indexes`, `dbms`.
@@ -1012,6 +965,6 @@ Khác biệt quan trọng:
 | Logical -> Physical | `convertLogicalToPhysical` | Giữ table id, đổi column id `lid` -> `pid`, remap FK refColumnId, infer data type theo role/name/DBMS, set autoIncrement cho single integer PK không phải FK, init indexes rỗng |
 | Physical -> Logical | `convertPhysicalToLogical` | Giữ table id/name/PK/FK/unique/nullable, đổi column id `pid` -> `lid`, bỏ physical-only fields, merge comment vào notes |
 | Logical -> Conceptual | `convertLogicalToConceptual` | Classify table thành `REGULAR`, `ISA_CHILD`, `JUNCTION`, `MULTI_VALUED`, `WEAK`; tạo entity, relationship, generalization bằng heuristic PK/FK |
-| Conceptual -> Logical | `convertConceptualToLogical` | Entity thành table, key attr thành PK, derived bị bỏ, composite flatten, multi-valued thành table riêng, generalization thành PK+FK, relationship thành FK hoặc junction |
+| Conceptual -> Logical | `convertConceptualToLogical` | Theo Elmasri & Navathe Ch.9: entity thành table, key attr thành PK (khóa tổ hợp không UNIQUE từng cột), weak entity có PK = PK owner + partial key, derived bị bỏ, composite flatten, multi-valued thành table riêng, generalization thành PK+FK, relationship thành FK (tham chiếu toàn bộ PK, nullable theo participation) hoặc junction |
 | Physical -> Conceptual | `convertPhysicalToConceptual` | Chain Physical -> Logical -> Conceptual |
 | Conceptual -> Physical | `convertConceptualToPhysical` | Chain Conceptual -> Logical -> Physical, truyền DBMS xuống bước Logical -> Physical nếu có |

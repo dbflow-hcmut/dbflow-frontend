@@ -79,6 +79,7 @@ import { useAuth } from "@/providers/AuthProvider";
 import { checkSchemaExistence, getProjectPermissions } from "@/api/projects/client";
 import { createSchema, saveSchemaModel, updateSchema } from "./api/client";
 import { revalidateProjectSchemas } from "@/app/projects/actions";
+import { getFkSourceCardinality, isColumnAloneUnique } from "./utils/edge-cardinality";
 import { convertLogicalToPhysical, convertPhysicalToLogical, convertLogicalToConceptual, convertConceptualToLogical, convertPhysicalToConceptual, convertConceptualToPhysical } from "./utils/schema-conversion";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import { useCopyPasteSchema } from "./hooks/useCopyPasteSchema";
@@ -818,34 +819,34 @@ const EditProject = (props: IPropsEditProject) => {
                         return match ? parseInt(match[1], 10) : -1;
                     };
 
-                    const getColumnIsKey = (edgeTableId: string, edgeColumnIndex: number, edgeHandle?: string | null) => {
-                        if (edgeTableId === tableId && edgeColumnIndex === columnIndex) {
-                            const tableData = selectedNode?.type === 'logical-table'
-                                ? selectedNode.data as LogicalTableData
-                                : undefined;
-                            const column = tableData?.columns?.[columnIndex];
-                            const nextColumn = { ...column, ...updates };
-                            return Boolean(nextColumn.isKey || nextColumn.isCandidateKey);
-                        }
-
-                        const tableData = nodes.find((node) =>
+                    // columns of an edge endpoint's table; the column being edited uses its pending `updates`
+                    const getTableColumns = (edgeTableId: string): LogicalTableData['columns'] | undefined => {
+                        const nodeColumns = (nodes.find((node) =>
                             node.id === edgeTableId && node.type === 'logical-table'
-                        )?.data as LogicalTableData | undefined;
-                        const fallbackIndex = parseColumnIndex(edgeHandle);
-                        const column = tableData?.columns?.[edgeColumnIndex >= 0 ? edgeColumnIndex : fallbackIndex];
-                        return Boolean(column?.isKey || column?.isCandidateKey);
+                        )?.data as LogicalTableData | undefined)?.columns;
+                        if (edgeTableId !== tableId) return nodeColumns;
+
+                        const selectedColumns = selectedNode?.type === 'logical-table'
+                            ? (selectedNode.data as LogicalTableData).columns
+                            : nodeColumns;
+                        return selectedColumns?.map((column, index) =>
+                            index === columnIndex ? { ...column, ...updates } : column
+                        );
                     };
 
                     const sourceColumnIndex = parseColumnIndex(edge.sourceHandle);
                     const targetColumnIndex = parseColumnIndex(edge.targetHandle);
-                    const sourceIsKey = getColumnIsKey(edge.source, sourceColumnIndex, edge.sourceHandle);
-                    const targetIsKey = getColumnIsKey(edge.target, targetColumnIndex, edge.targetHandle);
+                    const sourceColumns = getTableColumns(edge.source);
+                    const targetColumn = getTableColumns(edge.target)?.[targetColumnIndex];
+                    // 1–1 only when the FK column ALONE is unique; a column that is just part of a
+                    // composite PK (e.g. journal_id in issue's PK) keeps the edge 1–N
+                    const sourceCardinality = getFkSourceCardinality(sourceColumns, sourceColumnIndex, targetColumn);
 
                     return {
                         ...edge,
                         data: {
                             ...edge.data,
-                            sourceCardinality: sourceIsKey && targetIsKey ? '1' : 'N',
+                            sourceCardinality,
                             targetCardinality: '1',
                         },
                     };
@@ -867,33 +868,33 @@ const EditProject = (props: IPropsEditProject) => {
                 .map((edge) => {
                     if (edge.type !== 'relation-table-edge') return edge;
 
-                    const getColumnIsKey = (edgeTableId: string, edgeColumnName?: string | null) => {
-                        if (!edgeColumnName) return false;
-
-                        if (edgeTableId === tableId && edgeColumnName === columnName) {
-                            const tableData = selectedNode?.type === 'relation'
-                                ? selectedNode.data as RelationTableData
-                                : undefined;
-                            const column = tableData?.columns?.find((col) => col.name === columnName);
-                            const nextColumn = { ...column, ...updates };
-                            return Boolean(nextColumn.isPrimary || nextColumn.isCandidateKey || nextColumn.isUnique);
-                        }
-
-                        const tableData = nodes.find((node) =>
+                    // columns of an edge endpoint's table; the column being edited uses its pending `updates`
+                    const getTableColumns = (edgeTableId: string): RelationColumn[] | undefined => {
+                        const nodeColumns = (nodes.find((node) =>
                             node.id === edgeTableId && node.type === 'relation'
-                        )?.data as RelationTableData | undefined;
-                        const column = tableData?.columns?.find((col) => col.name === edgeColumnName);
-                        return Boolean(column?.isPrimary || column?.isCandidateKey || column?.isUnique);
+                        )?.data as RelationTableData | undefined)?.columns;
+                        if (edgeTableId !== tableId) return nodeColumns;
+
+                        const selectedColumns = selectedNode?.type === 'relation'
+                            ? (selectedNode.data as RelationTableData).columns
+                            : nodeColumns;
+                        return selectedColumns?.map((column) =>
+                            column.name === columnName ? { ...column, ...updates } : column
+                        );
                     };
 
-                    const sourceIsKey = getColumnIsKey(edge.source, edge.sourceHandle);
-                    const targetIsKey = getColumnIsKey(edge.target, edge.targetHandle);
+                    const sourceColumns = getTableColumns(edge.source);
+                    const targetColumns = getTableColumns(edge.target);
+                    const sourceColumnIndex = sourceColumns?.findIndex((column) => column.name === edge.sourceHandle) ?? -1;
+                    const targetColumn = targetColumns?.find((column) => column.name === edge.targetHandle);
+                    // 1–1 only when the FK column ALONE is unique (not just part of a composite PK)
+                    const sourceCardinality = getFkSourceCardinality(sourceColumns, sourceColumnIndex, targetColumn);
 
                     return {
                         ...edge,
                         data: {
                             ...edge.data,
-                            sourceCardinality: sourceIsKey && targetIsKey ? '1' : 'N',
+                            sourceCardinality,
                             targetCardinality: '1',
                         },
                     };
@@ -1163,7 +1164,14 @@ const EditProject = (props: IPropsEditProject) => {
                 return;
             }
             if (sourceColumn.isReferencedKey && targetColumn.isReferencedKey) {
-                addLogicalFkEdge('target', { oneToOne: true });
+                // both are keys: the FK is the column that is only PART of a composite key (the N side)
+                const sourceAlone = isColumnAloneUnique((sourceNode.data as LogicalTableData).columns, sourceColumn.columnIndex);
+                const targetAlone = isColumnAloneUnique((targetNode.data as LogicalTableData).columns, targetColumn.columnIndex);
+                if (!sourceAlone && targetAlone) {
+                    addLogicalFkEdge('source');
+                } else {
+                    addLogicalFkEdge('target', { oneToOne: targetAlone });
+                }
                 return;
             }
 
@@ -1222,7 +1230,14 @@ const EditProject = (props: IPropsEditProject) => {
                 return;
             }
             if (sourceColumn.isReferencedKey && targetColumn.isReferencedKey) {
-                addPhysicalFkEdge('target', { oneToOne: true });
+                // both are keys: the FK is the column that is only PART of a composite key (the N side)
+                const sourceAlone = isColumnAloneUnique((sourceNode.data as RelationTableData).columns, sourceColumn.columnIndex);
+                const targetAlone = isColumnAloneUnique((targetNode.data as RelationTableData).columns, targetColumn.columnIndex);
+                if (!sourceAlone && targetAlone) {
+                    addPhysicalFkEdge('source');
+                } else {
+                    addPhysicalFkEdge('target', { oneToOne: targetAlone });
+                }
                 return;
             }
 
@@ -1325,10 +1340,12 @@ const EditProject = (props: IPropsEditProject) => {
                     };
                     const srcCol = srcData?.columns?.[parseColIdx(connection.sourceHandle)];
                     const tgtCol = tgtData?.columns?.[parseColIdx(connection.targetHandle)];
-                    const srcIsKey = srcCol?.isKey || false;
-                    const tgtIsKey = tgtCol?.isKey || false;
-                    // Both PK → 1:1, otherwise default N:1
-                    const sourceCardinality = (srcIsKey && tgtIsKey) ? '1' : 'N';
+                    // 1:1 only when the FK column alone is unique, otherwise default N:1
+                    const sourceCardinality = getFkSourceCardinality(
+                        srcData?.columns,
+                        parseColIdx(connection.sourceHandle),
+                        tgtCol,
+                    );
                     const targetCardinality = '1';
                     return { data: { sourceCardinality, targetCardinality } };
                 })()

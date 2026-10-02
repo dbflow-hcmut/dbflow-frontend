@@ -528,6 +528,15 @@ PropertiesPanel cho phép override cardinality:
 - `1:N`.
 - `N:N`.
 
+Quy tắc cardinality của FK edge (`utils/edge-cardinality.ts`, `getFkSourceCardinality`):
+
+- Phía target (referenced key) luôn là `1`.
+- Phía source (FK) là `1` (edge 1-1) **chỉ khi cột FK tự nó là duy nhất**: cột `UNIQUE`/candidate key, hoặc là cột PK **duy nhất** của bảng (ví dụ child của ISA, quan hệ 1-1).
+- Cột chỉ là **một phần** của PK tổ hợp (ví dụ `journal_id` trong `issue(journal_id, issue_number, date_issued)`) không đủ để là 1-1, edge giữ `N` (nhiều issue cùng một journal).
+- Cột referenced phải là key (PK/CK/UNIQUE), nếu không edge là `N`.
+
+Quy tắc này được dùng ở mọi nơi tự động đặt cardinality: tính lại khi bật/tắt key của cột (`refreshLogicalEdgeCardinalities`, `refreshPhysicalEdgeCardinalities`) và khi user kéo edge giữa 2 cột đều là key (`onConnect`). Khi cả 2 cột đều là key, FK là cột chỉ là một phần của key tổ hợp (không duy nhất riêng), cột còn lại là referenced; nếu cả hai đều duy nhất thì target user kéo tới là FK và edge là 1-1.
+
 Nhưng cardinality override hiện nằm trong `edge.data.sourceCardinality/targetCardinality`. Khi map sang stored edge, các field này không được lưu trong `fkRef`. Vì vậy cardinality visual là metadata UI của edge, không phải nguồn chính để build FK model hoặc DDL.
 
 ## 11. Tạo và chỉnh physical table
