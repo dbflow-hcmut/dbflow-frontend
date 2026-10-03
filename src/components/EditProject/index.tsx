@@ -82,6 +82,7 @@ import { revalidateProjectSchemas } from "@/app/projects/actions";
 import { getFkSourceCardinality, isColumnAloneUnique } from "./utils/edge-cardinality";
 import { findColumnIndexByHandle } from "./utils/logical-column-handle";
 import { collectReferencingColumns, getReferencingColumnType } from "./utils/physical-column-type";
+import { choosePkOwner } from "./utils/fd-cleanup";
 import { convertLogicalToPhysical, convertPhysicalToLogical, convertLogicalToConceptual, convertConceptualToLogical, convertPhysicalToConceptual, convertConceptualToPhysical } from "./utils/schema-conversion";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import { useCopyPasteSchema } from "./hooks/useCopyPasteSchema";
@@ -2010,11 +2011,9 @@ const EditProject = (props: IPropsEditProject) => {
                         const col = t.columns.find((c) => c.name.toLowerCase() === lc);
                         return col?.roles?.primaryKey;
                     });
-                    if (candidates.length <= 1) return candidates[0] ?? null;
-                    // Prefer the smaller table (dimension table, not the join table)
-                    return candidates.reduce((a, b) =>
-                        a.columns.length <= b.columns.length ? a : b,
-                    );
+                    // The table whose PK is exactly this column is the owner (an FK can only reference a
+                    // unique column); then the smaller table (dimension table, not the join table)
+                    return choosePkOwner(candidates);
                 };
 
                 // ── 2. Move outgoing FKs (orig → other) to correct sub-table ─

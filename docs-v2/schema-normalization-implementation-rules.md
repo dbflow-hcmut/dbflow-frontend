@@ -402,6 +402,8 @@ Nếu không có FD hợp lệ:
 
 Điều này nghĩa là engine xem table không khai báo FD là trivially BCNF.
 
+UI (`TableResultCard`) không để kết quả này trông như đã được phân tích: khi `originalFDs.length === 0`, dòng table có thêm tag `no FDs` và khi mở rộng hiển thị ghi chú "No functional dependencies are declared… assumed to be BCNF; add FDs in Properties → Functional Dependencies" thay cho thông báo "already meets target".
+
 ### 9.2. currentNF interpretation
 
 | Violation tồn tại | currentNF |
@@ -749,9 +751,11 @@ Helper chọn sub-table owner cho một PK column:
 
 1. Tìm các sub-table có column cùng tên và column đó là PK.
 2. Nếu 0 hoặc 1 candidate, trả candidate đó hoặc null.
-3. Nếu nhiều candidate, chọn table có ít columns nhất.
+3. Nếu nhiều candidate, gọi `choosePkOwner` (`utils/fd-cleanup.ts`):
+   - Ưu tiên table có PK **đúng bằng một cột** đó (FK chỉ được tham chiếu cột duy nhất; table mà cột chỉ là một phần PK tổ hợp chỉ là phương án dự phòng).
+   - Nếu vẫn nhiều table, chọn table có ít columns nhất; hòa thì lấy table đứng trước.
 
-Ý tưởng: table nhỏ hơn thường là dimension/owner table, không phải join table.
+Ý tưởng: table có PK đơn là owner thật; table nhỏ hơn thường là dimension/owner table, không phải join table. Ví dụ `ARTICLE_WRITER` tách thành `(article_id, writer_id, fee)` và `(writer_id, writer_name, writer_address)` (cùng 3 cột): owner của `writer_id` là table thứ hai, nên FK là `ARTICLE_WRITER_1.writer_id → ARTICLE_WRITER_2.writer_id`. Trước đây tie-break theo số cột chọn nhầm table PK tổ hợp và sinh FK ngược chiều.
 
 ### 14.6. Create inter-decomposition FKs
 
@@ -861,7 +865,8 @@ Apply decomposition sẽ:
 12. `unique`, `candidateKey`, indexes của physical table gốc không được preserve đầy đủ sau apply.
 13. Table gốc bị thay thế hoàn toàn; action có confirm nhưng không có undo riêng ngoài hệ thống undo/version nếu có.
 14. Inter-decomposition FK heuristic chọn owner table nhỏ nhất, có thể không đúng với mọi schema phức tạp.
-15. Nếu FD được nhập sai hoặc thiếu, kết quả NF/decomposition sẽ phản ánh FD input, không tự suy luận business rule.
+15. FD được dọn khi sửa cột (`utils/fd-cleanup.ts`, gọi từ `utils/functions.ts`): xóa một cột gỡ cột đó khỏi mọi FD (`removeColumnFromFDs`); FD mất toàn bộ vế trái hoặc vế phải thì bị xóa, FD đang soạn dở (vế rỗng) được giữ. FD logical tham chiếu column id nên đổi tên cột không ảnh hưởng; FD physical tham chiếu tên cột nên đổi tên cột sẽ đổi tên trong FD (`renameColumnInFDs`).
+16. Nếu FD được nhập sai hoặc thiếu, kết quả NF/decomposition sẽ phản ánh FD input, không tự suy luận business rule.
 
 ## 17. Bảng tóm tắt thuật toán
 

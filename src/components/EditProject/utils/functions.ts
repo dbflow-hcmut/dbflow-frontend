@@ -3,6 +3,7 @@ import { Node } from "reactflow";
 import type { EntityData, RelationshipData, AttributeData, NodeData } from "../index";
 import type { RelationTableData, RelationColumn, TableIndex, PhysicalFD } from "@/components/erds-notations/relation-table";
 import type { LogicalTableData, LogicalFD } from "@/components/erds-notations/logical-table";
+import { removeColumnFromFDs, renameColumnInFDs } from "./fd-cleanup";
 
 export type ConstraintData = { symbol: 'd' | 'o' | 'u' };
 export type ErdEdgeData = {
@@ -317,6 +318,7 @@ export const createUpdateFunctions = (
     const removeRelationTableColumn = (columnIndex: number) => {
         if (!selectedNode || selectedNode.type !== 'relation') return;
         const tableData = selectedNode.data as RelationTableData;
+        const removedName = tableData.columns?.[columnIndex]?.name;
         setNodes((existingNodes) =>
             existingNodes.map((n) =>
                 n.id === selectedNode.id
@@ -325,6 +327,10 @@ export const createUpdateFunctions = (
                         data: {
                             ...tableData,
                             columns: tableData.columns?.filter((_, idx) => idx !== columnIndex) || [],
+                            // a deleted column must not stay behind in the functional dependencies
+                            ...(removedName !== undefined && tableData.functionalDependencies
+                                ? { functionalDependencies: removeColumnFromFDs(tableData.functionalDependencies, removedName, true) }
+                                : {}),
                         },
                     }
                     : n
@@ -338,6 +344,8 @@ export const createUpdateFunctions = (
     ) => {
         if (!selectedNode || selectedNode.type !== 'relation') return;
         const tableData = selectedNode.data as RelationTableData;
+        const oldName = tableData.columns?.[columnIndex]?.name;
+        const renamedTo = updates.name !== undefined && oldName !== undefined && updates.name !== oldName ? updates.name : undefined;
         setNodes((existingNodes) =>
             existingNodes.map((n) =>
                 n.id === selectedNode.id
@@ -348,6 +356,10 @@ export const createUpdateFunctions = (
                             columns: tableData.columns?.map((col, idx) =>
                                 idx === columnIndex ? { ...col, ...updates } : col
                             ) || [],
+                            // physical FDs reference columns by name, so a rename must follow
+                            ...(renamedTo !== undefined && oldName !== undefined && tableData.functionalDependencies
+                                ? { functionalDependencies: renameColumnInFDs(tableData.functionalDependencies, oldName, renamedTo) }
+                                : {}),
                         },
                     }
                     : n
@@ -474,6 +486,8 @@ export const createUpdateFunctions = (
     const removeLogicalTableAttribute = (columnIndex: number) => {
         if (!selectedNode || selectedNode.type !== 'logical-table') return;
         const tableData = selectedNode.data as LogicalTableData;
+        const removedColumn = tableData.columns?.[columnIndex];
+        const removedRef = removedColumn ? (removedColumn.id ?? removedColumn.name) : undefined;
         setNodes((existingNodes) =>
             existingNodes.map((n) =>
                 n.id === selectedNode.id
@@ -482,6 +496,10 @@ export const createUpdateFunctions = (
                         data: {
                             ...tableData,
                             columns: tableData.columns?.filter((_, idx) => idx !== columnIndex) || [],
+                            // a deleted column must not stay behind in the functional dependencies
+                            ...(removedRef !== undefined && tableData.functionalDependencies
+                                ? { functionalDependencies: removeColumnFromFDs(tableData.functionalDependencies, removedRef) }
+                                : {}),
                         },
                     }
                     : n

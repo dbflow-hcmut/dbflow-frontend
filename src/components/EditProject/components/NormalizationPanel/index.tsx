@@ -270,6 +270,8 @@ const TableResultCard: React.FC<{
     const relevantViolations = filterViolations(result.violations, targetNF);
     const decomposition = computeDecomposition(result, targetNF);
     const hasViolations = relevantViolations.length > 0;
+    // without declared FDs the engine cannot find violations, so BCNF here is only an assumption
+    const hasNoFDs = result.originalFDs.length === 0;
 
     return (
         <div className="border border-gray-200 rounded-lg mb-2 overflow-hidden">
@@ -302,6 +304,12 @@ const TableResultCard: React.FC<{
 
                 {nfLabel(result.currentNF)}
 
+                {hasNoFDs && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                        no FDs
+                    </span>
+                )}
+
                 {hasViolations && (
                     <span className="text-[10px] text-gray-400">
                         {relevantViolations.length} violation{relevantViolations.length !== 1 ? "s" : ""}
@@ -332,7 +340,15 @@ const TableResultCard: React.FC<{
                         )}
                     </div>
 
-                    {hasViolations ? (
+                    {hasNoFDs ? (
+                        <div className="px-3 py-3 text-[11px] text-amber-700 bg-amber-50 flex items-start gap-1.5">
+                            <AlertTriangle size={14} className="shrink-0 mt-px" />
+                            <span>
+                                No functional dependencies are declared for this table, so it can&apos;t be analysed. It is
+                                assumed to be {result.currentNF}; add FDs in Properties → Functional Dependencies to get a real result.
+                            </span>
+                        </div>
+                    ) : hasViolations ? (
                         <div>
                             {relevantViolations.map((v, i) => (
                                 <ViolationRow key={i} v={v} />
