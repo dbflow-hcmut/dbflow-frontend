@@ -1,6 +1,6 @@
 # DBFlow Admin, Subscription, Team & Billing Implementation Plan
 
-> Status: Implementation started — workspace/team foundation is in progress.
+> Status: Implementation started — workspace/team foundation is in progress. 
 >
 > Scope: DBFlow frontend, NestJS backend, PostgreSQL database, LangGraph AI service, admin portal, personal/team subscriptions, usage metering, and payment integration.
 
