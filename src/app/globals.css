@@ -100,12 +100,23 @@
   }
 } */
 
+html,
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: 'Gilroy', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior: none;
+  overscroll-behavior-x: none;
+}
+
+.react-flow,
+.react-flow__pane,
+.react-flow__viewport,
+.react-flow__renderer {
+  overscroll-behavior: none !important;
+  overscroll-behavior-x: none !important;
 }
 
 * {

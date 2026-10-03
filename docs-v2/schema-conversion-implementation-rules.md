@@ -791,6 +791,8 @@ Mọi FK đều dùng `makeFkCols`, tức luôn tham chiếu **toàn bộ PK** c
 
 Điều kiện: cả 2 end có `cardinality` `N` hoặc `M`, và cả hai table đều có PK.
 
+Converter chỉ nhận chính xác `N` hoặc `M` là phía many. Các dạng min-max như `0..N`, `1..N`, `(0,N)` chưa được parse và hiện sẽ rơi vào nhánh one; PropertiesPanel vì vậy chỉ cho chọn `1`, `N`, `M`.
+
 1. Tạo junction table `tbl_${rel.id}`, tên `rel.name || "${A.name}_${B.name}"`.
 2. Cột FK của phía A, rồi của phía B (`primaryKey: true`, `nullable: false`); tất cả cùng tạo PK của junction.
 3. N:M self-relationship: phía B dùng tiền tố `parent_` để không trùng tên.

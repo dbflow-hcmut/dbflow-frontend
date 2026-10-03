@@ -325,7 +325,7 @@ const Header: React.FC<HeaderProps> = ({
                             </Button>
                         </Tooltip>
                     )}
-                    <Tooltip title="Sync Schema" placement="bottom">
+                    <Tooltip title="Connect to Database" placement="bottom">
                         <Button
                             type={'text'}
                             className="!px-2"
@@ -425,7 +425,7 @@ const Header: React.FC<HeaderProps> = ({
                             placement="bottomRight"
                             align={{ offset: [0, 10] }}
                         >
-                            <Tooltip title="Sync to Schema" placement="bottom">
+                            <Tooltip title="Convert to Schema" placement="bottom">
                                 <Button
                                     type="text"
                                     className="!px-2"

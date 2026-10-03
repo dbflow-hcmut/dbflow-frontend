@@ -972,7 +972,8 @@ PropertiesPanel cho conceptual edge:
 - `useDiagramViewport`: nếu schema chưa có viewport lưu sẵn, hook gọi `fitView({ padding: 0.2 })` đúng một lần. Vì ReactFlow đo kích thước node sau khi nodes được set (đặc biệt khi diagram sinh từ model lần đầu), hook thăm dò mỗi 100ms (tối đa 30 lần ≈ 3s) cho tới khi mọi node có `width`/`height`, rồi mới `fitView`. Trước đây fitView chạy sớm một lần khi node chưa đo nên viewport ở `translate(0,0) scale(1)` và một phần sơ đồ nằm ngoài khung nhìn.
 - Nếu bracket trên entity - relationship hoặc entity - entity thì chọn direction `from` hoặc `to`.
 - Entity - entity bracket direction default là `from`.
-- Nếu edge là participation/identifying thì có label.
+- PropertiesPanel không còn ô chỉnh `Label` cho conceptual edge. `data.label`/`labels.center` cũ vẫn được đọc và render để tương thích dữ liệu đã lưu; thay đổi này chỉ bỏ control chỉnh sửa khỏi UI, không đổi stored JSON contract.
+- Relationship cardinality trong PropertiesPanel dùng select với các giá trị `1`, `N`, `M`; không cho nhập tự do và không thêm fallback cho giá trị legacy ngoài danh sách.
 - Relationship cardinality update ghi vào relationship node `data.cardinalities` và edge `fromMult` hoặc `toMult`.
 
 ## 15. Tạo và chỉnh conceptual diagram

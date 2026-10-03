@@ -2775,7 +2775,7 @@ const EditProject = (props: IPropsEditProject) => {
 
     return (
         <ReactFlowProvider>
-            <div className="h-screen w-full overflow-hidden">
+            <div className="h-screen w-full overflow-hidden overscroll-none">
                 <AddPage
                     open={isAddPageOpen}
                     onClose={() => setIsAddPageOpen(false)}
@@ -2904,7 +2904,7 @@ const EditProject = (props: IPropsEditProject) => {
                     onRestoreVersion={handleRestoreVersion}
                     previewingVersionId={previewingVersionId}
                 />
-                <div className="flex h-full overflow-hidden">
+                <div className="flex h-full overflow-hidden overscroll-none">
                     <NotationsSidebar
                         isOpen={isSidebarModalOpen}
                         canEdit={canEdit}
@@ -2992,16 +2992,6 @@ const EditProject = (props: IPropsEditProject) => {
                                     }
                                     return edge;
                                 })
-                            );
-                        }}
-                        onUpdateEdgeLabel={(value) => {
-                            if (!selectedEdge) return;
-                            setEdges((existingEdges) =>
-                                existingEdges.map((edge) =>
-                                    edge.id === selectedEdge.id
-                                        ? { ...edge, data: { ...edge.data, label: value || undefined } }
-                                        : edge
-                                )
                             );
                         }}
                         onUpdateEdgeFromMult={(value) => {
@@ -3176,7 +3166,7 @@ const EditProject = (props: IPropsEditProject) => {
                         />
                     )}
                     <div
-                        className={`flex-1 h-full relative overflow-hidden${commentMode ? ' comment-cursor-mode' : ''}`}
+                        className={`flex-1 h-full relative overflow-hidden overscroll-none${commentMode ? ' comment-cursor-mode' : ''}`}
                         ref={(el) => {
                             reactFlowWrapperRef.current = el;
                             setDiagramWrapperEl(el);

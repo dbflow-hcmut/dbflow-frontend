@@ -9,6 +9,12 @@ import type { ErdEdgeData } from "../../utils/functions";
 import { GENERIC_DATA_TYPES, type FKAction, type DataTypeOption } from "../../utils/dbms-config";
 import { isTypingValidLength, isValidTypeLength } from "../../utils/physical-column-type";
 
+const RELATIONSHIP_CARDINALITY_OPTIONS = [
+    { value: '1', label: '1' },
+    { value: 'N', label: 'N' },
+    { value: 'M', label: 'M' },
+];
+
 type PropertiesPanelProps = {
     isOpen: boolean;
     canEdit?: boolean;
@@ -21,7 +27,6 @@ type PropertiesPanelProps = {
     onUpdateName: (name: string) => void;
     onUpdateAttributeKey: (checked: boolean) => void;
     onUpdateRelationshipCardinality: (edgeId: string, cardinality: string) => void;
-    onUpdateEdgeLabel: (value: string) => void;
     onUpdateEdgeFromMult: (value: string) => void;
     onUpdateEdgeToMult: (value: string) => void;
     onUpdateEdgeLineStyle: (style: 'single' | 'double' | 'bracket') => void;
@@ -70,7 +75,6 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     onUpdateName,
     onUpdateAttributeKey,
     onUpdateRelationshipCardinality,
-    onUpdateEdgeLabel,
     onUpdateEdgeFromMult: _onUpdateEdgeFromMult,
     onUpdateEdgeToMult: _onUpdateEdgeToMult,
     onUpdateEdgeLineStyle,
@@ -791,7 +795,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                     </div>
                                     {connectedEnds.length > 0 && (
                                         <div>
-                                            <label className="block text-sm font-medium mb-2">Cardinalities</label>
+                                            <label className="block text-sm font-medium mb-2">Relationship cardinalities</label>
                                             <div className="flex flex-col gap-3">
                                                 {connectedEnds.map((end) => {
                                                     const relationshipData = selectedNode.data as RelationshipData;
@@ -799,13 +803,34 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                                     const displayName = end.roleLabel
                                                         ? `${end.entityName} (${end.roleLabel})`
                                                         : end.entityName;
+                                                    const oppositeEnd = connectedEnds.length === 2
+                                                        ? connectedEnds.find((candidate) => candidate.edgeId !== end.edgeId)
+                                                        : undefined;
+                                                    const oppositeDisplayName = oppositeEnd?.roleLabel
+                                                        ? `${oppositeEnd.entityName} (${oppositeEnd.roleLabel})`
+                                                        : oppositeEnd?.entityName;
+                                                    const cardinalityLabel = oppositeDisplayName
+                                                        ? `${displayName} per ${oppositeDisplayName}`
+                                                        : `${displayName} end`;
                                                     return (
                                                         <div key={end.edgeId} className="flex items-center gap-2">
-                                                            <span className="text-sm flex-1 truncate">{displayName}:</span>
-                                                            <Input
-                                                                value={currentCardinality || ''}
-                                                                onChange={(e) => onUpdateRelationshipCardinality(end.edgeId, e.target.value)}
-                                                                placeholder="Enter"
+                                                            <label
+                                                                className="text-sm flex-1 truncate"
+                                                                htmlFor={`relationship-cardinality-${end.edgeId}`}
+                                                                title={cardinalityLabel}
+                                                            >
+                                                                {cardinalityLabel}
+                                                            </label>
+                                                            <Select
+                                                                id={`relationship-cardinality-${end.edgeId}`}
+                                                                value={RELATIONSHIP_CARDINALITY_OPTIONS.some(
+                                                                    (option) => option.value === currentCardinality
+                                                                ) ? currentCardinality : undefined}
+                                                                onChange={(value) => onUpdateRelationshipCardinality(end.edgeId, value ?? '')}
+                                                                options={RELATIONSHIP_CARDINALITY_OPTIONS}
+                                                                placeholder="Select"
+                                                                allowClear
+                                                                aria-label={`Cardinality: ${cardinalityLabel}`}
                                                                 style={{ width: 80 }}
                                                             />
                                                         </div>
@@ -1010,16 +1035,6 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                                 { label: 'At source (from)', value: 'from' },
                                                 { label: 'At target (to)', value: 'to' },
                                             ]}
-                                        />
-                                    </div>
-                                )}
-                                {(selectedEdge.data?.storedType === 'participation' || selectedEdge.data?.storedType === 'identifying') && (
-                                    <div>
-                                        <label className="block text-sm font-medium mb-2">Label</label>
-                                        <Input
-                                            value={selectedEdge.data?.label || ''}
-                                            onChange={(e) => onUpdateEdgeLabel(e.target.value)}
-                                            placeholder="e.g., manages, supervises"
                                         />
                                     </div>
                                 )}
