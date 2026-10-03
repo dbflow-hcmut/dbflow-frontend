@@ -44,6 +44,7 @@ type TableInfo = {
 };
 
 type ColumnInfo = {
+    id?: string;
     name: string;
     dataType: string;
     length?: string;
@@ -70,9 +71,9 @@ type IndexInfo = {
 type FKInfo = {
     constraintName: string;
     sourceTable: string;
-    sourceColumn: string;
+    sourceColumns: string[];
     targetTable: string;
-    targetColumn: string;
+    targetColumns: string[];
     onDelete?: FKAction;
     onUpdate?: FKAction;
 };
@@ -140,6 +141,14 @@ const topologicalSort = (tables: TableInfo[], tableIdToName: Map<string, string>
 
 // ── Column DDL ───────────────────────────────────────────────────────
 
+/** DBMS-specific expression for an integer column flagged auto-increment, or null if the type cannot auto-increment. */
+const autoIncrementMapping = (dtLower: string, config: DBMSConfig): string | null => {
+    if (["int", "integer", "mediumint"].includes(dtLower)) return config.serialTypes.serial ?? null;
+    if (dtLower === "bigint") return config.serialTypes.bigserial ?? null;
+    if (dtLower === "smallint") return config.name === "PostgreSQL" ? "SMALLSERIAL" : config.serialTypes.serial ?? null;
+    return null;
+};
+
 const buildColumnDDL = (col: ColumnInfo, config: DBMSConfig): string => {
     const parts: string[] = [quote(col.name, config)];
 
@@ -150,6 +159,9 @@ const buildColumnDDL = (col: ColumnInfo, config: DBMSConfig): string => {
     if (serialMapping) {
         // Serial types: use DBMS-specific expansion (e.g. SERIAL, INT AUTO_INCREMENT)
         parts.push(serialMapping);
+    } else if (col.autoIncrement && autoIncrementMapping(dtLower, config)) {
+        // Integer column flagged auto-increment (e.g. imported from DDL): same expansion as the serial types
+        parts.push(autoIncrementMapping(dtLower, config)!);
     } else {
         let typeStr = col.dataType?.toUpperCase() || "VARCHAR";
         if (col.length) {
@@ -211,7 +223,9 @@ const buildCreateTable = (
 
 const buildAlterTableFK = (fk: FKInfo, config: DBMSConfig): string => {
     let sql = `ALTER TABLE ${quote(fk.sourceTable, config)} ADD CONSTRAINT ${quote(fk.constraintName, config)}\n`;
-    sql += `    FOREIGN KEY (${quote(fk.sourceColumn, config)}) REFERENCES ${quote(fk.targetTable, config)} (${quote(fk.targetColumn, config)})`;
+    const srcCols = fk.sourceColumns.map((c) => quote(c, config)).join(", ");
+    const tgtCols = fk.targetColumns.map((c) => quote(c, config)).join(", ");
+    sql += `    FOREIGN KEY (${srcCols}) REFERENCES ${quote(fk.targetTable, config)} (${tgtCols})`;
 
     const actions: string[] = [];
     if (fk.onDelete && fk.onDelete !== "NO ACTION") {
@@ -275,6 +289,7 @@ export const generateDDL = (
         id: t.id,
         name: t.name,
         columns: (t.columns ?? []).map((c) => ({
+            id: c.id,
             name: c.name,
             dataType: c.dataType ?? "varchar",
             length: c.length,
@@ -306,27 +321,58 @@ export const generateDDL = (
     // Collect FKs
     const allFKs: FKInfo[] = [];
     for (const table of sorted) {
+        // columns of this table that reference the same table (candidates for one composite FK)
+        const byTarget = new Map<string, ColumnInfo[]>();
         for (const col of table.columns) {
             if (!col.foreignKey) continue;
-            const targetName = tableIdToName.get(col.foreignKey.refTableId);
-            if (!targetName) {
+            if (!tableIdToName.get(col.foreignKey.refTableId)) {
                 warnings.push(`FK on ${table.name}.${col.name}: target table ID "${col.foreignKey.refTableId}" not found, skipping.`);
                 continue;
             }
-            // Resolve target column name
-            const targetTable = tables.find((t) => t.id === col.foreignKey!.refTableId);
-            const targetCol = targetTable?.columns.find((c) => c.isPrimaryKey);
-            const targetColName = targetCol?.name ?? "id";
+            const group = byTarget.get(col.foreignKey.refTableId) ?? [];
+            group.push(col);
+            byTarget.set(col.foreignKey.refTableId, group);
+        }
 
-            allFKs.push({
-                constraintName: `fk_${table.name}_${col.name}`,
-                sourceTable: table.name,
-                sourceColumn: col.name,
-                targetTable: targetName,
-                targetColumn: targetColName,
-                onDelete: col.foreignKey.onDelete,
-                onUpdate: col.foreignKey.onUpdate,
-            });
+        for (const [refTableId, cols] of byTarget) {
+            const targetTable = tables.find((t) => t.id === refTableId)!;
+            const targetPk = targetTable.columns.filter((c) => c.isPrimaryKey);
+            // The referenced column is the one the FK points at (refColumnId), not just the first PK column
+            const resolveTarget = (col: ColumnInfo) =>
+                targetTable.columns.find((c) => c.id !== undefined && c.id === col.foreignKey!.refColumnId) ?? targetPk[0];
+
+            // several columns referencing every column of the target's composite PK form ONE composite FK
+            const targets = cols.map(resolveTarget);
+            const distinctTargets = new Set(targets.map((t) => t?.name));
+            const isComposite =
+                cols.length > 1 &&
+                targetPk.length === cols.length &&
+                distinctTargets.size === cols.length &&
+                targetPk.every((pk) => distinctTargets.has(pk.name));
+
+            const push = (srcCols: ColumnInfo[], tgtCols: ColumnInfo[]) => {
+                const first = srcCols[0].foreignKey!;
+                allFKs.push({
+                    constraintName: `fk_${table.name}_${srcCols.map((c) => c.name).join("_")}`,
+                    sourceTable: table.name,
+                    sourceColumns: srcCols.map((c) => c.name),
+                    targetTable: targetTable.name,
+                    targetColumns: tgtCols.map((c) => c?.name ?? "id"),
+                    onDelete: srcCols.map((c) => c.foreignKey!.onDelete).find((a) => a !== undefined) ?? first.onDelete,
+                    onUpdate: srcCols.map((c) => c.foreignKey!.onUpdate).find((a) => a !== undefined) ?? first.onUpdate,
+                });
+            };
+
+            if (isComposite) {
+                // order both column lists by the target's PK order
+                const ordered = targetPk.map((pk) => {
+                    const idx = targets.findIndex((t) => t?.name === pk.name);
+                    return { src: cols[idx], tgt: pk };
+                });
+                push(ordered.map((o) => o.src), ordered.map((o) => o.tgt));
+            } else {
+                cols.forEach((col, i) => push([col], [targets[i]]));
+            }
         }
     }
 

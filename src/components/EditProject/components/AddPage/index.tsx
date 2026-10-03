@@ -106,6 +106,11 @@ export function AddPage(props: IAddPageProps) {
         return validateDDLSyntax(ddlText).filter((m) => m.severity === "error");
     }, [ddlText]);
 
+    const syntaxWarnings = useMemo(() => {
+        if (!ddlText.trim()) return [];
+        return validateDDLSyntax(ddlText).filter((m) => m.severity === "warning");
+    }, [ddlText]);
+
     const parseResult = useMemo(() => {
         if (!ddlText.trim() || syntaxErrors.length > 0) return null;
         return parseDDL(ddlText);
@@ -114,6 +119,7 @@ export function AddPage(props: IAddPageProps) {
     const tableCount = parseResult?.tables.length ?? 0;
     const columnCount = parseResult?.tables.reduce((s, t) => s + t.columns.length, 0) ?? 0;
     const hasParseErrors = (parseResult?.errors.length ?? 0) > 0;
+    const parseWarnings = parseResult?.warnings ?? [];
     const canImportDDL = syntaxErrors.length === 0 && tableCount > 0 && !hasParseErrors;
 
     const handleFinish = async (values: { name: string; type: string; dbms?: string }) => {
@@ -341,6 +347,31 @@ export function AddPage(props: IAddPageProps) {
                                             ))}
                                         </div>
                                     } />
+                                )}
+                                {!ddlText.trim() && (
+                                    <Alert type="info" showIcon className="!mb-3"
+                                        message="Paste a DDL script or upload a .sql file containing at least one CREATE TABLE statement."
+                                    />
+                                )}
+                                {syntaxErrors.length === 0 && hasParseErrors && (
+                                    <Alert type="error" showIcon className="!mb-3"
+                                        message={<div className="flex flex-col gap-0.5 text-xs">{parseResult!.errors.map((e, i) => <div key={i}>{e}</div>)}</div>}
+                                    />
+                                )}
+                                {syntaxErrors.length === 0 && (syntaxWarnings.length > 0 || parseWarnings.length > 0) && (
+                                    <Alert type="warning" showIcon className="!mb-3"
+                                        message={
+                                            <div className="flex flex-col gap-0.5 text-xs">
+                                                {syntaxWarnings.map((w, i) => (
+                                                    <div key={`s${i}`}>
+                                                        <span className="font-medium">Line {w.startLineNumber}:{w.startColumn}</span>
+                                                        {" — "}{w.message}
+                                                    </div>
+                                                ))}
+                                                {parseWarnings.map((w, i) => <div key={`p${i}`}>{w}</div>)}
+                                            </div>
+                                        }
+                                    />
                                 )}
                                 {canImportDDL && !mismatchWarning && (
                                     <Alert type="success" showIcon className="!mb-3"

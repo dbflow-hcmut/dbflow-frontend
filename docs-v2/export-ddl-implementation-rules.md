@@ -405,42 +405,22 @@ Với từng table trong `sorted`, từng column:
 3. Nếu không tìm thấy target table:
    - Thêm warning.
    - Skip FK này.
-4. Tìm target table trong `tables` bằng `id`.
-5. Tìm target column bằng primary key đầu tiên của target table.
-6. Nếu không tìm được PK, fallback target column name là `"id"`.
-7. Tạo constraint name:
-
-```ts
-fk_${sourceTable}_${sourceColumn}
-```
-
-8. Push vào `allFKs`.
+4. Nhóm các column của cùng một table theo `refTableId` (ứng viên của một FK tổ hợp).
+5. Với mỗi column, tìm target column bằng `refColumnId` (fallback: PK đầu tiên của target table, rồi `"id"`).
+6. Nếu nhóm có >= 2 column, các target column khác nhau và **đúng bằng tập PK của target table** thì sinh **một FK tổ hợp** (cột nguồn và cột đích cùng thứ tự theo PK của bảng đích). Ngược lại mỗi column là một FK riêng.
+7. Tạo constraint name: `fk_${sourceTable}_${sourceColumns.join("_")}`.
+8. `onDelete/onUpdate` lấy từ column đầu tiên có khai báo.
+9. Push vào `allFKs` (`FKInfo.sourceColumns/targetColumns` là mảng).
 
 ### 8.2. Điểm rất quan trọng về refColumnId
 
-Physical FK role có `refColumnId`, nhưng generator hiện không dùng `refColumnId` để tìm đúng target column.
-
-Code hiện tại chọn:
+Physical FK role có `refColumnId`. Generator dùng `refColumnId` để tìm đúng target column (`ColumnInfo` giữ `id`):
 
 ```ts
-const targetCol = targetTable?.columns.find((c) => c.isPrimaryKey);
-const targetColName = targetCol?.name ?? "id";
+targetTable.columns.find(c => c.id === fk.refColumnId) ?? targetPk[0]
 ```
 
-Hệ quả:
-
-- FK trỏ vào PK đầu tiên thì đúng.
-- FK trỏ vào candidate key hoặc unique column không phải PK sẽ bị export sai target column.
-- Composite PK cũng chỉ lấy PK đầu tiên.
-- `refColumnId` trong model bị bỏ qua khi export.
-
-Nếu cần sửa thuật toán, nên đổi bước resolve target column thành:
-
-```ts
-targetTable.columns.find(c => c.id === fk.refColumnId)
-```
-
-Nhưng `ColumnInfo` hiện chưa giữ `id`, nên phải bổ sung `id` vào normalize step.
+Trước đây generator luôn lấy PK đầu tiên của target table và mỗi column tạo một FK riêng, nên FK tổ hợp `(journal_id, issue_number, date_issued) -> issue` bị xuất thành 3 FK cùng trỏ `issue(journal_id)` (script không chạy được). Hiện FK tổ hợp được gom thành một `FOREIGN KEY (a, b, c) REFERENCES t (a, b, c)`.
 
 ### 8.3. Vì sao FK được tách thành ALTER TABLE
 
@@ -554,7 +534,7 @@ Lưu ý:
 - `defaultValue` được chèn nguyên văn, không tự quote string.
 - `unique` không render ở column line, mà render thành table-level constraint.
 - `primaryKey` không render inline, mà render thành table-level constraint.
-- `autoIncrement` không render trực tiếp.
+- `autoIncrement = true` với cột `int/integer/mediumint/bigint/smallint` được render như kiểu serial của DBMS (PostgreSQL `SERIAL/BIGSERIAL/SMALLSERIAL`, MySQL `INT AUTO_INCREMENT`/`BIGINT AUTO_INCREMENT`, SQL Server `INT IDENTITY(1,1)`/`BIGINT IDENTITY(1,1)`), giống kiểu `serial`; các kiểu khác giữ nguyên.
 
 ### 10.2. buildCreateTable
 
@@ -611,8 +591,10 @@ ALTER TABLE <sourceTable> ADD CONSTRAINT <constraintName>
 2. Render FK clause:
 
 ```sql
-FOREIGN KEY (<sourceColumn>) REFERENCES <targetTable> (<targetColumn>)
+FOREIGN KEY (<sourceColumns>) REFERENCES <targetTable> (<targetColumns>)
 ```
+
+(danh sách cột phân tách bằng dấu phẩy; một cột với FK đơn, nhiều cột với FK tổ hợp)
 
 3. Nếu `onDelete` tồn tại và khác `"NO ACTION"`, append:
 

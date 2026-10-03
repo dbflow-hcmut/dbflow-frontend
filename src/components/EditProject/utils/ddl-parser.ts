@@ -196,8 +196,13 @@ export function validateDDLSyntax(sql: string): ValidationMarker[] {
         }
         if (closedAt === -1) continue; // already caught as unbalanced paren
 
-        const afterClose = masked.slice(closedAt + 1).trimStart();
-        if (!afterClose.startsWith(";")) {
+        // Table options (ENGINE=InnoDB, DEFAULT CHARSET=..., COMMENT=...) may sit between ')' and ';'.
+        // The statement is only unterminated when the next statement starts before any ';'.
+        const rest = masked.slice(closedAt + 1);
+        const semiIdx = rest.indexOf(";");
+        const nextStmtIdx = rest.search(/\b(?:CREATE|ALTER|DROP|INSERT|GO)\b/i);
+        const terminated = semiIdx !== -1 && (nextStmtIdx === -1 || semiIdx < nextStmtIdx);
+        if (!terminated) {
             const lineNum = masked.slice(0, closedAt + 1).split("\n").length;
             const lineStart = masked.lastIndexOf("\n", closedAt) + 1;
             const col = closedAt - lineStart + 1;
@@ -210,6 +215,63 @@ export function validateDDLSyntax(sql: string): ValidationMarker[] {
                 severity: "error",
             });
         }
+    }
+
+    // ── 2b. Unknown statement keyword (e.g. "CREAT TABLE") ─────────
+    const KNOWN_STATEMENTS = new Set([
+        "CREATE", "ALTER", "DROP", "INSERT", "UPDATE", "DELETE", "SELECT", "SET", "USE", "GO", "BEGIN", "START",
+        "COMMIT", "ROLLBACK", "LOCK", "UNLOCK", "GRANT", "REVOKE", "COMMENT", "TRUNCATE", "WITH", "DELIMITER",
+        "PRAGMA", "EXEC", "EXECUTE", "DECLARE", "IF", "ANALYZE", "VACUUM", "RENAME", "COPY",
+    ]);
+    const editDistance = (a: string, b: string) => {
+        const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...new Array<number>(b.length).fill(0)]);
+        for (let j = 1; j <= b.length; j++) dp[0][j] = j;
+        for (let i = 1; i <= a.length; i++) {
+            for (let j = 1; j <= b.length; j++) {
+                dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+            }
+        }
+        return dp[a.length][b.length];
+    };
+    {
+        let depth = 0;
+        let quote: string | null = null;
+        let stmtStart = 0;
+        const flush = (end: number) => {
+            const text = masked.slice(stmtStart, end);
+            const lead = text.length - text.trimStart().length;
+            const word = text.trimStart().match(/^[A-Za-z_]+/)?.[0];
+            const at = stmtStart + lead;
+            stmtStart = end + 1;
+            if (!word) return;
+            const upper = word.toUpperCase();
+            if (KNOWN_STATEMENTS.has(upper)) return;
+            const lineNum = masked.slice(0, at).split("\n").length;
+            const col = at - (masked.lastIndexOf("\n", at - 1) + 1) + 1;
+            const near = ["CREATE", "ALTER", "DROP"].find((kw) => editDistance(upper, kw) <= 2);
+            markers.push({
+                startLineNumber: lineNum,
+                startColumn: col,
+                endLineNumber: lineNum,
+                endColumn: col + word.length,
+                message: near
+                    ? `Unknown statement "${word}" - did you mean ${near}?`
+                    : `Unrecognized statement "${word}" - it will be ignored.`,
+                severity: near ? "error" : "warning",
+            });
+        };
+        for (let i = 0; i < masked.length; i++) {
+            const ch = masked[i];
+            if (quote) {
+                if (ch === quote) quote = null;
+                continue;
+            }
+            if (ch === "'" || ch === '"' || ch === "`") quote = ch;
+            else if (ch === "(") depth++;
+            else if (ch === ")") depth = Math.max(0, depth - 1);
+            else if (ch === ";" && depth === 0) flush(i);
+        }
+        flush(masked.length);
     }
 
     // ── 3. REFERENCES without column list ─────────────────────────
@@ -340,6 +402,9 @@ function parseColumnList(str: string): string[] {
 
 // ── Main parser ──────────────────────────────────────────────────────
 
+/** Constraint/index name as it can appear in DDL: "quoted", `quoted`, [quoted] or a bare token. */
+const CONSTRAINT_NAME = '(?:"[^"]*"|`[^`]*`|\\[[^\\]]*\\]|\\S+)';
+
 /**
  * Parse SQL DDL text into structured table definitions.
  * Supports: CREATE TABLE, PRIMARY KEY, FOREIGN KEY, UNIQUE, NOT NULL,
@@ -352,7 +417,9 @@ export function parseDDL(sql: string): DDLParseResult {
     const clean = stripComments(sql);
 
     // ── Extract CREATE TABLE statements ──
-    const createTableRegex = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([^\s(]+)\s*\(([^]*?)\)\s*;/gi;
+    // Table options after the closing ')' (ENGINE=InnoDB, DEFAULT CHARSET=...) are skipped; the body is found by
+    // balancing parentheses instead of requiring ');'.
+    const createTableRegex = /CREATE\s+(?:(?:GLOBAL\s+|LOCAL\s+)?(?:TEMP|TEMPORARY)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:"[^"]*"|`[^`]*`|\[[^\]]*\]|[^\s(])+)\s*\(/gi;
     let match: RegExpExecArray | null;
 
     // Collect table names first for duplicate detection
@@ -360,7 +427,26 @@ export function parseDDL(sql: string): DDLParseResult {
 
     while ((match = createTableRegex.exec(clean)) !== null) {
         const tableName = stripSchemaPrefix(match[1]);
-        const body = match[2];
+        const openIdx = match.index + match[0].length - 1;
+        let depth = 0;
+        let closeIdx = -1;
+        let inQuote: string | null = null;
+        for (let i = openIdx; i < clean.length; i++) {
+            const ch = clean[i];
+            if (inQuote) {
+                if (ch === inQuote) inQuote = null;
+                continue;
+            }
+            if (ch === "'" || ch === '"' || ch === "`") inQuote = ch;
+            else if (ch === "(") depth++;
+            else if (ch === ")") {
+                depth--;
+                if (depth === 0) { closeIdx = i; break; }
+            }
+        }
+        if (closeIdx === -1) continue; // unbalanced - reported by validateDDLSyntax
+        const body = clean.slice(openIdx + 1, closeIdx);
+        createTableRegex.lastIndex = closeIdx + 1;
 
         // ── Duplicate table name warning ──
         const normalizedName = tableName.toLowerCase();
@@ -379,15 +465,15 @@ export function parseDDL(sql: string): DDLParseResult {
         for (const part of parts) {
             const upper = part.toUpperCase().trimStart();
 
-            // ── Table-level PRIMARY KEY ──
-            if (/^PRIMARY\s+KEY\b/i.test(upper)) {
+            // ── Table-level PRIMARY KEY (optionally CONSTRAINT <name>, name may be quoted) ──
+            if (new RegExp(`^(?:CONSTRAINT\\s+${CONSTRAINT_NAME}\\s+)?PRIMARY\\s+KEY\\b`, "i").test(upper)) {
                 const cols = parseColumnList(part);
                 primaryKeyColumns.push(...cols);
                 continue;
             }
 
             // ── Table-level FOREIGN KEY ──
-            if (/^(?:CONSTRAINT\s+\S+\s+)?FOREIGN\s+KEY\b/i.test(upper)) {
+            if (new RegExp(`^(?:CONSTRAINT\\s+${CONSTRAINT_NAME}\\s+)?FOREIGN\\s+KEY\\b`, "i").test(upper)) {
                 const fkMatch = part.match(
                     /FOREIGN\s+KEY\s*\(([^)]+)\)\s*REFERENCES\s+(\S+)\s*\(([^)]+)\)([^]*)?$/i
                 );
@@ -410,13 +496,31 @@ export function parseDDL(sql: string): DDLParseResult {
             }
 
             // ── Table-level UNIQUE ──
-            if (/^(?:CONSTRAINT\s+\S+\s+)?UNIQUE\b/i.test(upper)) {
+            if (new RegExp(`^(?:CONSTRAINT\\s+${CONSTRAINT_NAME}\\s+)?UNIQUE\\b`, "i").test(upper)) {
                 const cols = parseColumnList(part);
-                const constraintNameMatch = part.match(/CONSTRAINT\s+(\S+)/i);
+                const constraintNameMatch = part.match(new RegExp(`CONSTRAINT\\s+(${CONSTRAINT_NAME})`, "i"));
                 tableIndexes.push({
                     name: constraintNameMatch ? unquote(constraintNameMatch[1]) : `uq_${tableName}_${cols.join("_")}`,
                     columns: cols.map((c) => ({ columnName: c, order: "ASC" as const })),
                     isUnique: true,
+                });
+                continue;
+            }
+
+            // ── Table-level CHECK (not modelled) ──
+            if (new RegExp(`^(?:CONSTRAINT\\s+${CONSTRAINT_NAME}\\s+)?CHECK\\b`, "i").test(upper)) {
+                warnings.push(`Table "${tableName}": CHECK constraint is not supported and was ignored.`);
+                continue;
+            }
+
+            // ── MySQL inline index: KEY idx (cols) / INDEX idx (cols) / UNIQUE KEY idx (cols) ──
+            const inlineIndex = part.match(new RegExp(`^(UNIQUE\\s+)?(?:KEY|INDEX)\\s+(${CONSTRAINT_NAME})\\s*\\(`, "i"));
+            if (inlineIndex) {
+                const cols = parseColumnList(part);
+                tableIndexes.push({
+                    name: unquote(inlineIndex[2]),
+                    columns: cols.map((c) => ({ columnName: c, order: "ASC" as const })),
+                    isUnique: !!inlineIndex[1],
                 });
                 continue;
             }
@@ -447,6 +551,10 @@ export function parseDDL(sql: string): DDLParseResult {
                 dataType = dataType === "BIGSERIAL" ? "BIGINT" : dataType === "SMALLSERIAL" ? "SMALLINT" : "INTEGER";
             }
             if (/\bGENERATED\s+(?:ALWAYS|BY\s+DEFAULT)\s+AS\s+IDENTITY\b/i.test(colDef)) {
+                autoIncrement = true;
+            }
+            // SQL Server: INT IDENTITY(1,1)
+            if (/\bIDENTITY\s*\(/i.test(colDef)) {
                 autoIncrement = true;
             }
 

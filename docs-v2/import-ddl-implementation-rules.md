@@ -144,7 +144,15 @@ Validator tìm pattern:
 CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?\S+\s*\(
 ```
 
-Sau đó tìm dấu `)` đóng outermost parentheses. Nếu sau `)` không có `;`, tạo error.
+Sau đó tìm dấu `)` đóng outermost parentheses. Phần giữa `)` và `;` có thể là **table options** (`ENGINE=InnoDB`, `DEFAULT CHARSET=utf8mb4`, `COMMENT='...'`...), nên statement chỉ bị coi là thiếu `;` khi **không có `;` nào** hoặc câu lệnh kế tiếp (`CREATE/ALTER/DROP/INSERT/GO`) bắt đầu trước dấu `;` đầu tiên. Nếu thiếu, tạo error.
+
+### 4.4b. Từ khóa statement không nhận diện được
+
+Validator cắt masked text thành các statement theo `;` ở depth 0 (bỏ qua nội dung trong dấu nháy) và đọc từ đầu tiên của mỗi statement:
+
+- Từ nằm trong danh sách đã biết (`CREATE`, `ALTER`, `DROP`, `INSERT`, `SET`, `USE`, `GO`, `BEGIN`, `COMMIT`, `LOCK`, ...) -> bỏ qua.
+- Từ gần giống `CREATE`/`ALTER`/`DROP` (khoảng cách chỉnh sửa <= 2, vd `CREAT`) -> **error** `Unknown statement "CREAT" - did you mean CREATE?`.
+- Từ lạ khác -> **warning** `Unrecognized statement "X" - it will be ignored.`.
 
 Vị trí: `src/components/EditProject/utils/ddl-parser.ts:138`.
 
@@ -248,16 +256,14 @@ Vị trí: `src/components/EditProject/utils/ddl-parser.ts:306`.
 Parser dùng regex:
 
 ```regex
-CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([^\s(]+)\s*\(([^]*?)\)\s*;
+CREATE\s+(?:(?:GLOBAL\s+|LOCAL\s+)?(?:TEMP|TEMPORARY)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(<tên có thể bọc "..." / `...` / [...]>)\s*\(
 ```
 
 Ý nghĩa:
 
-- Bắt `CREATE TABLE`.
-- Cho phép `IF NOT EXISTS`.
-- Capture table identifier.
-- Capture body bên trong `(...)`.
-- Yêu cầu kết thúc bằng `;`.
+- Bắt `CREATE TABLE`, cho phép `TEMP/TEMPORARY` và `IF NOT EXISTS`.
+- Capture table identifier (kể cả tên có dấu nháy/schema prefix).
+- Body bên trong `(...)` **không** lấy bằng regex mà bằng cách đếm cân bằng ngoặc từ dấu `(` (bỏ qua nội dung trong dấu nháy), nên các **table options sau `)`** (`ENGINE=InnoDB`, `DEFAULT CHARSET=...`) bị bỏ qua và không làm bảng này "nuốt" bảng sau; `lastIndex` của regex được đặt sau dấu `)` đóng.
 
 Vị trí: `src/components/EditProject/utils/ddl-parser.ts:308`.
 
@@ -294,13 +300,12 @@ Vị trí: `src/components/EditProject/utils/ddl-parser.ts:326`.
 
 ### 6.5. Step 5: parse table-level PRIMARY KEY
 
-Nếu part match:
+Nếu part match `^(?:CONSTRAINT <tên>\s+)?PRIMARY\s+KEY\b` (tên constraint có thể bọc `"..."`, `` `...` `` hoặc `[...]`) thì parser lấy column list và push vào `primaryKeyColumns`. Cùng pattern tên constraint được dùng cho FOREIGN KEY, UNIQUE và CHECK. Nhờ vậy DDL do DBFlow xuất (`CONSTRAINT "pk_x" PRIMARY KEY (...)`) import lại đúng (trước đây dòng này bị coi là một cột tên `CONSTRAINT PK`).
 
-```regex
-^PRIMARY\s+KEY\b
-```
+Các part table-level khác:
 
-thì parser lấy column list và push vào `primaryKeyColumns`.
+- `CHECK (...)` (kể cả `CONSTRAINT x CHECK`): không được model hóa, bỏ qua và thêm warning.
+- MySQL `KEY|INDEX <tên> (cols)` và `UNIQUE KEY <tên> (cols)`: parse thành index của bảng.
 
 Ví dụ:
 
@@ -399,6 +404,8 @@ Vị trí: `src/components/EditProject/utils/ddl-parser.ts:388`.
 Lưu ý: multi-word type như `DOUBLE PRECISION` hiện chỉ lấy token đầu `DOUBLE`.
 
 ### 6.10. Step 10: detect auto increment
+
+Ngoài `AUTO_INCREMENT`, `SERIAL` và `GENERATED ... AS IDENTITY`, parser nhận cả SQL Server `IDENTITY(seed, step)` (vd `INT IDENTITY(1,1)`) là `autoIncrement = true`.
 
 Parser set `autoIncrement = true` nếu gặp một trong các pattern:
 
