@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useAcceptInvite } from "./api";
 import { notificationProvider } from "@/providers/notification";
 import { Button } from "antd";
+import { getApiErrorMessage } from "@/utils/functions";
 
 export default function AcceptInvite() {
   const searchParams = useSearchParams();
@@ -52,8 +53,7 @@ export default function AcceptInvite() {
       setStatus("error");
       notificationProvider.open({
         type: "error",
-        message: "Failed to accept invitation",
-        description: error instanceof Error ? error.message : "Something went wrong while accepting the invitation.",
+        message: getApiErrorMessage(error, "Failed to accept invitation"),
       });
     }
   };

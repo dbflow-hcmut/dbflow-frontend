@@ -41,3 +41,46 @@ export const getToken = async () => {
       return '';
   }
 };
+// Plan limit keys (backend SubscriptionsService/UsageService) -> text shown to the user.
+const QUOTA_LABELS: Record<string, string> = {
+    projects: "projects",
+    schemas_per_project: "schemas per project",
+    schema_versions_per_schema: "versions per schema",
+    db_connections: "database connections",
+    ai_requests_monthly: "AI requests this month",
+    exports_monthly: "exports this month",
+    document_storage_bytes: "document storage",
+    workspace_seats: "workspace seats",
+};
+
+const FEATURE_LABELS: Record<string, string> = {
+    export: "Schema & DDL export",
+    rollback: "Schema version rollback",
+    team_roles: "Team roles & permissions",
+};
+
+/** Turns backend quota/feature messages into readable text; other messages pass through. */
+export function mapQuotaMessage(message: string): string {
+    const quota = /^([a-z_]+) quota exceeded$/.exec(message);
+    if (quota && QUOTA_LABELS[quota[1]]) {
+        return `You have reached the limit of ${QUOTA_LABELS[quota[1]]} for your current plan. Please upgrade your plan to continue.`;
+    }
+    const feature = /^([a-z_]+) feature is not included in the current plan$/.exec(message);
+    if (feature && FEATURE_LABELS[feature[1]]) {
+        return `${FEATURE_LABELS[feature[1]]} is not included in your current plan. Please upgrade your plan to use it.`;
+    }
+    if (message === "Workspace seat limit reached") {
+        return "You have reached the limit of workspace seats for your current plan. Please upgrade your plan to continue.";
+    }
+    return message;
+}
+
+/**
+ * Message returned by the backend (`meta.message`, surfaced by clientFetch as Error.message),
+ * or `fallback` when the error carries no usable message. Quota/feature messages are mapped to readable text.
+ */
+export function getApiErrorMessage(error: unknown, fallback: string): string {
+    const raw = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+    const msg = raw.trim();
+    return msg && msg !== "Request failed" ? mapQuotaMessage(msg) : fallback;
+}

@@ -23,6 +23,7 @@ import { notificationProvider } from "@/providers/notification";
 import { SchemaType } from "@/utils/constants";
 import { revalidateProjectSchemas } from "@/app/projects/actions";
 import { mutate } from "swr";
+import { getApiErrorMessage } from "@/utils/functions";
 
 interface DbFlowControllerProps {
     flow: DbFlowName;
@@ -133,8 +134,7 @@ export default function DbFlowController({
             setSyncingSchema(false);
             notificationProvider.open({
                 type: "error",
-                message: "Sync failed",
-                description: err instanceof Error ? err.message : "Failed to sync schema",
+                message: getApiErrorMessage(err, "Sync failed"),
             });
         }
     }, [linkedConn, projectId, syncingSchema, onClose, onNewSchemaCreated]);

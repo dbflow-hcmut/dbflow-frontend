@@ -31,6 +31,7 @@ import type { DBConnection } from "@/types/db-connection.type";
 import { usePermissionDetector } from "@/components/EditProject/features/dbms/shared/use-permission-detector";
 import type { PermissionMatrix } from "@/components/EditProject/features/dbms/shared/types";
 import { getCachedSchemas, setCachedSchemas, pickDefaultSchema, setCachedSelectedSchema } from "@/utils/schema-session-cache";
+import { getApiErrorMessage } from "@/utils/functions";
 
 const DBMS_COLORS: Record<string, string> = {
     postgresql: "#336791",
@@ -169,10 +170,10 @@ export default function SyncSchemaStep({
             );
             await mutate(key);
             onChangeDb();
-        } catch {
+        } catch (error) {
             notificationProvider.open({
                 type: "error",
-                message: "Failed to disconnect",
+                message: getApiErrorMessage(error, "Failed to disconnect"),
                 description: "Could not unlink the database from this project.",
             });
         } finally {

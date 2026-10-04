@@ -55,6 +55,7 @@ import dayjs from "dayjs";
 import { formatBytes } from "@/utils/functions";
 import LoadingIndicator from "@/components/LoadingIndicator";
 import { clearActiveWorkspaceId } from "@/utils/active-workspace";
+import { getApiErrorMessage } from "@/utils/functions";
 
 type Props = { workspaceId: string; embedded?: boolean };
 type WorkspaceTab = "general" | "plan" | "orders" | "members" | "invitations" | "groups" | "activity";
@@ -186,8 +187,7 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
     } catch (error) {
       notificationProvider.open({
         type: "error",
-        message: "Failed to load workspace",
-        description: error instanceof Error ? error.message : undefined,
+        message: getApiErrorMessage(error, "Failed to load workspace"),
       });
     } finally {
       setLoading(false);
@@ -255,8 +255,7 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
     } catch (error) {
       notificationProvider.open({
         type: "error",
-        message: "Failed to update workspace",
-        description: error instanceof Error ? error.message : undefined,
+        message: getApiErrorMessage(error, "Failed to update workspace"),
       });
     } finally {
       setSaving(false);
@@ -277,8 +276,7 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
     } catch (error) {
       notificationProvider.open({
         type: "error",
-        message: "Failed to invite member",
-        description: error instanceof Error ? error.message : undefined,
+        message: getApiErrorMessage(error, "Failed to invite member"),
       });
     } finally {
       setSaving(false);
@@ -300,8 +298,7 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
     } catch (error) {
       notificationProvider.open({
         type: "error",
-        message: "Failed to update role",
-        description: error instanceof Error ? error.message : undefined,
+        message: getApiErrorMessage(error, "Failed to update role"),
       });
     } finally {
       setMemberActionId(undefined);
@@ -351,8 +348,7 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
     } catch (error) {
       notificationProvider.open({
         type: "error",
-        message: "Failed to create group",
-        description: error instanceof Error ? error.message : undefined,
+        message: getApiErrorMessage(error, "Failed to create group"),
       });
     } finally {
       setSaving(false);
@@ -380,8 +376,7 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
     } catch (error) {
       notificationProvider.open({
         type: "error",
-        message: "Failed to add member",
-        description: error instanceof Error ? error.message : undefined,
+        message: getApiErrorMessage(error, "Failed to add member"),
       });
     }
   };
@@ -414,8 +409,7 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
     } catch (error) {
       notificationProvider.open({
         type: "error",
-        message: "Failed to transfer ownership",
-        description: error instanceof Error ? error.message : undefined,
+        message: getApiErrorMessage(error, "Failed to transfer ownership"),
       });
     } finally {
       setSaving(false);
@@ -771,8 +765,7 @@ export default function WorkspaceSettings({ workspaceId, embedded = false }: Pro
                         } catch (error) {
                           notificationProvider.open({
                             type: "error",
-                            message: "Unable to open Stripe billing portal",
-                            description: error instanceof Error ? error.message : undefined,
+                            message: getApiErrorMessage(error, "Unable to open Stripe billing portal"),
                           });
                         }
                       }}

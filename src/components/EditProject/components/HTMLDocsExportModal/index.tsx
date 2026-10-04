@@ -10,6 +10,7 @@ import type { PhysicalModelPayload } from "../../utils/physical-model.builder";
 import type { LogicalModelPayload } from "../../utils/logical-model.builder";
 import type { ConceptualModelPayload } from "../../utils/conceptual-model.builder";
 import { trackExportUsage } from "@/api/exports/client";
+import { getApiErrorMessage } from "@/utils/functions";
 
 type SchemaModel = PhysicalModelPayload | LogicalModelPayload | ConceptualModelPayload;
 type SchemaKind = "physical" | "logical" | "conceptual";
@@ -144,7 +145,7 @@ const HTMLDocsExportModal: React.FC<HTMLDocsExportModalProps> = ({
             await navigator.clipboard.writeText(shareUrl);
             notificationProvider.open({ type: "success", message: "Share link copied to clipboard" });
         } catch (err) {
-            notificationProvider.open({ type: "error", message: "Failed to create share link" });
+            notificationProvider.open({ type: "error", message: getApiErrorMessage(err, "Failed to create share link") });
             console.error(err);
         } finally {
             setSharing(false);

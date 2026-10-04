@@ -11,6 +11,7 @@ import {
 import { mutate } from "swr";
 import { notificationProvider } from "@/providers/notification";
 import type { DBConnection } from "@/types/db-connection.type";
+import { getApiErrorMessage } from "@/utils/functions";
 
 const DBMS_COLORS: Record<string, string> = {
     postgresql: "#336791",
@@ -62,10 +63,10 @@ export default function ConnectDbStep({
                 description: `"${conn.name}" is now linked to this project.`,
             });
             onConnected();
-        } catch {
+        } catch (error) {
             notificationProvider.open({
                 type: "error",
-                message: "Failed to connect",
+                message: getApiErrorMessage(error, "Failed to connect"),
                 description: "Could not link the database to this project.",
             });
         } finally {

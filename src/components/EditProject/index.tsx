@@ -115,6 +115,7 @@ import type { LintResult } from "./utils/schema-linter";
 import LinterPanel from "./components/LinterPanel";
 import NormalizationPanel from "./components/NormalizationPanel";
 import type { DecomposedTable } from "./utils/normalization";
+import { getApiErrorMessage } from "@/utils/functions";
 
 export type EntityField = {
     id: string;
@@ -605,8 +606,8 @@ const EditProject = (props: IPropsEditProject) => {
                     nodeId: draftComment.nodeId ?? undefined,
                 });
                 await loadComments();
-            } catch {
-                notificationProvider.open({ type: "error", message: "Failed to create comment" });
+            } catch (error) {
+                notificationProvider.open({ type: "error", message: getApiErrorMessage(error, "Failed to create comment") });
             }
             setDraftComment(null);
             setCommentMode(false);
@@ -628,8 +629,8 @@ const EditProject = (props: IPropsEditProject) => {
                 x: parent.x, y: parent.y, content, parentId,
             });
             await loadComments();
-        } catch {
-            notificationProvider.open({ type: "error", message: "Failed to add reply" });
+        } catch (error) {
+            notificationProvider.open({ type: "error", message: getApiErrorMessage(error, "Failed to add reply") });
         }
     }, [projectData?.id, selectedSchema?.id, comments, loadComments]);
 
@@ -639,8 +640,8 @@ const EditProject = (props: IPropsEditProject) => {
             await updateComment(projectData.id, selectedSchema.id, commentId, { resolved: true });
             await loadComments();
             setActiveCommentId(null);
-        } catch {
-            notificationProvider.open({ type: "error", message: "Failed to resolve comment" });
+        } catch (error) {
+            notificationProvider.open({ type: "error", message: getApiErrorMessage(error, "Failed to resolve comment") });
         }
     }, [projectData?.id, selectedSchema?.id, loadComments]);
 
@@ -650,8 +651,8 @@ const EditProject = (props: IPropsEditProject) => {
             await deleteComment(projectData.id, selectedSchema.id, commentId);
             await loadComments();
             setActiveCommentId(null);
-        } catch {
-            notificationProvider.open({ type: "error", message: "Failed to delete comment" });
+        } catch (error) {
+            notificationProvider.open({ type: "error", message: getApiErrorMessage(error, "Failed to delete comment") });
         }
     }, [projectData?.id, selectedSchema?.id, loadComments]);
 
@@ -1890,7 +1891,7 @@ const EditProject = (props: IPropsEditProject) => {
                 };
             } catch (error) {
                 console.error("Failed to create cross-schema from chat:", error);
-                notificationProvider.open({ type: "error", message: "Failed to create new schema. Please try again." });
+                notificationProvider.open({ type: "error", message: getApiErrorMessage(error, "Failed to create new schema. Please try again.") });
             }
             return;
         }
@@ -2230,7 +2231,7 @@ const EditProject = (props: IPropsEditProject) => {
                 router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
             } catch (error) {
                 console.error("Failed to convert physical to logical:", error);
-                notificationProvider.open({ type: "error", message: "Failed to convert schema. Please try again." });
+                notificationProvider.open({ type: "error", message: getApiErrorMessage(error, "Failed to convert schema. Please try again.") });
                 setIsConverting(false);
             }
             return;
@@ -2258,7 +2259,7 @@ const EditProject = (props: IPropsEditProject) => {
                 router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
             } catch (error) {
                 console.error("Failed to convert logical to conceptual:", error);
-                notificationProvider.open({ type: "error", message: "Failed to convert schema. Please try again." });
+                notificationProvider.open({ type: "error", message: getApiErrorMessage(error, "Failed to convert schema. Please try again.") });
                 setIsConverting(false);
             }
             return;
@@ -2286,7 +2287,7 @@ const EditProject = (props: IPropsEditProject) => {
                 router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
             } catch (error) {
                 console.error("Failed to convert conceptual to logical:", error);
-                notificationProvider.open({ type: "error", message: "Failed to convert schema. Please try again." });
+                notificationProvider.open({ type: "error", message: getApiErrorMessage(error, "Failed to convert schema. Please try again.") });
                 setIsConverting(false);
             }
             return;
@@ -2314,7 +2315,7 @@ const EditProject = (props: IPropsEditProject) => {
                 router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
             } catch (error) {
                 console.error("Failed to convert physical to conceptual:", error);
-                notificationProvider.open({ type: "error", message: "Failed to convert schema. Please try again." });
+                notificationProvider.open({ type: "error", message: getApiErrorMessage(error, "Failed to convert schema. Please try again.") });
                 setIsConverting(false);
             }
             return;
@@ -2461,7 +2462,7 @@ const EditProject = (props: IPropsEditProject) => {
             router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
         } catch (error) {
             console.error("Failed to convert to physical:", error);
-            notificationProvider.open({ type: "error", message: "Failed to convert schema. Please try again." });
+            notificationProvider.open({ type: "error", message: getApiErrorMessage(error, "Failed to convert schema. Please try again.") });
             setIsConverting(false);
         }
     }, [pendingPhysicalConvert, projectData?.id, selectedSchema?.name, diagramName, router]);

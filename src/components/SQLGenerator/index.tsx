@@ -3,6 +3,7 @@ import { Select, Button, Space, Table, Form, Input, Checkbox, message, Tabs, Div
 import { CopyOutlined, DeleteOutlined, PlayCircleOutlined, ClearOutlined, PlusOutlined, MinusCircleOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { executeQueryDbConnection, QueryResultDto } from '@/api/db-connections/client';
+import { getApiErrorMessage } from "@/utils/functions";
 
 type QueryType = 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE';
 type QueryOperator = 'equals' | 'like' | 'greaterThan' | 'lessThan' | 'between';
@@ -303,7 +304,7 @@ const SQLGenerator: React.FC<SQLGeneratorProps> = ({
     } catch (error) {
       const hasFormErrors = typeof error === 'object' && error !== null && 'errorFields' in error;
       if (!hasFormErrors) {
-        message.error('Failed to generate query');
+        message.error(getApiErrorMessage(error, 'Failed to generate query'));
       }
     }
   }, [currentTable, form, queryType]);

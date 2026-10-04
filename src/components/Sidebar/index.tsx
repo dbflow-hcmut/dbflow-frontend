@@ -33,6 +33,7 @@ import { notificationProvider } from "@/providers/notification";
 import { getActiveWorkspaceId, setActiveWorkspaceId as persistActiveWorkspaceId } from "@/utils/active-workspace";
 import { ChatConversation, deleteConversation, getConversations } from "@/api/chat/client";
 import { getWorkspaceSubscription } from "@/api/subscriptions/client";
+import { getApiErrorMessage } from "@/utils/functions";
 
 interface NavItem {
   label: string;
@@ -191,8 +192,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose, mobile = fa
     } catch (error) {
       notificationProvider.open({
         type: "error",
-        message: "Unable to delete chat",
-        description: error instanceof Error ? error.message : undefined,
+        message: getApiErrorMessage(error, "Unable to delete chat"),
       });
     }
   };
@@ -440,8 +440,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose, mobile = fa
           .catch((error) => {
             notificationProvider.open({
               type: "error",
-              message: "Failed to create team",
-              description: error instanceof Error ? error.message : undefined,
+              message: getApiErrorMessage(error, "Failed to create team"),
             });
           })
           .finally(() => setCreatingTeam(false));

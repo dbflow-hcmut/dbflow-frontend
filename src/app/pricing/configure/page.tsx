@@ -11,6 +11,7 @@ import { ArrowLeft, Check, Minus, Plus, X } from "lucide-react";
 import { Input, Select, Skeleton } from "antd";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { getApiErrorMessage } from "@/utils/functions";
 
 type Cycle = "monthly" | "yearly";
 
@@ -43,8 +44,7 @@ export default function ConfigureTeamPlanPage() {
       })
       .catch((error) => notificationProvider.open({
         type: "error",
-        message: "Unable to load plan configuration",
-        description: error instanceof Error ? error.message : undefined,
+        message: getApiErrorMessage(error, "Unable to load plan configuration"),
       }))
       .finally(() => setLoading(false));
   }, [requestedPlanCode, requestedWorkspaceId]);
@@ -74,8 +74,7 @@ export default function ConfigureTeamPlanPage() {
     } catch (error) {
       notificationProvider.open({
         type: "error",
-        message: "Unable to create checkout",
-        description: error instanceof Error ? error.message : undefined,
+        message: getApiErrorMessage(error, "Unable to create checkout"),
       });
     } finally {
       setSubmitting(false);

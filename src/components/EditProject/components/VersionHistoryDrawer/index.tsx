@@ -48,6 +48,7 @@ import type { DBMSType } from "../../utils/dbms-config";
 import type { NodeData } from "../../index";
 import { SchemaType } from "@/utils/constants";
 import LazyDiffEditor from "./LazyDiffEditor";
+import { getApiErrorMessage } from "@/utils/functions";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -331,7 +332,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
             const data = await apiGet<VersionSummary[]>(PROXY_SCHEMA_VERSIONS(projectId, schemaId));
             setVersions(data ?? []);
         } catch (err) {
-            notificationProvider.open({ type: "error", message: "Failed to load versions" });
+            notificationProvider.open({ type: "error", message: getApiErrorMessage(err, "Failed to load versions") });
             console.error(err);
         } finally {
             setLoading(false);
@@ -362,7 +363,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
                 notificationProvider.open({ type: "error", message: "This version has no diagram snapshot. Try creating a new snapshot." });
             }
         } catch (err) {
-            notificationProvider.open({ type: "error", message: "Failed to load version" });
+            notificationProvider.open({ type: "error", message: getApiErrorMessage(err, "Failed to load version") });
             console.error(err);
         } finally {
             setLoadingPreview(null);
@@ -408,7 +409,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
             setNewLabel("");
             await fetchVersions();
         } catch (err) {
-            notificationProvider.open({ type: "error", message: "Failed to create version" });
+            notificationProvider.open({ type: "error", message: getApiErrorMessage(err, "Failed to create version") });
             console.error(err);
         } finally {
             setCreating(false);
@@ -434,7 +435,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
             notificationProvider.open({ type: "success", message: "Version restored. A backup of your previous state was saved." });
             await fetchVersions();
         } catch (err) {
-            notificationProvider.open({ type: "error", message: "Failed to restore version" });
+            notificationProvider.open({ type: "error", message: getApiErrorMessage(err, "Failed to restore version") });
             console.error(err);
         } finally {
             setRestoring(false);
@@ -478,7 +479,7 @@ const VersionHistoryDrawer: React.FC<VersionHistoryDrawerProps> = ({
             setDiffView("diagram");
             setDiagramsReady({ from: false, to: false });
         } catch (err) {
-            notificationProvider.open({ type: "error", message: "Failed to compare versions" });
+            notificationProvider.open({ type: "error", message: getApiErrorMessage(err, "Failed to compare versions") });
             console.error(err);
             setComparing(false);
         }
