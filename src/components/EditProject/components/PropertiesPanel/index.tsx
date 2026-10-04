@@ -252,7 +252,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                                     }}
                                                     onDrop={(e) => {
                                                         e.preventDefault();
-                                                        if (draggedIndex !== null && draggedIndex !== idx) {
+                                                        if (draggedIndex !== null && draggedIndex !== idx && Boolean(col.isKey) === Boolean((selectedNode.data as LogicalTableData).columns?.[draggedIndex]?.isKey)) {
                                                             onReorderLogicalTableAttributes?.(draggedIndex, idx);
                                                         }
                                                         setDraggedIndex(null);
@@ -457,7 +457,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                                     }}
                                                     onDrop={(e) => {
                                                         e.preventDefault();
-                                                        if (draggedIndex !== null && draggedIndex !== idx) {
+                                                        if (draggedIndex !== null && draggedIndex !== idx && Boolean(col.isPrimary) === Boolean((selectedNode.data as RelationTableData).columns?.[draggedIndex]?.isPrimary)) {
                                                             onReorderRelationTableColumns?.(draggedIndex, idx);
                                                         }
                                                         setDraggedIndex(null);

@@ -670,6 +670,10 @@ Duyệt các relationship có `type = "identifying"` và đúng 2 end hợp lệ
 
 Kết quả: `weakInfo: Map<weakEntityId, { ownerIds, relAttributes }>` và `identifyingRelIds` (các relationship đã được xử lý ở Step 2, bị bỏ qua ở Step 4/5).
 
+### 9.0.2. Tên trống
+
+Entity hoặc attribute (kể cả thành phần composite và thuộc tính của relationship) có tên rỗng hoặc chỉ toàn khoảng trắng được đặt tên mặc định duy nhất trước khi map (không sửa model đầu vào): entity `unnamed_entity`, attribute `unnamed_attribute`, thêm hậu tố `_2`, `_3`... khi trùng tên đã có (không phân biệt hoa/thường). Mỗi lần đặt tên mặc định có một notice `warning`.
+
 ### 9.1. Step 1: entities -> base tables
 
 Mỗi entity tạo một table:
@@ -689,7 +693,8 @@ Với từng attribute:
 
 - `derived`: bỏ qua, không lưu relational.
 - `multi_valued`: bỏ qua ở step này, xử lý riêng ở Step 6.
-- `composite` có components: flatten thành một column cho mỗi component (không có role key).
+- `composite` có components: flatten thành một column cho mỗi component. Nếu attribute composite được đánh dấu `isKey`, mỗi column thành phần là `primaryKey` (`nullable: false`, không `unique` riêng lẻ) và được tính vào số cột khóa của entity, nên khóa composite kết hợp với khóa đơn vẫn tạo một PK ghép; entity không còn bị tự thêm cột `id`.
+  Tên column thành phần: nếu tên đó xuất hiện nhiều hơn một lần trong table (giữa các thuộc tính thường và các thành phần composite, không phân biệt hoa/thường) thì thành phần được đặt tên `<tên composite cấp trên cùng>_<tên thành phần>` (thuộc tính thường giữ nguyên tên); nếu vẫn trùng thì thêm hậu tố số. Mỗi thành phần bị đổi tên có một notice `warning` ghi tên mới.
 - Attribute thường:
 
 ```ts
@@ -719,7 +724,7 @@ Nếu entity **không phải weak entity có owner** và không có key attribut
 }
 ```
 
-Column này được unshift vào đầu table. Weak entity có owner không được thêm `id`, vì PK của nó lấy từ owner (Step 2). Weak entity **không** có identifying relationship hợp lệ được coi như entity thường (có auto `id` nếu thiếu key).
+Column này được unshift vào đầu table. Tên là `id`; nếu entity đã có column tên `id` (không phân biệt hoa/thường) thì dùng `<entity>_id` (thêm hậu tố số nếu vẫn trùng). Weak entity có owner không được thêm `id`, vì PK của nó lấy từ owner (Step 2). Weak entity **không** có identifying relationship hợp lệ được coi như entity thường (có auto `id` nếu thiếu key).
 
 ### 9.2. Step 2: weak entities -> PK = PK owner + partial key
 
@@ -768,7 +773,31 @@ Với mỗi generalization:
 
 Lưu ý: class table inheritance luôn dùng child PK làm FK về parent. Step 3 chạy **sau** Step 2, nên parent là weak entity vẫn có PK đầy đủ; ngược lại, nếu một weak entity có owner là child của generalization thì PK của owner có thể chưa phản ánh phép kế thừa (giới hạn, xem mục 14).
 
+Nếu một `childEntityIds` của generalization không tồn tại thì bị bỏ qua và converter thêm notice `warning` "Generalization of <parent>: child entity "<id>" does not exist, so it was ignored" (hiển thị theo id vì entity không có tên); các con còn lại vẫn được chuyển bình thường.
+
+### 9.3.1. Step 3b: categories (union types) -> surrogate key hoặc khóa chung
+
+Theo EER step 9 (slide trang 85-86). Chạy sau Step 3, trước Step 4/5, cho từng phần tử của `conceptualModel.categories`:
+
+- Nếu category không có `categoryEntityId` (hoặc entity không tồn tại): `warning` "A category has no entity of its own, so it was not converted", bỏ qua.
+- `supers` = `superclassEntityIds` còn tồn tại và khác category; thiếu thì `warning`; rỗng thì `warning` và bỏ qua.
+- So sánh chữ ký khóa (tên cột PK, không phân biệt hoa/thường, đã sắp xếp) của tất cả superclass.
+
+**Khóa khác nhau** (ví dụ PERSON `Ssn`, BANK `Bname`, COMPANY `Cname` -> OWNER):
+
+1. Bảng category dùng khóa thay thế. Nếu entity category không có key attribute, cột `id` tự thêm ở Step 1 được đổi tên thành `<category>_id` (ví dụ `owner_id`); nếu có key attribute riêng thì dùng khóa đó.
+2. Mỗi bảng superclass thêm cột FK tới PK của category (`makeFkCols`, `primaryKey: false`, `nullable: true`, tên `<category>_id`).
+
+**Khóa giống nhau** (ví dụ CAR, TRUCK cùng `Vehicle_id` -> REGISTERED_VEHICLE):
+
+1. Bảng category dùng khóa chung làm PK (cột tự thêm `id` bị bỏ; key attribute khai báo riêng trên category được giữ lại thành cột `unique`).
+2. Cột PK của mỗi superclass đồng thời là FK trỏ về cột tương ứng của category (không thêm cột). Nếu cột PK của superclass đã là FK tới bảng khác (superclass là subclass trong generalization) thì không ghi đè, thêm `warning`.
+
+Quan hệ nối tới category (ví dụ OWNS N:M) được map ở Step 4/5 như entity thường, tham chiếu PK của bảng category. Completeness `total/partial` không ảnh hưởng schema quan hệ. Tên cột FK theo quy ước của tool (`registered_vehicle_id`), khác tên `Vehicle_id` trong slide nhưng cùng cấu trúc.
+
 ### 9.4. Step 4/5: relationships -> FK hoặc junction table
+
+Quy tắc tên bảng: mọi entity table được tạo trước (Step 1), nên `uniqueTableName(base)` so sánh `base` (không phân biệt hoa/thường) với tên của tất cả table đã có; nếu trùng thì thêm hậu tố `_2`, `_3`, ... cho đến khi duy nhất. Áp dụng cho junction table (binary N:M và n-ary) và table của multi-valued attribute. Chỉ khi `rel.name` do người dùng đặt mà bị đổi tên thì mới thêm notice `warning` ghi tên mới; tên do công cụ tự sinh (`A_B`) bị đổi thì không báo.
 
 Bỏ qua các identifying relationship đã xử lý ở Step 2. Code chỉ xử lý relationship có ít nhất 2 ends hợp lệ trong `tableMap`.
 
@@ -779,12 +808,20 @@ Bỏ qua các identifying relationship đã xử lý ở Step 2. Code chỉ xử
 
 Mọi FK đều dùng `makeFkCols`, tức luôn tham chiếu **toàn bộ PK** của bảng được tham chiếu (kể cả PK tổ hợp, ví dụ `article` -> `issue` sinh 3 cột FK).
 
+Cardinality chưa đặt: đầu không có `cardinality` được đọc là `1` ở quan hệ 2 ngôi (không phải "nhiều") và là nhiều (N) ở quan hệ n ngôi (giữ FK trong PK). Mỗi quan hệ có đầu bỏ trống sinh một notice `warning` nêu tên quan hệ, entity bị bỏ trống và cách đã đọc (one-to-one, one-to-many hoặc many (N)).
+
+Thuộc tính của relationship (áp dụng cho FK-table 1:N/1:1, junction N:M, junction n ngôi và bảng của weak entity với identifying relationship) đi qua helper `attributeColumns`:
+
+- `derived`: không lưu, `warning` "<label>.<attr>: derived attribute is not stored".
+- Có `components` (composite): một column cho mỗi thành phần đơn (lồng nhau được flatten xuống lá), `nullable: true`, không thuộc PK; thành phần `derived`/`multi_valued` bị bỏ kèm `warning`; thành phần trùng tên column đã có thì thêm tiền tố `<tên composite>_` (hậu tố số nếu vẫn trùng) và có `warning`. Theo slide trang 70 (n-ary) và trang 72 (composite → tập thành phần đơn).
+- Còn lại: một column mang tên thuộc tính.
+
 ### 9.4.1. N-ary relationship
 
 Điều kiện: `ends.length > 2`.
 
-1. Tạo junction table `tbl_${rel.id}`, tên `rel.name || participantNames.join("_")`.
-2. Mỗi participant sinh các cột FK (`primaryKey: true`, `nullable: false`) tham chiếu toàn bộ PK của participant; các cột này cùng tạo PK của junction.
+1. Tạo junction table `tbl_${rel.id}`, tên `rel.name || participantNames.join("_")`, rồi làm duy nhất bằng `uniqueTableName` (xem bên dưới).
+2. Mỗi participant sinh các cột FK (`nullable: false`) tham chiếu toàn bộ PK của participant. Participant có `cardinality === "1"` được xác định bởi các participant còn lại nên cột FK của nó KHÔNG thuộc PK; các cột FK của participant còn lại cùng tạo PK của junction. Nếu mọi participant đều là `"1"` thì cả các FK đều ở trong PK. Participant chưa đặt cardinality được coi là không phải `"1"` (giữ FK trong PK).
 3. `rel.attributes` thành cột thường (`nullable: true`).
 
 ### 9.4.2. Binary N:M
@@ -793,7 +830,7 @@ Mọi FK đều dùng `makeFkCols`, tức luôn tham chiếu **toàn bộ PK** c
 
 Converter chỉ nhận chính xác `N` hoặc `M` là phía many. Các dạng min-max như `0..N`, `1..N`, `(0,N)` chưa được parse và hiện sẽ rơi vào nhánh one; PropertiesPanel vì vậy chỉ cho chọn `1`, `N`, `M`.
 
-1. Tạo junction table `tbl_${rel.id}`, tên `rel.name || "${A.name}_${B.name}"`.
+1. Tạo junction table `tbl_${rel.id}`, tên `rel.name || "${A.name}_${B.name}"`, rồi làm duy nhất bằng `uniqueTableName` (xem bên dưới).
 2. Cột FK của phía A, rồi của phía B (`primaryKey: true`, `nullable: false`); tất cả cùng tạo PK của junction.
 3. N:M self-relationship: phía B dùng tiền tố `parent_` để không trùng tên.
 4. `rel.attributes` thành cột thường.
@@ -821,10 +858,14 @@ Participation: nullable của FK phụ thuộc `optional` của end chứa FK (e
 
 Mỗi attribute `multi_valued`:
 
-1. Tạo table `tbl_mv_${entity.id}_${attr.id}`, tên `${entity.name}_${attr.name}`.
+1. Tạo table `tbl_mv_${entity.id}_${attr.id}`, tên `${entity.name}_${attr.name}`, rồi làm duy nhất bằng `uniqueTableName`. Nếu multi-valued attribute có `components` (slide trang 66) thì bảng chứa một column cho mỗi thành phần đơn (qua `attributeColumns`, tiền tố tên attribute khi trùng với cột FK) thay vì một column mang tên attribute; PK = FK về owner + tất cả các column thành phần. Nếu không còn thành phần nào lưu được thì bỏ bảng và `warning`.
 2. Các cột FK tham chiếu **toàn bộ PK** của entity sở hữu (`primaryKey: true`, `nullable: false`).
 3. Cột giá trị `attr.name` (`nullable: false`, `primaryKey: true`).
 4. PK của table = (PK owner) + (cột giá trị).
+
+### 9.5.1. Kiểm tra tên trùng
+
+Trước khi trả kết quả, converter gom tên table, và tên column trong từng table, theo khóa so sánh `normalize("NFC")` + `trim()` + `toLowerCase()` (không phân biệt hoa/thường, bỏ khoảng trắng đầu/cuối, chuẩn hóa Unicode để chữ có dấu viết dạng precomposed hoặc dạng chữ + dấu rời được coi là một). Mỗi nhóm có từ hai tên trở lên sinh một notice `warning`; converter không đổi tên các cột/bảng này. Tên chỉ khác dấu (`Ma` / `Mã`) là hai tên khác nhau. Tên được giữ nguyên như người dùng nhập (kể cả dấu, khoảng trắng đầu/cuối và giữa tên, ký tự đặc biệt) vì DDL generator luôn đặt tên trong dấu nháy; đây là quyết định có chủ đích: khoảng trắng trong tên được coi là hợp lệ, kể cả trong tên tự sinh (`order item_id`, `học sinh_môn học`). Tên rỗng hoặc chỉ toàn khoảng trắng được xử lý ở mục 9.0.2.
 
 ### 9.6. Output
 
@@ -836,9 +877,11 @@ Mỗi attribute `multi_valued`:
         version: 1,
         notes: conceptualModel.model.notes,
     },
-    tables: Array.from(tableMap.values()),
+    tables: Array.from(tableMap.values()).map(t => ({ ...t, columns: pkColumnsFirst(t.columns) })),
 }
 ```
+
+**Thứ tự cột PK**: mọi cột `primaryKey` của một table (kể cả PK ghép) được gom thành một nhóm và xếp lên đầu table qua `pkColumnsFirst` (stable sort: thứ tự tương đối trong nhóm PK và trong nhóm cột còn lại giữ nguyên). Helper này được áp dụng ở output của Conceptual -> Logical, Logical -> Physical và Physical -> Logical, nên các table sau convert luôn có PK ở trên cùng. Khi user bật/tắt PK thủ công trong properties panel (`updateLogicalTableAttribute` với `isKey`, `updateRelationTableColumn` với `isPrimary` trong `utils/functions.ts`), table cũng được xếp lại bằng cùng quy tắc (`pkFirst`). Logical pin `column.id` trước khi xếp để handle không phụ thuộc vị trí; physical dùng tên cột làm handle nên edge không bị ảnh hưởng. Trong properties panel, kéo thả reorder chỉ được thả trong cùng nhóm: PK với PK (đổi thứ tự trong khóa tổ hợp) hoặc cột thường với cột thường; thả khác nhóm bị bỏ qua, nên PK luôn nằm trên cùng.
 
 Kiểm thử: `src/components/EditProject/utils/schema-conversion.test.ts` (chạy bằng `npx tsx src/components/EditProject/utils/schema-conversion.test.ts`), gồm bài Journal (weak entity `issue`, composite FK, junction `writes`), weak entity lồng nhau, participation -> nullability, khóa tổ hợp của strong entity.
 
@@ -940,7 +983,8 @@ Khác biệt quan trọng:
 ## 14. Những giới hạn và điểm cần chú ý
 
 1. Logical -> Conceptual là heuristic reverse-engineering, không khôi phục được đầy đủ semantic conceptual ban đầu.
-2. Category/union không được convert trong `convertConceptualToLogical`; output Logical không xử lý `conceptualModel.categories`.
+2. Category/union được convert ở Step 3b (mục 9.3.1). Ràng buộc "mỗi instance của category chỉ thuộc đúng một superclass" và `completeness` không thể hiện được trong schema quan hệ. Chiều ngược lại (Logical -> Conceptual) không khôi phục được category.
+   Generalization chỉ hỗ trợ MỘT cha (giới hạn có chủ đích của phạm vi đồ án): nếu `parentEntityIds` có nhiều phần tử thì chỉ dùng cha đầu tiên và `convertConceptualToLogical` thêm notice `warning` "multiple parents are not supported, only the first parent was used"; không tạo FK cho các cha còn lại.
 3. Logical -> Conceptual luôn output `categories: []`, `constraints: []`.
 4. Generalization reverse từ logical luôn default `disjoint + partial`.
 5. Relationship dedup Logical -> Conceptual dùng pair không phân biệt hướng; nhiều FK giữa cùng 2 table chỉ còn một relationship.
@@ -949,7 +993,7 @@ Khác biệt quan trọng:
 8. Weak entity detection yêu cầu composite PK có một phần là FK và có non-PK columns; weak entity không có non-PK column có thể bị phân loại khác.
 9. Multi-valued detection rất chặt: đúng 2 columns, cả 2 PK, đúng 1 FK, không có non-PK.
 10. Conceptual derived attributes bị bỏ khi sang Logical.
-11. Composite attributes bị flatten, không có metadata để reverse lại composite.
+11. Composite attributes bị flatten, không có metadata để reverse lại composite. Thuộc tính derived của relationship cũng bị bỏ (kèm cảnh báo) như derived của entity; slide không nói gì về derived, đây là quy ước của đồ án.
 12. Conceptual -> Logical relationship attributes trong 1:N/1:1 được đặt vào table chứa FK; attributes của identifying relationship được đặt vào bảng weak entity.
 13. Conceptual -> Logical self relationship dùng prefix `parent_` để tránh trùng tên FK column.
     FK tới bảng có PK tổ hợp sinh một cột FK cho mỗi cột PK, giữ tên cột PK (đã đảm bảo duy nhất bằng tiền tố `<refTable>_` / hậu tố số); FK nhiều cột luôn `unique: false`.
