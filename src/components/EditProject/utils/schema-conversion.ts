@@ -15,6 +15,12 @@ import type { PhysicalModelPayload } from "./physical-model.builder";
 import type { ConceptualModelPayload } from "./conceptual-model.builder";
 import type { DBMSType } from "./dbms-config";
 
+/** Something the user should know about after a conversion: data that was dropped (warning) or a rule applied automatically (info). */
+export type ConversionNotice = {
+    level: "warning" | "info";
+    message: string;
+};
+
 // ── ID generators ───────────────────────────────────────────────────────────────
 
 const generatePid = (): string => {
@@ -303,10 +309,39 @@ export interface ConvertPhysicalToLogicalOptions {
  *  - `comment` fields are merged into `notes` (comment takes priority).
  *  - `showFunctionalDependencies` flag and functional dependencies are carried over.
  */
-export const convertPhysicalToLogical = (
+export const convertPhysicalToLogicalWithNotices = (
     physicalModel: PhysicalModelPayload,
     opts: ConvertPhysicalToLogicalOptions = {},
-): LogicalModelPayload => {
+): { model: LogicalModelPayload; notices: ConversionNotice[] } => {
+    const notices: ConversionNotice[] = [];
+    const warn = (message: string) => notices.push({ level: "warning", message });
+    const physicalTables = physicalModel.tables ?? [];
+
+    // Physical-only data that the logical layer cannot hold
+    const indexed = physicalTables.filter((t) => (t.indexes?.length ?? 0) > 0).map((t) => t.name);
+    if (indexed.length > 0) warn(`Indexes not kept — ${indexed.join(", ")}.`);
+    const defaults = physicalTables.flatMap((t) =>
+        (t.columns ?? []).filter((c) => c.defaultValue).map((c) => `${t.name}.${c.name}`),
+    );
+    if (defaults.length > 0) warn(`Default values not kept — ${defaults.join(", ")}.`);
+    const fkActions = physicalTables.flatMap((t) =>
+        (t.columns ?? [])
+            .filter((c) => {
+                const fk = c.roles?.foreignKey;
+                return fk && ((fk.onDelete && fk.onDelete !== "NO ACTION") || (fk.onUpdate && fk.onUpdate !== "NO ACTION"));
+            })
+            .map((c) => `${t.name}.${c.name}`),
+    );
+    if (fkActions.length > 0) warn(`Foreign key ON DELETE / ON UPDATE actions not kept — ${fkActions.join(", ")}.`);
+    // comment takes priority over notes, so a different note is overwritten
+    const overwrittenNotes = physicalTables.flatMap((t) => [
+        ...(t.comment && t.notes && t.comment !== t.notes ? [t.name] : []),
+        ...(t.columns ?? [])
+            .filter((c) => c.comment && c.notes && c.comment !== c.notes)
+            .map((c) => `${t.name}.${c.name}`),
+    ]);
+    if (overwrittenNotes.length > 0) warn(`Notes replaced by the comment — ${overwrittenNotes.join(", ")}.`);
+
     const derivedName = physicalModel.model.name
         .replace(/physical/gi, "Logical")
         .replace(/Physical/g, "Logical");
@@ -316,7 +351,7 @@ export const convertPhysicalToLogical = (
             ? derivedName
             : `${physicalModel.model.name} (Logical)`);
 
-    return {
+    const logicalModel: LogicalModelPayload = {
         model: {
             id: opts.newModelId ?? generateLid(),
             name: modelName,
@@ -356,7 +391,14 @@ export const convertPhysicalToLogical = (
             })),
         })),
     };
+    return { model: logicalModel, notices };
 };
+
+/** Same conversion without the notices; see `convertPhysicalToLogicalWithNotices`. */
+export const convertPhysicalToLogical = (
+    physicalModel: PhysicalModelPayload,
+    opts: ConvertPhysicalToLogicalOptions = {},
+): LogicalModelPayload => convertPhysicalToLogicalWithNotices(physicalModel, opts).model;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  LOGICAL -> CONCEPTUAL   (major reverse-engineering logic)
@@ -413,7 +455,7 @@ type TableClassification = {
  *  4. WEAK:      composite PK (>= 2), partial FK among PKs, has non-PK cols.
  *  5. REGULAR:   everything else -> strong entity.
  */
-const classifyTables = (tables: LogicalTable[]): TableClassification[] => {
+export const classifyTables = (tables: LogicalTable[]): TableClassification[] => {
     const tableIdSet = new Set(tables.map((t) => t.id));
 
     return tables.map((table): TableClassification => {
@@ -519,10 +561,13 @@ const classifyTables = (tables: LogicalTable[]): TableClassification[] => {
  *   - Categories (union types): no representation in relational schema.
  *   - Exact disjointness / completeness semantics.
  */
-export const convertLogicalToConceptual = (
+export const convertLogicalToConceptualWithNotices = (
     logicalModel: LogicalModelPayload,
     opts: ConvertLogicalToConceptualOptions = {},
-): ConceptualModelPayload => {
+): { model: ConceptualModelPayload; notices: ConversionNotice[] } => {
+    const notices: ConversionNotice[] = [];
+    const warn = (message: string) => notices.push({ level: "warning", message });
+
     const derivedName = logicalModel.model.name
         .replace(/logical/gi, "Conceptual")
         .replace(/Logical/g, "Conceptual");
@@ -690,7 +735,10 @@ export const convertLogicalToConceptual = (
         if (cls.kind !== "WEAK" || !cls.weakOwnerId) continue;
 
         const pk = pairKey(cls.table.id, cls.weakOwnerId);
-        if (emittedRelPairs.has(pk)) continue;
+        if (emittedRelPairs.has(pk)) {
+            warn(`${cls.table.name}: identifying relationship was not created because a relationship between the same entities already exists.`);
+            continue;
+        }
         emittedRelPairs.add(pk);
 
         const ownerTable = tables.find((t) => t.id === cls.weakOwnerId);
@@ -717,11 +765,16 @@ export const convertLogicalToConceptual = (
         for (const col of table.columns ?? []) {
             if (!col.roles?.foreignKey) continue;
             const fk = col.roles.foreignKey;
-            if (!tableIdSet.has(fk.refTableId)) continue;
+            if (!tableIdSet.has(fk.refTableId)) {
+                warn(`${table.name}.${col.name}: foreign key references a table that does not exist, so no relationship was created.`);
+                continue;
+            }
 
             // Skip if the referenced table is a junction/MV (not an entity)
-            if (junctionTableIds.has(fk.refTableId) || mvTableIds.has(fk.refTableId))
+            if (junctionTableIds.has(fk.refTableId) || mvTableIds.has(fk.refTableId)) {
+                warn(`${table.name}.${col.name}: foreign key references a table that became a relationship/attribute, so no relationship was created.`);
                 continue;
+            }
 
             // Skip ISA FK (already represented as generalization)
             if (
@@ -741,10 +794,13 @@ export const convertLogicalToConceptual = (
 
             // Deduplicate by entity pair
             const pk = pairKey(table.id, fk.refTableId);
-            if (emittedRelPairs.has(pk)) continue;
+            const refTable = tables.find((t) => t.id === fk.refTableId);
+            if (emittedRelPairs.has(pk)) {
+                warn(`${table.name}.${col.name}: foreign key to ${refTable?.name ?? fk.refTableId} was merged into an existing relationship between the same entities.`);
+                continue;
+            }
             emittedRelPairs.add(pk);
 
-            const refTable = tables.find((t) => t.id === fk.refTableId);
             const relName = `${table.name}_${refTable?.name ?? fk.refTableId}`;
 
             relationships.push({
@@ -770,7 +826,15 @@ export const convertLogicalToConceptual = (
         }
     }
 
-    return {
+    // Data the conceptual layer has no place for
+    const withFds = tables.filter((t) => (t.functionalDependencies?.length ?? 0) > 0).map((t) => t.name);
+    if (withFds.length > 0) warn(`Functional dependencies not kept — ${withFds.join(", ")}.`);
+    const withColumnNotes = tables.flatMap((t) =>
+        (t.columns ?? []).filter((c) => c.notes).map((c) => `${t.name}.${c.name}`),
+    );
+    if (withColumnNotes.length > 0) warn(`Column notes not kept — ${withColumnNotes.join(", ")}.`);
+
+    const conceptualModel: ConceptualModelPayload = {
         model: {
             id: opts.newModelId ?? generateCid(),
             name: modelName,
@@ -783,7 +847,14 @@ export const convertLogicalToConceptual = (
         categories: [],
         constraints: [],
     };
+    return { model: conceptualModel, notices };
 };
+
+/** Same conversion without the notices; see `convertLogicalToConceptualWithNotices`. */
+export const convertLogicalToConceptual = (
+    logicalModel: LogicalModelPayload,
+    opts: ConvertLogicalToConceptualOptions = {},
+): ConceptualModelPayload => convertLogicalToConceptualWithNotices(logicalModel, opts).model;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CONCEPTUAL -> LOGICAL
@@ -833,10 +904,13 @@ export interface ConvertConceptualToLogicalOptions {
  *  Not representable:
  *   - Categories (union/category types) -> plain tables with no FK.
  */
-export const convertConceptualToLogical = (
+export const convertConceptualToLogicalWithNotices = (
     conceptualModel: ConceptualModelPayload,
     opts: ConvertConceptualToLogicalOptions = {},
-): LogicalModelPayload => {
+): { model: LogicalModelPayload; notices: ConversionNotice[] } => {
+    const notices: ConversionNotice[] = [];
+    const warn = (message: string) => notices.push({ level: "warning", message });
+
     const derivedName = conceptualModel.model.name
         .replace(/conceptual/gi, "Logical")
         .replace(/Conceptual/g, "Logical");
@@ -979,6 +1053,12 @@ export const convertConceptualToLogical = (
         identifyingRelIds.add(rel.id);
     }
 
+    for (const entity of entities) {
+        if (entity.kind === "weak" && !weakInfo.has(entity.id)) {
+            warn(`${entity.name}: weak entity has no usable identifying relationship, so it gets no owner key.`);
+        }
+    }
+
     // ── Step 1: Regular entities -> Tables with attribute columns ────────
     for (const entity of entities) {
         const columns: MutCol[] = [];
@@ -994,14 +1074,20 @@ export const convertConceptualToLogical = (
 
         for (const attr of entity.attributes ?? []) {
             // Derived attributes are not stored
-            if (attr.kind === "derived") continue;
+            if (attr.kind === "derived") {
+                warn(`${entity.name}.${attr.name}: derived attribute is not stored.`);
+                continue;
+            }
 
             // Multi-valued attributes become separate tables (handled in Step 6)
             if (attr.kind === "multi_valued") continue;
 
             if ((attr.kind === "composite" || attr.kind === "complex") && attr.components?.length) {
                 for (const comp of collectStoredAttributeLeaves(attr)) {
-                    if (comp.kind === "derived" || comp.kind === "multi_valued") continue;
+                    if (comp.kind === "derived" || comp.kind === "multi_valued") {
+                        warn(`${entity.name}.${attr.name}.${comp.name}: ${comp.kind === "derived" ? "derived" : "multi-valued"} component is not stored.`);
+                        continue;
+                    }
                     columns.push({
                         id: generateLid(),
                         name: comp.name,
@@ -1086,11 +1172,20 @@ export const convertConceptualToLogical = (
               ? [(gen as typeof gen & { parentEntityId: string }).parentEntityId]
               : [];
         const parentEntityId = parentEntityIds[0];
-        if (!parentEntityId) continue;
+        if (!parentEntityId) {
+            warn("A generalization has no parent entity, so it was not converted.");
+            continue;
+        }
 
         const parentPKs = getPKCols(parentEntityId);
         const parentTable = tableMap.get(parentEntityId);
-        if (parentPKs.length === 0 || !parentTable) continue;
+        if (parentPKs.length === 0 || !parentTable) {
+            warn(`Generalization of ${entityById.get(parentEntityId)?.name ?? parentEntityId}: parent has no primary key, so it was not converted.`);
+            continue;
+        }
+        if (parentEntityIds.length > 1) {
+            warn(`Generalization of ${parentTable.name}: multiple parents are not supported, only the first parent was used.`);
+        }
 
         for (const childId of gen.childEntityIds) {
             const childTable = tableMap.get(childId);
@@ -1099,6 +1194,9 @@ export const convertConceptualToLogical = (
             const existingPK = childTable.columns.find(
                 (c) => c.roles?.primaryKey,
             );
+            if (existingPK && !existingPK.roles?.foreignKey) {
+                warn(`${childTable.name}: own key "${existingPK.name}" was replaced by the key inherited from ${parentTable.name}.`);
+            }
             if (parentPKs.length > 1) {
                 // composite parent PK: child PK = all parent PK columns (each also FK)
                 for (const c of childTable.columns) {
@@ -1144,8 +1242,16 @@ export const convertConceptualToLogical = (
         // identifying relationships were mapped in Step 2
         if (identifyingRelIds.has(rel.id)) continue;
 
+        const relLabel = `Relationship ${rel.name || rel.id}`;
         const ends = (rel.ends ?? []).filter((e) => tableMap.has(e.entityId));
-        if (ends.length < 2) continue;
+        const missingEnds = (rel.ends?.length ?? 0) - ends.length;
+        if (missingEnds > 0) {
+            warn(`${relLabel}: ${missingEnds} participant(s) reference an entity that does not exist and were ignored, so the relationship was converted with ${ends.length} participant(s) instead of ${rel.ends.length}.`);
+        }
+        if (ends.length < 2) {
+            warn(`${relLabel}: connects fewer than 2 entities, so no foreign key was created.`);
+            continue;
+        }
 
         const relAttributes = rel.attributes ?? [];
 
@@ -1175,6 +1281,8 @@ export const convertConceptualToLogical = (
                     name: junctionName,
                     columns: cols,
                 });
+            } else {
+                warn(`${relLabel}: participating entities have no primary key, so no junction table was created.`);
             }
             continue;
         }
@@ -1186,7 +1294,10 @@ export const convertConceptualToLogical = (
 
         if (isAMany && isBMany) {
             // N:M -> junction table (FK columns of both sides form the PK)
-            if (getPKCols(endA.entityId).length === 0 || getPKCols(endB.entityId).length === 0) continue;
+            if (getPKCols(endA.entityId).length === 0 || getPKCols(endB.entityId).length === 0) {
+                warn(`${relLabel}: a participating entity has no primary key, so no junction table was created.`);
+                continue;
+            }
             const tableA = tableMap.get(endA.entityId)!;
             const tableB = tableMap.get(endB.entityId)!;
             const junctionId = `tbl_${rel.id}`;
@@ -1246,7 +1357,10 @@ export const convertConceptualToLogical = (
                 unique: !isAMany && !isBMany, // 1:1 -> unique
                 selfRef: endA.entityId === endB.entityId,
             });
-            if (fkCols.length === 0) continue;
+            if (fkCols.length === 0) {
+                warn(`${relLabel}: ${tableMap.get(refEnd.entityId)?.name} has no primary key to reference, so no foreign key was created.`);
+                continue;
+            }
             fkTable.columns.push(...fkCols);
             for (const rAttr of relAttributes) {
                 fkTable.columns.push({
@@ -1273,7 +1387,10 @@ export const convertConceptualToLogical = (
                 primaryKey: true,
                 nullable: false,
             });
-            if (cols.length === 0) continue;
+            if (cols.length === 0) {
+                warn(`${entity.name}.${attr.name}: multi-valued attribute dropped because ${entity.name} has no primary key.`);
+                continue;
+            }
             cols.push({
                 id: generateLid(),
                 name: attr.name,
@@ -1289,16 +1406,29 @@ export const convertConceptualToLogical = (
         }
     }
 
+    if ((conceptualModel.categories?.length ?? 0) > 0) {
+        warn("Categories (union types) cannot be represented: they were not converted.");
+    }
+
     return {
         model: {
-            id: opts.newModelId ?? generateLid(),
-            name: modelName,
-            version: 1,
-            notes: conceptualModel.model.notes,
+            model: {
+                id: opts.newModelId ?? generateLid(),
+                name: modelName,
+                version: 1,
+                notes: conceptualModel.model.notes,
+            },
+            tables: Array.from(tableMap.values()),
         },
-        tables: Array.from(tableMap.values()),
+        notices,
     };
 };
+
+/** Same conversion without the notices; see `convertConceptualToLogicalWithNotices`. */
+export const convertConceptualToLogical = (
+    conceptualModel: ConceptualModelPayload,
+    opts: ConvertConceptualToLogicalOptions = {},
+): LogicalModelPayload => convertConceptualToLogicalWithNotices(conceptualModel, opts).model;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  PHYSICAL -> CONCEPTUAL (two-step chain)
@@ -1318,10 +1448,10 @@ export interface ConvertPhysicalToConceptualOptions {
  *
  * See `convertPhysicalToLogical` and `convertLogicalToConceptual` for full rules.
  */
-export const convertPhysicalToConceptual = (
+export const convertPhysicalToConceptualWithNotices = (
     physicalModel: PhysicalModelPayload,
     opts: ConvertPhysicalToConceptualOptions = {},
-): ConceptualModelPayload => {
+): { model: ConceptualModelPayload; notices: ConversionNotice[] } => {
     const derivedName = physicalModel.model.name
         .replace(/physical/gi, "Conceptual")
         .replace(/Physical/g, "Conceptual");
@@ -1331,12 +1461,19 @@ export const convertPhysicalToConceptual = (
             ? derivedName
             : `${physicalModel.model.name} (Conceptual)`);
 
-    const logicalModel = convertPhysicalToLogical(physicalModel);
-    return convertLogicalToConceptual(logicalModel, {
+    const toLogical = convertPhysicalToLogicalWithNotices(physicalModel);
+    const toConceptual = convertLogicalToConceptualWithNotices(toLogical.model, {
         newModelId: opts.newModelId,
         newModelName: modelName,
     });
+    return { model: toConceptual.model, notices: [...toLogical.notices, ...toConceptual.notices] };
 };
+
+/** Same conversion without the notices; see `convertPhysicalToConceptualWithNotices`. */
+export const convertPhysicalToConceptual = (
+    physicalModel: PhysicalModelPayload,
+    opts: ConvertPhysicalToConceptualOptions = {},
+): ConceptualModelPayload => convertPhysicalToConceptualWithNotices(physicalModel, opts).model;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CONCEPTUAL -> PHYSICAL (two-step chain)
@@ -1358,10 +1495,10 @@ export interface ConvertConceptualToPhysicalOptions {
  *
  * See `convertConceptualToLogical` and `convertLogicalToPhysical` for full rules.
  */
-export const convertConceptualToPhysical = (
+export const convertConceptualToPhysicalWithNotices = (
     conceptualModel: ConceptualModelPayload,
     opts: ConvertConceptualToPhysicalOptions = {},
-): PhysicalModelPayload => {
+): { model: PhysicalModelPayload; notices: ConversionNotice[] } => {
     const derivedName = conceptualModel.model.name
         .replace(/conceptual/gi, "Physical")
         .replace(/Conceptual/g, "Physical");
@@ -1371,10 +1508,18 @@ export const convertConceptualToPhysical = (
             ? derivedName
             : `${conceptualModel.model.name} (Physical)`);
 
-    const logicalModel = convertConceptualToLogical(conceptualModel);
-    return convertLogicalToPhysical(logicalModel, {
+    // Logical -> Physical loses nothing, so only the first step contributes notices
+    const toLogical = convertConceptualToLogicalWithNotices(conceptualModel);
+    const physical = convertLogicalToPhysical(toLogical.model, {
         newModelId: opts.newModelId,
         newModelName: modelName,
         dbms: opts.dbms,
     });
+    return { model: physical, notices: toLogical.notices };
 };
+
+/** Same conversion without the notices; see `convertConceptualToPhysicalWithNotices`. */
+export const convertConceptualToPhysical = (
+    conceptualModel: ConceptualModelPayload,
+    opts: ConvertConceptualToPhysicalOptions = {},
+): PhysicalModelPayload => convertConceptualToPhysicalWithNotices(conceptualModel, opts).model;

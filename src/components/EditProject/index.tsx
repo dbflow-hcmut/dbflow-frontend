@@ -53,6 +53,8 @@ import DbFlowController from "@/components/db-flow/DbFlowController";
 import ExportHistoryDrawer from "./features/dbms/schema-export/ExportHistoryDrawer";
 import DDLImportModal from "./components/DDLImportModal";
 import ConvertToPhysicalModal from "./components/ConvertToPhysicalModal";
+import ConversionReportModal from "./components/ConversionReportModal";
+import type { ConversionNotice } from "./utils/schema-conversion";
 import { getDBMSConfig, type DBMSType } from "./utils/dbms-config";
 import HTMLDocsExportModal from "./components/HTMLDocsExportModal";
 import VersionHistoryDrawer from "./components/VersionHistoryDrawer";
@@ -83,7 +85,7 @@ import { getFkSourceCardinality, isColumnAloneUnique } from "./utils/edge-cardin
 import { findColumnIndexByHandle } from "./utils/logical-column-handle";
 import { collectReferencingColumns, getReferencingColumnType } from "./utils/physical-column-type";
 import { choosePkOwner } from "./utils/fd-cleanup";
-import { convertLogicalToPhysical, convertPhysicalToLogical, convertLogicalToConceptual, convertConceptualToLogical, convertPhysicalToConceptual, convertConceptualToPhysical } from "./utils/schema-conversion";
+import { convertLogicalToPhysical, convertPhysicalToLogicalWithNotices, convertLogicalToConceptualWithNotices, convertConceptualToLogicalWithNotices, convertPhysicalToConceptualWithNotices, convertConceptualToPhysicalWithNotices } from "./utils/schema-conversion";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import { useCopyPasteSchema } from "./hooks/useCopyPasteSchema";
 import ShareProject from "@/components/ShareProject";
@@ -402,6 +404,7 @@ const EditProject = (props: IPropsEditProject) => {
         sourceLevel: "logical" | "conceptual";
         freshModel: LogicalModelPayload | ConceptualModelPayload;
     } | null>(null);
+    const [pendingConversionReport, setPendingConversionReport] = useState<{ targetSchemaId: string; targetLabel: string; action: "created" | "synced"; notices: ConversionNotice[] } | null>(null);
     const [isShareProjectOpen, setIsShareProjectOpen] = useState(false);
     const [exportInitialConfig, setExportInitialConfig] = useState<{ format: ExportFormat; scope: ExportScope }>({ format: 'png', scope: 'all' });
     const [isLinterOpen, setIsLinterOpen] = useState(false);
@@ -2167,40 +2170,69 @@ const EditProject = (props: IPropsEditProject) => {
         ],
     );
 
-    // ── Schema conversion (logical ↔ physical done directly; others via AI) ──
-    const handleConvertSchema = useCallback(async (targetType: string) => {
-        // Helper: rebuild fresh model from current canvas nodes/edges,
-        // falling back to the collaboration hook's cached model if canvas is empty.
-        const buildFreshLogicalModel = () => {
-            const storedNodes = mapLogicalReactToStored(nodes);
-            const storedEdges = mapLogicalReactEdgesToStored(edges, nodes);
-            if (storedNodes.length > 0) {
-                return buildLogicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
-            }
-            return _logicalModelData;
-        };
-
-        const buildFreshPhysicalModel = () => {
-            const storedNodes = mapPhysicalReactToStored(nodes);
-            const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
-            if (storedNodes.length > 0) {
-                return buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name, dbms: (_physicalModelData as any)?.model?.dbms });
-            }
-            return _physicalModelData;
-        };
-
-        const buildFreshConceptualModel = () => {
+    const getCurrentModel = useCallback((): ConceptualModelPayload | LogicalModelPayload | PhysicalModelPayload | null => {
+        if (isConceptualSchema) {
             const storedNodes = mapConceptualReactToStored(nodes, edges);
             const storedEdges = mapConceptualReactEdgesToStored(edges, nodes);
-            if (storedNodes.length > 0) {
-                return buildConceptualModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
-            }
-            return _conceptualModelData;
-        };
+            return storedNodes.length > 0
+                ? buildConceptualModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
+                : _conceptualModelData;
+        }
 
+        if (isLogicalSchema) {
+            const storedNodes = mapLogicalReactToStored(nodes);
+            const storedEdges = mapLogicalReactEdgesToStored(edges, nodes);
+            return storedNodes.length > 0
+                ? buildLogicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name })
+                : _logicalModelData;
+        }
+
+        if (isPhysicalSchema) {
+            const storedNodes = mapPhysicalReactToStored(nodes);
+            const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
+            return storedNodes.length > 0
+                ? buildPhysicalModel({
+                    storedNodes,
+                    storedEdges,
+                    runtimeNodes: nodes,
+                    schemaId: selectedSchema?.id,
+                    schemaName: selectedSchema?.name,
+                    dbms: _physicalModelData?.model?.dbms,
+                })
+                : _physicalModelData;
+        }
+
+        return null;
+    }, [
+        isConceptualSchema,
+        isLogicalSchema,
+        isPhysicalSchema,
+        nodes,
+        edges,
+        selectedSchema?.id,
+        selectedSchema?.name,
+        _conceptualModelData,
+        _logicalModelData,
+        _physicalModelData,
+    ]);
+
+    // ── Schema conversion (logical ↔ physical done directly; others via AI) ──
+    // After a conversion: show the notices popup (stay / open) if there are any, otherwise go straight to the new schema.
+    const finishConversion = useCallback((targetSchemaId: string, targetLabel: string, notices: ConversionNotice[], action: "created" | "synced" = "created") => {
+        if (!projectData?.id) return;
+        if (notices.length > 0) {
+            notificationProvider.open({ type: "success", message: action === "synced" ? "Schema synced successfully" : `${targetLabel} schema created` });
+            setPendingConversionReport({ targetSchemaId, targetLabel, action, notices });
+        } else {
+            notificationProvider.open({ type: "success", message: action === "synced" ? "Schema synced — switching now" : `${targetLabel} schema created — switching now` });
+            router.push(`/projects/${projectData.id}?schemaId=${targetSchemaId}`);
+        }
+    }, [projectData?.id, router]);
+
+    const handleConvertSchema = useCallback(async (targetType: string) => {
         // Direct, deterministic conversion: logical → physical (opens DBMS picker first)
         if (isLogicalSchema && targetType === SchemaType.PHYSICAL && projectData?.id) {
-            const freshModel = buildFreshLogicalModel();
+            const freshModel = getCurrentModel() as LogicalModelPayload | null;
             if (!freshModel) {
                 notificationProvider.open({ type: "error", message: "Logical model is not loaded yet. Please wait and try again." });
                 return;
@@ -2211,14 +2243,14 @@ const EditProject = (props: IPropsEditProject) => {
 
         // Direct, deterministic conversion: physical → logical
         if (isPhysicalSchema && targetType === SchemaType.LOGICAL && projectData?.id) {
-            const freshModel = buildFreshPhysicalModel();
+            const freshModel = getCurrentModel() as PhysicalModelPayload | null;
             if (!freshModel) {
                 notificationProvider.open({ type: "error", message: "Physical model is not loaded yet. Please wait and try again." });
                 return;
             }
             setIsConverting(true);
             try {
-                const logicalModel = convertPhysicalToLogical(freshModel, {
+                const { model: logicalModel, notices } = convertPhysicalToLogicalWithNotices(freshModel, {
                     newModelName: `${diagramName} (Logical)`,
                 });
                 const newSchema = await createSchema(projectData.id, {
@@ -2226,9 +2258,8 @@ const EditProject = (props: IPropsEditProject) => {
                     type: SchemaType.LOGICAL,
                 });
                 await saveSchemaModel(projectData.id, newSchema.id, logicalModel as Record<string, unknown>);
-                notificationProvider.open({ type: "success", message: "Logical schema created — switching now" });
                 setIsConverting(false);
-                router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
+                finishConversion(newSchema.id, "Logical", notices);
             } catch (error) {
                 console.error("Failed to convert physical to logical:", error);
                 notificationProvider.open({ type: "error", message: getApiErrorMessage(error, "Failed to convert schema. Please try again.") });
@@ -2239,14 +2270,14 @@ const EditProject = (props: IPropsEditProject) => {
 
         // Direct, deterministic conversion: logical → conceptual
         if (isLogicalSchema && targetType === SchemaType.CONCEPTUAL && projectData?.id) {
-            const freshModel = buildFreshLogicalModel();
+            const freshModel = getCurrentModel() as LogicalModelPayload | null;
             if (!freshModel) {
                 notificationProvider.open({ type: "error", message: "Logical model is not loaded yet. Please wait and try again." });
                 return;
             }
             setIsConverting(true);
             try {
-                const conceptualModel = convertLogicalToConceptual(freshModel, {
+                const { model: conceptualModel, notices } = convertLogicalToConceptualWithNotices(freshModel, {
                     newModelName: `${diagramName} (Conceptual)`,
                 });
                 const newSchema = await createSchema(projectData.id, {
@@ -2254,9 +2285,8 @@ const EditProject = (props: IPropsEditProject) => {
                     type: SchemaType.CONCEPTUAL,
                 });
                 await saveSchemaModel(projectData.id, newSchema.id, conceptualModel as Record<string, unknown>);
-                notificationProvider.open({ type: "success", message: "Conceptual schema created — switching now" });
                 setIsConverting(false);
-                router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
+                finishConversion(newSchema.id, "Conceptual", notices);
             } catch (error) {
                 console.error("Failed to convert logical to conceptual:", error);
                 notificationProvider.open({ type: "error", message: getApiErrorMessage(error, "Failed to convert schema. Please try again.") });
@@ -2267,14 +2297,14 @@ const EditProject = (props: IPropsEditProject) => {
 
         // Direct, deterministic conversion: conceptual → logical
         if (isConceptualSchema && targetType === SchemaType.LOGICAL && projectData?.id) {
-            const freshModel = buildFreshConceptualModel();
+            const freshModel = getCurrentModel() as ConceptualModelPayload | null;
             if (!freshModel) {
                 notificationProvider.open({ type: "error", message: "Conceptual model is not loaded yet. Please wait and try again." });
                 return;
             }
             setIsConverting(true);
             try {
-                const logicalModel = convertConceptualToLogical(freshModel, {
+                const { model: logicalModel, notices } = convertConceptualToLogicalWithNotices(freshModel, {
                     newModelName: `${diagramName} (Logical)`,
                 });
                 const newSchema = await createSchema(projectData.id, {
@@ -2282,9 +2312,8 @@ const EditProject = (props: IPropsEditProject) => {
                     type: SchemaType.LOGICAL,
                 });
                 await saveSchemaModel(projectData.id, newSchema.id, logicalModel as Record<string, unknown>);
-                notificationProvider.open({ type: "success", message: "Logical schema created — switching now" });
                 setIsConverting(false);
-                router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
+                finishConversion(newSchema.id, "Logical", notices);
             } catch (error) {
                 console.error("Failed to convert conceptual to logical:", error);
                 notificationProvider.open({ type: "error", message: getApiErrorMessage(error, "Failed to convert schema. Please try again.") });
@@ -2295,14 +2324,14 @@ const EditProject = (props: IPropsEditProject) => {
 
         // Direct, deterministic conversion: physical → conceptual
         if (isPhysicalSchema && targetType === SchemaType.CONCEPTUAL && projectData?.id) {
-            const freshModel = buildFreshPhysicalModel();
+            const freshModel = getCurrentModel() as PhysicalModelPayload | null;
             if (!freshModel) {
                 notificationProvider.open({ type: "error", message: "Physical model is not loaded yet. Please wait and try again." });
                 return;
             }
             setIsConverting(true);
             try {
-                const conceptualModel = convertPhysicalToConceptual(freshModel, {
+                const { model: conceptualModel, notices } = convertPhysicalToConceptualWithNotices(freshModel, {
                     newModelName: `${diagramName} (Conceptual)`,
                 });
                 const newSchema = await createSchema(projectData.id, {
@@ -2310,9 +2339,8 @@ const EditProject = (props: IPropsEditProject) => {
                     type: SchemaType.CONCEPTUAL,
                 });
                 await saveSchemaModel(projectData.id, newSchema.id, conceptualModel as Record<string, unknown>);
-                notificationProvider.open({ type: "success", message: "Conceptual schema created — switching now" });
                 setIsConverting(false);
-                router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
+                finishConversion(newSchema.id, "Conceptual", notices);
             } catch (error) {
                 console.error("Failed to convert physical to conceptual:", error);
                 notificationProvider.open({ type: "error", message: getApiErrorMessage(error, "Failed to convert schema. Please try again.") });
@@ -2323,7 +2351,7 @@ const EditProject = (props: IPropsEditProject) => {
 
         // Direct, deterministic conversion: conceptual → physical (opens DBMS picker first)
         if (isConceptualSchema && targetType === SchemaType.PHYSICAL && projectData?.id) {
-            const freshModel = buildFreshConceptualModel();
+            const freshModel = getCurrentModel() as ConceptualModelPayload | null;
             if (!freshModel) {
                 notificationProvider.open({ type: "error", message: "Conceptual model is not loaded yet. Please wait and try again." });
                 return;
@@ -2334,7 +2362,7 @@ const EditProject = (props: IPropsEditProject) => {
 
         // Fallback: open ChatBox with a conversion hint for AI-assisted conversions
         // (still passes fresh model via currentModel prop of ChatBox)
-        void buildFreshConceptualModel(); // ensure conceptual model is fresh if needed
+        void getCurrentModel();
         setIsChatBoxOpen(true);
         setChatThreadId(undefined);
         const params = new URLSearchParams(searchParams.toString());
@@ -2345,11 +2373,8 @@ const EditProject = (props: IPropsEditProject) => {
         isConceptualSchema,
         isLogicalSchema,
         isPhysicalSchema,
-        nodes,
-        edges,
-        _logicalModelData,
-        _physicalModelData,
-        _conceptualModelData,
+        getCurrentModel,
+        finishConversion,
         selectedSchema?.id,
         selectedSchema?.name,
         projectData?.id,
@@ -2362,52 +2387,44 @@ const EditProject = (props: IPropsEditProject) => {
     const handleSyncToSchema = useCallback(async (targetSchemaId: string, targetSchemaType: string) => {
         if (!projectData?.id) return;
 
-        const buildFreshLogical = () => {
-            const storedNodes = mapLogicalReactToStored(nodes);
-            const storedEdges = mapLogicalReactEdgesToStored(edges, nodes);
-            if (storedNodes.length > 0) return buildLogicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
-            return _logicalModelData;
-        };
-        const buildFreshPhysical = () => {
-            const storedNodes = mapPhysicalReactToStored(nodes);
-            const storedEdges = mapPhysicalReactEdgesToStored(edges, nodes);
-            if (storedNodes.length > 0) return buildPhysicalModel({ storedNodes, storedEdges, runtimeNodes: nodes, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name, dbms: (_physicalModelData as any)?.model?.dbms });
-            return _physicalModelData;
-        };
-        const buildFreshConceptual = () => {
-            const storedNodes = mapConceptualReactToStored(nodes, edges);
-            const storedEdges = mapConceptualReactEdgesToStored(edges, nodes);
-            if (storedNodes.length > 0) return buildConceptualModel({ storedNodes, storedEdges, schemaId: selectedSchema?.id, schemaName: selectedSchema?.name });
-            return _conceptualModelData;
-        };
-
         const targetDbms = schemaList.find(s => s.id === targetSchemaId)?.dbms as DBMSType | undefined;
 
         let convertedModel: Record<string, unknown> | null = null;
+        let syncNotices: ConversionNotice[] = [];
         if (isLogicalSchema && targetSchemaType === SchemaType.PHYSICAL) {
-            const fresh = buildFreshLogical();
+            const fresh = getCurrentModel() as LogicalModelPayload | null;
             if (!fresh) { notificationProvider.open({ type: 'error', message: 'Logical model is not loaded yet.' }); return; }
             convertedModel = convertLogicalToPhysical(fresh, { dbms: targetDbms }) as Record<string, unknown>;
         } else if (isLogicalSchema && targetSchemaType === SchemaType.CONCEPTUAL) {
-            const fresh = buildFreshLogical();
+            const fresh = getCurrentModel() as LogicalModelPayload | null;
             if (!fresh) { notificationProvider.open({ type: 'error', message: 'Logical model is not loaded yet.' }); return; }
-            convertedModel = convertLogicalToConceptual(fresh) as Record<string, unknown>;
+            const result = convertLogicalToConceptualWithNotices(fresh);
+            convertedModel = result.model as Record<string, unknown>;
+            syncNotices = result.notices;
         } else if (isPhysicalSchema && targetSchemaType === SchemaType.LOGICAL) {
-            const fresh = buildFreshPhysical();
+            const fresh = getCurrentModel() as PhysicalModelPayload | null;
             if (!fresh) { notificationProvider.open({ type: 'error', message: 'Physical model is not loaded yet.' }); return; }
-            convertedModel = convertPhysicalToLogical(fresh) as Record<string, unknown>;
+            const result = convertPhysicalToLogicalWithNotices(fresh);
+            convertedModel = result.model as Record<string, unknown>;
+            syncNotices = result.notices;
         } else if (isPhysicalSchema && targetSchemaType === SchemaType.CONCEPTUAL) {
-            const fresh = buildFreshPhysical();
+            const fresh = getCurrentModel() as PhysicalModelPayload | null;
             if (!fresh) { notificationProvider.open({ type: 'error', message: 'Physical model is not loaded yet.' }); return; }
-            convertedModel = convertPhysicalToConceptual(fresh) as Record<string, unknown>;
+            const result = convertPhysicalToConceptualWithNotices(fresh);
+            convertedModel = result.model as Record<string, unknown>;
+            syncNotices = result.notices;
         } else if (isConceptualSchema && targetSchemaType === SchemaType.LOGICAL) {
-            const fresh = buildFreshConceptual();
+            const fresh = getCurrentModel() as ConceptualModelPayload | null;
             if (!fresh) { notificationProvider.open({ type: 'error', message: 'Conceptual model is not loaded yet.' }); return; }
-            convertedModel = convertConceptualToLogical(fresh) as Record<string, unknown>;
+            const logical = convertConceptualToLogicalWithNotices(fresh);
+            convertedModel = logical.model as Record<string, unknown>;
+            syncNotices = logical.notices;
         } else if (isConceptualSchema && targetSchemaType === SchemaType.PHYSICAL) {
-            const fresh = buildFreshConceptual();
+            const fresh = getCurrentModel() as ConceptualModelPayload | null;
             if (!fresh) { notificationProvider.open({ type: 'error', message: 'Conceptual model is not loaded yet.' }); return; }
-            convertedModel = convertConceptualToPhysical(fresh, { dbms: targetDbms }) as Record<string, unknown>;
+            const result = convertConceptualToPhysicalWithNotices(fresh, { dbms: targetDbms });
+            convertedModel = result.model as Record<string, unknown>;
+            syncNotices = result.notices;
         }
 
         if (!convertedModel) {
@@ -2418,19 +2435,20 @@ const EditProject = (props: IPropsEditProject) => {
         setIsSyncing(true);
         try {
             await saveSchemaModel(projectData.id, targetSchemaId, convertedModel);
-            notificationProvider.open({ type: 'success', message: 'Schema synced successfully' });
+            const targetLabel = targetSchemaType.charAt(0).toUpperCase() + targetSchemaType.slice(1);
+            finishConversion(targetSchemaId, targetLabel, syncNotices, "synced");
         } catch (error) {
             console.error('Failed to sync schema:', error);
-            notificationProvider.open({ type: 'error', message: 'Failed to sync schema. Please try again.' });
+            notificationProvider.open({ type: 'error', message: getApiErrorMessage(error, 'Failed to sync schema. Please try again.') });
         } finally {
             setIsSyncing(false);
         }
     }, [
         isConceptualSchema, isLogicalSchema, isPhysicalSchema,
-        nodes, edges,
-        _logicalModelData, _physicalModelData, _conceptualModelData,
-        selectedSchema?.id, selectedSchema?.name,
+        getCurrentModel,
         projectData?.id,
+        finishConversion,
+        schemaList,
     ]);
 
     // ── Execute pending convert-to-physical after DBMS selection ──
@@ -2440,12 +2458,16 @@ const EditProject = (props: IPropsEditProject) => {
 
         setIsConverting(true);
         try {
-            const physicalModel = sourceLevel === "logical"
-                ? convertLogicalToPhysical(freshModel as LogicalModelPayload, {
-                      newModelName: `${diagramName} (Physical)`,
-                      dbms,
-                  })
-                : convertConceptualToPhysical(freshModel as ConceptualModelPayload, {
+            // Logical -> Physical loses nothing, so only the conceptual route has notices
+            const { model: physicalModel, notices } = sourceLevel === "logical"
+                ? {
+                      model: convertLogicalToPhysical(freshModel as LogicalModelPayload, {
+                          newModelName: `${diagramName} (Physical)`,
+                          dbms,
+                      }),
+                      notices: [] as ConversionNotice[],
+                  }
+                : convertConceptualToPhysicalWithNotices(freshModel as ConceptualModelPayload, {
                       newModelName: `${diagramName} (Physical)`,
                       dbms,
                   });
@@ -2456,16 +2478,15 @@ const EditProject = (props: IPropsEditProject) => {
                 dbms,
             });
             await saveSchemaModel(projectData.id, newSchema.id, physicalModel as Record<string, unknown>);
-            notificationProvider.open({ type: "success", message: "Physical schema created — switching now" });
             setPendingPhysicalConvert(null);
             setIsConverting(false);
-            router.push(`/projects/${projectData.id}?schemaId=${newSchema.id}`);
+            finishConversion(newSchema.id, "Physical", notices);
         } catch (error) {
             console.error("Failed to convert to physical:", error);
             notificationProvider.open({ type: "error", message: getApiErrorMessage(error, "Failed to convert schema. Please try again.") });
             setIsConverting(false);
         }
-    }, [pendingPhysicalConvert, projectData?.id, selectedSchema?.name, diagramName, router]);
+    }, [pendingPhysicalConvert, projectData?.id, selectedSchema?.name, diagramName, finishConversion]);
 
     const projectAwareness = useProjectAwareness({
         enabled: Boolean(projectData?.id && sessionId && hasPermission && isValidSchema === true && !!token),
@@ -2728,6 +2749,17 @@ const EditProject = (props: IPropsEditProject) => {
 
     const handleExportJson = useCallback(async () => {
         if (!projectData?.id) return;
+
+        const data = getCurrentModel();
+
+        if (!data) {
+            notificationProvider.open({
+                type: "error",
+                message: "Unable to build model JSON for this schema",
+            });
+            return;
+        }
+
         try {
             await trackExportUsage(projectData.id, "json");
         } catch (error) {
@@ -2737,11 +2769,6 @@ const EditProject = (props: IPropsEditProject) => {
             });
             return;
         }
-        const data = {
-            nodes,
-            edges,
-            viewport: reactFlowInstanceRef.current?.getViewport(),
-        };
         const jsonString = JSON.stringify(data, null, 2);
         const blob = new Blob([jsonString], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -2750,7 +2777,11 @@ const EditProject = (props: IPropsEditProject) => {
         a.download = `${diagramName}.json`;
         a.click();
         URL.revokeObjectURL(url);
-    }, [nodes, edges, diagramName, projectData?.id]);
+    }, [
+        getCurrentModel,
+        diagramName,
+        projectData?.id,
+    ]);
 
     // Show loading state when redirecting to accept invite page
     if (isRedirecting) {
@@ -2871,6 +2902,24 @@ const EditProject = (props: IPropsEditProject) => {
                     onConfirm={handleConfirmConvertToPhysical}
                     loading={isConverting}
                     sourceLevel={pendingPhysicalConvert?.sourceLevel}
+                />
+                <ConversionReportModal
+                    isOpen={pendingConversionReport !== null}
+                    notices={pendingConversionReport?.notices ?? []}
+                    targetLabel={pendingConversionReport?.targetLabel ?? ""}
+                    action={pendingConversionReport?.action ?? "created"}
+                    onStay={async () => {
+                        setPendingConversionReport(null);
+                        if (projectData?.id) {
+                            await revalidateProjectSchemas(projectData.id);
+                            router.refresh();
+                        }
+                    }}
+                    onOpen={() => {
+                        const targetId = pendingConversionReport?.targetSchemaId;
+                        setPendingConversionReport(null);
+                        if (targetId && projectData?.id) router.push(`/projects/${projectData.id}?schemaId=${targetId}`);
+                    }}
                 />
                 <HTMLDocsExportModal
                     isOpen={isHTMLDocsExportOpen}
