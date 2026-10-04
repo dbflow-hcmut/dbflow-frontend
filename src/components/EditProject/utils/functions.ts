@@ -14,6 +14,12 @@ export type ErdEdgeData = {
     bracketDirection?: 'from' | 'to';
     storedType?: string;
 };
+/** Stable sort: columns of the (composite) primary key go together to the top of the table. */
+const pkFirst = <C,>(columns: C[], isPk: (col: C) => boolean): C[] => [
+    ...columns.filter(isPk),
+    ...columns.filter((col) => !isPk(col)),
+];
+
 export const RELATION_NOTE_PREFIX = '__RELATION__::';
 
 export const generateDiagramId = () => {
@@ -353,9 +359,12 @@ export const createUpdateFunctions = (
                         ...n,
                         data: {
                             ...tableData,
-                            columns: tableData.columns?.map((col, idx) =>
-                                idx === columnIndex ? { ...col, ...updates } : col
-                            ) || [],
+                            columns: (() => {
+                                const next = tableData.columns?.map((col, idx) =>
+                                    idx === columnIndex ? { ...col, ...updates } : col
+                                ) || [];
+                                return updates.isPrimary !== undefined ? pkFirst(next, (col) => Boolean(col.isPrimary)) : next;
+                            })(),
                             // physical FDs reference columns by name, so a rename must follow
                             ...(renamedTo !== undefined && oldName !== undefined && tableData.functionalDependencies
                                 ? { functionalDependencies: renameColumnInFDs(tableData.functionalDependencies, oldName, renamedTo) }
@@ -520,9 +529,17 @@ export const createUpdateFunctions = (
                         ...n,
                         data: {
                             ...tableData,
-                            columns: tableData.columns?.map((col, idx) =>
-                                idx === columnIndex ? { ...col, ...updates } : col
-                            ) || [],
+                            columns: updates.isKey !== undefined
+                                ? pkFirst(
+                                    (tableData.columns ?? [])
+                                        // pin ids before moving: a column without id gets its handle from its position
+                                        .map((col, idx) => ({ ...col, id: col.id ?? `lid_${selectedNode.id}_col_${idx}` }))
+                                        .map((col, idx) => (idx === columnIndex ? { ...col, ...updates } : col)),
+                                    (col) => Boolean(col.isKey),
+                                )
+                                : tableData.columns?.map((col, idx) =>
+                                    idx === columnIndex ? { ...col, ...updates } : col
+                                ) || [],
                         },
                     }
                     : n

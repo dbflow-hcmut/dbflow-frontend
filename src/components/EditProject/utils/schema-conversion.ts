@@ -46,6 +46,15 @@ const generateCid = (): string => {
 
 // ── ID prefix remapping ─────────────────────────────────────────────────────────
 
+/**
+ * Stable sort that groups all PK columns (the composite key) at the top of a
+ * table while keeping the relative order of the remaining columns.
+ */
+const pkColumnsFirst = <C extends { roles?: { primaryKey?: boolean } }>(columns: C[]): C[] => [
+    ...columns.filter((c) => c.roles?.primaryKey),
+    ...columns.filter((c) => !c.roles?.primaryKey),
+];
+
 /** Map a logical column-id (lid_...) to a physical column-id (pid_...). */
 const remapColId = (id: string): string => id.replace(/^lid_/, "pid_");
 
@@ -238,7 +247,7 @@ export const convertLogicalToPhysical = (
                 id: table.id,
                 name: table.name,
                 notes: table.notes,
-                columns: (table.columns ?? []).map((col) => {
+                columns: pkColumnsFirst(table.columns ?? []).map((col) => {
                     const { dataType, length } = inferPhysicalDataType(col, dbms);
                     const isPK = !!col.roles?.primaryKey;
                     // Auto-increment: single-column integer PK that is NOT also a FK
@@ -362,7 +371,7 @@ export const convertPhysicalToLogicalWithNotices = (
             id: table.id,
             name: table.name,
             notes: table.comment || table.notes,
-            columns: (table.columns ?? []).map((col) => ({
+            columns: pkColumnsFirst(table.columns ?? []).map((col) => ({
                 id: remapColIdToLogical(col.id),
                 name: col.name,
                 nullable: col.nullable ?? true,
@@ -920,7 +929,34 @@ export const convertConceptualToLogicalWithNotices = (
             ? derivedName
             : `${conceptualModel.model.name} (Logical)`);
 
-    const entities = conceptualModel.entities ?? [];
+    // Entities and attributes without a name (empty or only spaces) get a default unique name, and the user is told.
+    const isBlank = (name: string | undefined) => !name || !name.trim();
+    const namesIn = (attrs: ConceptualAttribute[]): string[] =>
+        attrs.flatMap((x) => [x.name, ...namesIn(x.components ?? [])]).filter((n) => !isBlank(n));
+    const uniqueDefault = (base: string, taken: Set<string>) => {
+        let name = base;
+        for (let i = 2; taken.has(name.toLowerCase()); i++) name = `${base}_${i}`;
+        taken.add(name.toLowerCase());
+        return name;
+    };
+    const entityNamesTaken = new Set((conceptualModel.entities ?? []).map((e) => e.name).filter((n) => !isBlank(n)).map((n) => n.toLowerCase()));
+    const nameAttribute = (a: ConceptualAttribute, taken: Set<string>, label: string): ConceptualAttribute => {
+        let name = a.name;
+        if (isBlank(name)) {
+            name = uniqueDefault("unnamed_attribute", taken);
+            warn(`${label}: an attribute has no name, so it was named "${name}".`);
+        }
+        return a.components?.length ? { ...a, name, components: a.components.map((c) => nameAttribute(c, taken, label)) } : { ...a, name };
+    };
+    const entities = (conceptualModel.entities ?? []).map((e) => {
+        let name = e.name;
+        if (isBlank(name)) {
+            name = uniqueDefault("unnamed_entity", entityNamesTaken);
+            warn(`An entity has no name, so it was named "${name}".`);
+        }
+        const taken = new Set(namesIn(e.attributes ?? []).map((n) => n.toLowerCase()));
+        return { ...e, name, attributes: (e.attributes ?? []).map((x) => nameAttribute(x, taken, name)) };
+    });
     const relationships = conceptualModel.relationships ?? [];
     const generalizations = conceptualModel.generalizations ?? [];
 
@@ -960,8 +996,64 @@ export const convertConceptualToLogicalWithNotices = (
     const getPKCols = (tableId: string): MutCol[] =>
         tableMap.get(tableId)?.columns.filter((c) => c.roles?.primaryKey) ?? [];
 
+    /**
+     * A table name that no existing table uses (case-insensitive); appends _2, _3, ... on a clash.
+     * Entity tables are all created first, so junction / multi-valued tables never reuse an entity name.
+     */
+    const uniqueTableName = (base: string): string => {
+        const used = new Set(Array.from(tableMap.values()).map((t) => t.name.toLowerCase()));
+        if (!used.has(base.toLowerCase())) return base;
+        let i = 2;
+        while (used.has(`${base}_${i}`.toLowerCase())) i++;
+        return `${base}_${i}`;
+    };
+
     const hasColumnName = (cols: MutCol[], name: string): boolean =>
         cols.some((c) => c.name.toLowerCase() === name.toLowerCase());
+
+    /**
+     * Columns for one attribute of a relationship or of a multi-valued attribute:
+     * - derived: not stored (reported);
+     * - composite / with components: one column per simple component (EER mapping steps 1, 5, 6, 7), a component whose
+     *   name is already taken is prefixed with the attribute's name;
+     * - anything else: one column named after the attribute.
+     */
+    const attributeColumns = (
+        attr: ConceptualAttribute,
+        label: string,
+        existing: MutCol[],
+        o: { nullable: boolean; primaryKey?: boolean },
+    ): MutCol[] => {
+        if (attr.kind === "derived") {
+            warn(`${label}.${attr.name}: derived attribute is not stored.`);
+            return [];
+        }
+        const leavesOf = (a: ConceptualAttribute): ConceptualAttribute[] =>
+            a.components?.length ? a.components.flatMap(leavesOf) : [a];
+        const hasComponents = Boolean(attr.components?.length);
+        const built: MutCol[] = [];
+        for (const leaf of hasComponents ? leavesOf(attr) : [attr]) {
+            if (hasComponents && (leaf.kind === "derived" || leaf.kind === "multi_valued")) {
+                warn(`${label}.${attr.name}.${leaf.name}: ${leaf.kind === "derived" ? "derived" : "multi-valued"} component is not stored.`);
+                continue;
+            }
+            let name = leaf.name;
+            if (hasComponents && hasColumnName([...existing, ...built], name)) {
+                name = `${attr.name}_${leaf.name}`;
+                const base = name;
+                for (let i = 2; hasColumnName([...existing, ...built], name); i++) name = `${base}_${i}`;
+                warn(`${label}.${attr.name}.${leaf.name}: column was renamed to "${name}" because the name is already used in the table.`);
+            }
+            built.push({
+                id: generateLid(),
+                name,
+                nullable: o.nullable,
+                unique: false,
+                roles: o.primaryKey ? { primaryKey: true } : undefined,
+            });
+        }
+        return built;
+    };
 
     /**
      * Build the FK column(s) that reference ALL columns of `refTableId`'s PK
@@ -1048,7 +1140,8 @@ export const convertConceptualToLogicalWithNotices = (
 
         const info = weakInfo.get(weakEnd.entityId) ?? { ownerIds: [], relAttributes: [] };
         if (!info.ownerIds.includes(ownerEnd.entityId)) info.ownerIds.push(ownerEnd.entityId);
-        info.relAttributes.push(...(rel.attributes ?? []));
+        const identTaken = new Set(namesIn(rel.attributes ?? []).map((n) => n.toLowerCase()));
+        info.relAttributes.push(...(rel.attributes ?? []).map((x) => nameAttribute(x, identTaken, `Relationship ${rel.name || rel.id}`)));
         weakInfo.set(weakEnd.entityId, info);
         identifyingRelIds.add(rel.id);
     }
@@ -1059,18 +1152,36 @@ export const convertConceptualToLogicalWithNotices = (
         }
     }
 
+    // entities whose PK column was added automatically (no key attribute), see Step 1
+    const autoKeyEntityIds = new Set<string>();
+
     // ── Step 1: Regular entities -> Tables with attribute columns ────────
     for (const entity of entities) {
         const columns: MutCol[] = [];
         const isOwnedWeak = weakInfo.has(entity.id);
-        // key attributes of one entity together form ONE (composite) key
-        const storedKeyCount = (entity.attributes ?? []).filter(
-            (a) =>
-                a.isKey &&
-                a.kind !== "derived" &&
-                a.kind !== "multi_valued" &&
-                !((a.kind === "composite" || a.kind === "complex") && a.components?.length),
-        ).length;
+        // key attributes of one entity together form ONE (composite) key; a composite attribute marked as
+        // key contributes one key column per stored component
+        const isStoredLeaf = (a: ConceptualAttribute) => a.kind !== "derived" && a.kind !== "multi_valued";
+        const storedKeyCount = (entity.attributes ?? []).reduce((count, a) => {
+            if (!a.isKey || !isStoredLeaf(a)) return count;
+            if ((a.kind === "composite" || a.kind === "complex") && a.components?.length) {
+                return count + collectStoredAttributeLeaves(a).filter(isStoredLeaf).length;
+            }
+            return count + 1;
+        }, 0);
+
+        // How often each column name would occur in this table (plain attributes + composite components).
+        // A component whose name is used more than once is prefixed with its composite attribute's name.
+        const leafNameCount = new Map<string, number>();
+        const countLeaf = (name: string) => leafNameCount.set(name.toLowerCase(), (leafNameCount.get(name.toLowerCase()) ?? 0) + 1);
+        for (const a of entity.attributes ?? []) {
+            if (!isStoredLeaf(a)) continue;
+            if ((a.kind === "composite" || a.kind === "complex") && a.components?.length) {
+                collectStoredAttributeLeaves(a).filter(isStoredLeaf).forEach((c) => countLeaf(c.name));
+            } else {
+                countLeaf(a.name);
+            }
+        }
 
         for (const attr of entity.attributes ?? []) {
             // Derived attributes are not stored
@@ -1088,11 +1199,19 @@ export const convertConceptualToLogicalWithNotices = (
                         warn(`${entity.name}.${attr.name}.${comp.name}: ${comp.kind === "derived" ? "derived" : "multi-valued"} component is not stored.`);
                         continue;
                     }
+                    let columnName = (leafNameCount.get(comp.name.toLowerCase()) ?? 0) > 1 ? `${attr.name}_${comp.name}` : comp.name;
+                    const baseName = columnName;
+                    for (let i = 2; hasColumnName(columns, columnName); i++) columnName = `${baseName}_${i}`;
+                    if (columnName !== comp.name) {
+                        warn(`${entity.name}.${attr.name}.${comp.name}: column was renamed to "${columnName}" because the name is used more than once in the table.`);
+                    }
                     columns.push({
                         id: generateLid(),
-                        name: comp.name,
-                        nullable: true,
+                        name: columnName,
+                        // a composite attribute marked as key: its components together form the key
+                        nullable: !attr.isKey,
                         unique: false,
+                        roles: attr.isKey ? { primaryKey: true } : undefined,
                     });
                 }
             } else {
@@ -1111,9 +1230,17 @@ export const convertConceptualToLogicalWithNotices = (
         // Auto-add id PK if the entity has no key attribute
         // (an owned weak entity takes its PK from its owner(s), Step 2)
         if (!isOwnedWeak && !columns.some((c) => c.roles?.primaryKey)) {
+            autoKeyEntityIds.add(entity.id);
+            // the surrogate key is called "id" unless the entity already has a column with that name
+            let keyName = "id";
+            if (hasColumnName(columns, keyName)) {
+                keyName = `${entity.name}_id`;
+                const baseKeyName = keyName;
+                for (let i = 2; hasColumnName(columns, keyName); i++) keyName = `${baseKeyName}_${i}`;
+            }
             columns.unshift({
                 id: generateLid(),
-                name: "id",
+                name: keyName,
                 nullable: false,
                 unique: true,
                 roles: { primaryKey: true },
@@ -1153,12 +1280,7 @@ export const convertConceptualToLogicalWithNotices = (
         }
         weakTable.columns.unshift(...ownerFkCols);
         for (const rAttr of info.relAttributes) {
-            weakTable.columns.push({
-                id: generateLid(),
-                name: rAttr.name,
-                nullable: true,
-                unique: false,
-            });
+            weakTable.columns.push(...attributeColumns(rAttr, weakTable.name, weakTable.columns, { nullable: true }));
         }
         mappedWeak.add(weakId);
     };
@@ -1189,12 +1311,15 @@ export const convertConceptualToLogicalWithNotices = (
 
         for (const childId of gen.childEntityIds) {
             const childTable = tableMap.get(childId);
-            if (!childTable) continue;
+            if (!childTable) {
+                warn(`Generalization of ${parentTable.name}: child entity "${childId}" does not exist, so it was ignored.`);
+                continue;
+            }
 
             const existingPK = childTable.columns.find(
                 (c) => c.roles?.primaryKey,
             );
-            if (existingPK && !existingPK.roles?.foreignKey) {
+            if (existingPK && !existingPK.roles?.foreignKey && entityById.get(childId)?.attributes?.some((x) => x.isKey)) {
                 warn(`${childTable.name}: own key "${existingPK.name}" was replaced by the key inherited from ${parentTable.name}.`);
             }
             if (parentPKs.length > 1) {
@@ -1237,6 +1362,76 @@ export const convertConceptualToLogicalWithNotices = (
         }
     }
 
+    // ── Step 3b: Categories (union types), EER step 9 ───────────────────
+    // - superclasses with DIFFERENT keys: the category table gets a surrogate key, and every superclass
+    //   table gets a FK column to it (e.g. OWNER(Owner_id) <- PERSON.Owner_id, COMPANY.Owner_id, BANK.Owner_id).
+    // - superclasses sharing the SAME key: the category table is identified by that key and the key of every
+    //   superclass table is also an FK to the category table (e.g. REGISTERED_VEHICLE <- CAR, TRUCK).
+    for (const cat of conceptualModel.categories ?? []) {
+        const catTable = cat.categoryEntityId ? tableMap.get(cat.categoryEntityId) : undefined;
+        if (!catTable) {
+            warn("A category has no entity of its own, so it was not converted.");
+            continue;
+        }
+        const declared = cat.superclassEntityIds ?? [];
+        const supers = declared.filter((id) => id !== catTable.id && tableMap.has(id));
+        if (supers.length < declared.length) {
+            warn(`Category ${catTable.name}: ${declared.length - supers.length} superclass(es) do not exist and were ignored.`);
+        }
+        if (supers.length === 0) {
+            warn(`Category ${catTable.name}: has no superclass, so it was not linked to any table.`);
+            continue;
+        }
+
+        const keySignature = (id: string) => getPKCols(id).map((c) => c.name.toLowerCase()).sort().join("|");
+        const sameKey = keySignature(supers[0]) !== "" && supers.every((id) => keySignature(id) === keySignature(supers[0]));
+        const autoKey = autoKeyEntityIds.has(catTable.id);
+
+        if (!sameKey) {
+            // different keys -> surrogate key on the category table, FK column on each superclass table
+            if (autoKey) {
+                const surrogate = getPKCols(catTable.id)[0];
+                if (surrogate) surrogate.name = `${catTable.name}_id`;
+            }
+            for (const superId of supers) {
+                const superTable = tableMap.get(superId)!;
+                superTable.columns.push(...makeFkCols(superTable.columns, catTable.id, { primaryKey: false, nullable: true }));
+            }
+            continue;
+        }
+
+        // same key -> the category table takes the shared key; the key of each superclass also references it
+        const sharedKey = getPKCols(supers[0]);
+        const catKeyCols: MutCol[] = sharedKey.map((pk) => ({
+            id: generateLid(),
+            name: pk.name,
+            nullable: false,
+            unique: false,
+            roles: { primaryKey: true },
+        }));
+        // an automatically added key is dropped; a key declared on the category entity stays as a unique column
+        catTable.columns = catTable.columns
+            .filter((c) => !(autoKey && c.roles?.primaryKey))
+            .map((c) => (c.roles?.primaryKey ? { ...c, unique: true, roles: { ...c.roles, primaryKey: false } } : c));
+        for (const keyCol of catKeyCols) {
+            if (hasColumnName(catTable.columns, keyCol.name)) keyCol.name = `${catTable.name}_${keyCol.name}`;
+        }
+        catTable.columns.unshift(...catKeyCols);
+
+        for (const superId of supers) {
+            const superTable = tableMap.get(superId)!;
+            for (const pk of getPKCols(superId)) {
+                const target = catKeyCols[sharedKey.findIndex((k) => k.name.toLowerCase() === pk.name.toLowerCase())];
+                if (!target) continue;
+                if (pk.roles?.foreignKey) {
+                    warn(`Category ${catTable.name}: the key of ${superTable.name} already references another table, so it was not linked to the category.`);
+                    break;
+                }
+                pk.roles = { ...pk.roles, foreignKey: { refTableId: catTable.id, refColumnId: target.id } };
+            }
+        }
+    }
+
     // ── Step 4/5: Relationships -> FK columns / junction tables ─────────
     for (const rel of relationships) {
         // identifying relationships were mapped in Step 2
@@ -1253,27 +1448,36 @@ export const convertConceptualToLogicalWithNotices = (
             continue;
         }
 
-        const relAttributes = rel.attributes ?? [];
+        const relTaken = new Set(namesIn(rel.attributes ?? []).map((n) => n.toLowerCase()));
+        const relAttributes = (rel.attributes ?? []).map((x) => nameAttribute(x, relTaken, relLabel));
+
+        // A participant without a cardinality: tell the user how it was read
+        const unsetNames = ends.filter((e) => !e.cardinality).map((e) => tableMap.get(e.entityId)!.name);
+        if (unsetNames.length > 0 && ends.length > 2) {
+            warn(`${relLabel}: cardinality is not set on ${unsetNames.join(", ")}, so it was read as many (N).`);
+        }
 
         // N-ary (3+) -> junction table
         if (ends.length > 2) {
             const junctionId = `tbl_${rel.id}`;
-            const junctionName =
-                rel.name ||
-                ends.map((e) => tableMap.get(e.entityId)!.name).join("_");
+            const wantedName = rel.name || ends.map((e) => tableMap.get(e.entityId)!.name).join("_");
+            const junctionName = uniqueTableName(wantedName);
+            if (rel.name && junctionName !== wantedName) {
+                warn(`${relLabel}: table name "${wantedName}" is already used by another table, so the junction table was named "${junctionName}".`);
+            }
             const cols: MutCol[] = [];
+            // A participant with cardinality "1" is determined by the other participants, so its FK is not part of
+            // the PK (textbook rule for n-ary relationships). If every participant is "1" (or a cardinality is not
+            // set), all FKs stay in the PK.
+            const isOneEnd = (e: (typeof ends)[number]) => e.cardinality === "1";
+            const allOne = ends.every(isOneEnd);
             for (const end of ends) {
                 cols.push(
-                    ...makeFkCols(cols, end.entityId, { primaryKey: true, nullable: false }),
+                    ...makeFkCols(cols, end.entityId, { primaryKey: allOne || !isOneEnd(end), nullable: false }),
                 );
             }
             for (const rAttr of relAttributes) {
-                cols.push({
-                    id: generateLid(),
-                    name: rAttr.name,
-                    nullable: true,
-                    unique: false,
-                });
+                cols.push(...attributeColumns(rAttr, relLabel, cols, { nullable: true }));
             }
             if (cols.length > 0) {
                 tableMap.set(junctionId, {
@@ -1292,6 +1496,13 @@ export const convertConceptualToLogicalWithNotices = (
         const isAMany = isManyEnd(endA);
         const isBMany = isManyEnd(endB);
 
+        if (unsetNames.length > 0) {
+            warn(
+                `${relLabel}: cardinality is not set on ${unsetNames.join(", ")}, so it was read as 1 and the relationship was converted as ` +
+                    (isAMany || isBMany ? "one-to-many." : "one-to-one."),
+            );
+        }
+
         if (isAMany && isBMany) {
             // N:M -> junction table (FK columns of both sides form the PK)
             if (getPKCols(endA.entityId).length === 0 || getPKCols(endB.entityId).length === 0) {
@@ -1301,8 +1512,11 @@ export const convertConceptualToLogicalWithNotices = (
             const tableA = tableMap.get(endA.entityId)!;
             const tableB = tableMap.get(endB.entityId)!;
             const junctionId = `tbl_${rel.id}`;
-            const junctionName =
-                rel.name || `${tableA.name}_${tableB.name}`;
+            const wantedName = rel.name || `${tableA.name}_${tableB.name}`;
+            const junctionName = uniqueTableName(wantedName);
+            if (rel.name && junctionName !== wantedName) {
+                warn(`${relLabel}: table name "${wantedName}" is already used by another table, so the junction table was named "${junctionName}".`);
+            }
             const cols: MutCol[] = [];
             cols.push(...makeFkCols(cols, endA.entityId, { primaryKey: true, nullable: false }));
             cols.push(
@@ -1313,12 +1527,7 @@ export const convertConceptualToLogicalWithNotices = (
                 }),
             );
             for (const rAttr of relAttributes) {
-                cols.push({
-                    id: generateLid(),
-                    name: rAttr.name,
-                    nullable: true,
-                    unique: false,
-                });
+                cols.push(...attributeColumns(rAttr, relLabel, cols, { nullable: true }));
             }
             tableMap.set(junctionId, {
                 id: junctionId,
@@ -1363,12 +1572,7 @@ export const convertConceptualToLogicalWithNotices = (
             }
             fkTable.columns.push(...fkCols);
             for (const rAttr of relAttributes) {
-                fkTable.columns.push({
-                    id: generateLid(),
-                    name: rAttr.name,
-                    nullable: true,
-                    unique: false,
-                });
+                fkTable.columns.push(...attributeColumns(rAttr, relLabel, fkTable.columns, { nullable: true }));
             }
         }
     }
@@ -1382,7 +1586,7 @@ export const convertConceptualToLogicalWithNotices = (
             if (!parentTable) continue;
 
             const mvTableId = `tbl_mv_${entity.id}_${attr.id}`;
-            const mvTableName = `${entity.name}_${attr.name}`;
+            const mvTableName = uniqueTableName(`${entity.name}_${attr.name}`);
             const cols: MutCol[] = makeFkCols([], entity.id, {
                 primaryKey: true,
                 nullable: false,
@@ -1391,13 +1595,13 @@ export const convertConceptualToLogicalWithNotices = (
                 warn(`${entity.name}.${attr.name}: multi-valued attribute dropped because ${entity.name} has no primary key.`);
                 continue;
             }
-            cols.push({
-                id: generateLid(),
-                name: attr.name,
-                nullable: false,
-                unique: false,
-                roles: { primaryKey: true },
-            });
+            // the value column, or one column per simple component when the attribute is composite (slide, step 6)
+            const valueCols = attributeColumns(attr, entity.name, cols, { nullable: false, primaryKey: true });
+            if (valueCols.length === 0) {
+                warn(`${entity.name}.${attr.name}: multi-valued attribute dropped because none of its components can be stored.`);
+                continue;
+            }
+            cols.push(...valueCols);
             tableMap.set(mvTableId, {
                 id: mvTableId,
                 name: mvTableName,
@@ -1406,8 +1610,22 @@ export const convertConceptualToLogicalWithNotices = (
         }
     }
 
-    if ((conceptualModel.categories?.length ?? 0) > 0) {
-        warn("Categories (union types) cannot be represented: they were not converted.");
+    // Names that are the same once case is ignored (most databases treat them as one name).
+    // Unicode is normalised first so that "é" typed as one character or as e + accent counts as the same.
+    const nameKey = (n: string) => n.normalize("NFC").trim().toLowerCase();
+    const duplicateGroups = (names: string[]) => {
+        const groups = new Map<string, string[]>();
+        for (const n of names) groups.set(nameKey(n), [...(groups.get(nameKey(n)) ?? []), n]);
+        return Array.from(groups.values()).filter((g) => g.length > 1);
+    };
+    const quoted = (names: string[]) => names.map((n) => `"${n}"`).join(", ");
+    for (const group of duplicateGroups(Array.from(tableMap.values()).map((t) => t.name))) {
+        warn(`Tables ${quoted(group)} have the same name once case is ignored; most databases treat them as one table.`);
+    }
+    for (const t of tableMap.values()) {
+        for (const group of duplicateGroups(t.columns.map((c) => c.name))) {
+            warn(`${t.name}: columns ${quoted(group)} have the same name once case is ignored; most databases treat them as one column.`);
+        }
     }
 
     return {
@@ -1418,7 +1636,7 @@ export const convertConceptualToLogicalWithNotices = (
                 version: 1,
                 notes: conceptualModel.model.notes,
             },
-            tables: Array.from(tableMap.values()),
+            tables: Array.from(tableMap.values()).map((t) => ({ ...t, columns: pkColumnsFirst(t.columns) })),
         },
         notices,
     };
