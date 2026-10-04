@@ -230,7 +230,7 @@ const EditProject = (props: IPropsEditProject) => {
     // Undo/Redo hook - lớp trung gian quản lý state
     // maxHistorySize: 0 = không giới hạn
     // schemaId: phân biệt history cho từng diagram
-    const { undo, redo, canUndo, canRedo, saveState, resetHistory } = useUndoRedo<NodeData, unknown>({
+    const { undo, redo, canUndo, canRedo, saveState } = useUndoRedo<NodeData, unknown>({
         maxHistorySize: 0, // 0 = không giới hạn số lượng state
         schemaId: selectedSchema?.id || null,
     });
@@ -320,22 +320,6 @@ const EditProject = (props: IPropsEditProject) => {
         canEdit,
         getViewportCenter,
     });
-
-    useEffect(() => {
-        if (!projectData?.id || !selectedSchema?.id) {
-            return;
-        }
-
-        let isMounted = true;
-        const checkSchema = async () => {
-            setIsValidSchema(null);
-            const exists = await checkSchemaExistence(projectData.id, selectedSchema.id);
-            if (isMounted) setIsValidSchema(exists);
-        };
-
-        checkSchema();
-        return () => { isMounted = false; };
-    }, [projectData?.id, selectedSchema?.id]);
 
     const isUndoRedoActiveRef = useRef(false);
 
@@ -453,6 +437,32 @@ const EditProject = (props: IPropsEditProject) => {
         return [];
     }, [projectSchemasData]);
 
+    // Schemas already listed for this project are known to exist, so skip the
+    // extra HTTP round trip that used to block the Yjs connection on every
+    // schema switch. Only fall back to the API for ids missing from the list.
+    const isSelectedSchemaListed = Boolean(
+        selectedSchema?.id && schemaList.some((s) => s.id === selectedSchema.id),
+    );
+    useEffect(() => {
+        if (!projectData?.id || !selectedSchema?.id) {
+            return;
+        }
+        if (isSelectedSchemaListed) {
+            setIsValidSchema(true);
+            return;
+        }
+
+        let isMounted = true;
+        const checkSchema = async () => {
+            setIsValidSchema(null);
+            const exists = await checkSchemaExistence(projectData.id, selectedSchema.id);
+            if (isMounted) setIsValidSchema(exists);
+        };
+
+        checkSchema();
+        return () => { isMounted = false; };
+    }, [projectData?.id, selectedSchema?.id, isSelectedSchemaListed]);
+
     useEffect(() => {
         if (!schemaList.length) return;
 
@@ -502,9 +512,9 @@ const EditProject = (props: IPropsEditProject) => {
         setEdgesState(initialEdges);
         setIsLoadingDiagram(true);
 
-        // Reset history khi schema thay đổi
-        resetHistory();
-    }, [selectedSchema?.id, setNodesState, setEdgesState, resetHistory]);
+        // History được lưu riêng theo schemaId nên không reset khi đổi schema,
+        // để quay lại schema cũ vẫn undo/redo được.
+    }, [selectedSchema?.id, setNodesState, setEdgesState]);
 
     // Tắt loading khi collaboration hook đã build xong nodes,
     // hoặc sau timeout nếu diagram trống
