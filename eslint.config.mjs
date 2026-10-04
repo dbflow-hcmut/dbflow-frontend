@@ -18,6 +18,8 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
+      // unit tests build loosely typed model fixtures (jest, `yarn test`); they are not part of the app bundle
+      "**/*.spec.ts",
     ],
   },
 ];
