@@ -5,6 +5,7 @@ import { Modal, Input } from "antd";
 import { ProjectSchemasResponse } from "@/types/projects.type";
 import { updateSchemaName } from "./api";
 import { notificationProvider } from "@/providers/notification";
+import { getApiErrorMessage } from "@/utils/functions";
 
 type RenameSchemaModalProps = {
     open: boolean;
@@ -58,10 +59,10 @@ const RenameSchemaModal: React.FC<RenameSchemaModalProps> = ({
             });
             onSuccess();
             onClose();
-        } catch {  
+        } catch (error) {
             notificationProvider.open({
                 type: "error",
-                message: "Failed to rename schema. Please try again.",
+                message: getApiErrorMessage(error, "Failed to rename schema. Please try again."),
             });
         } finally {
             setIsRenaming(false);

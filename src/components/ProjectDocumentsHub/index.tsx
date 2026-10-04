@@ -25,6 +25,7 @@ import {
 } from "@/api/project-documents/client";
 import type { ProjectResponse } from "@/types/projects.type";
 import useSWR from "swr";
+import { getApiErrorMessage } from "@/utils/functions";
 
 const ACCEPTED_DOCUMENTS =
   ".pdf,.png,.jpg,.jpeg,.webp,.svg,.doc,.docx,.txt,.md,.sql,.json,.csv";
@@ -130,10 +131,10 @@ export default function ProjectDocumentsHub({
         return;
       }
       window.open(url, "_blank", "noopener,noreferrer");
-    } catch {
+    } catch (error) {
       notificationProvider.open({
         type: "error",
-        message: "Could not open document",
+        message: getApiErrorMessage(error, "Could not open document"),
       });
     }
   };
@@ -145,8 +146,8 @@ export default function ProjectDocumentsHub({
       await retryIngestDocument(projectId, doc.id);
       notificationProvider.open({ type: "success", message: "Re-indexing started" });
       await mutate();
-    } catch {
-      notificationProvider.open({ type: "error", message: "Retry failed" });
+    } catch (error) {
+      notificationProvider.open({ type: "error", message: getApiErrorMessage(error, "Retry failed") });
     } finally {
       setRetryingId(null);
     }
@@ -169,10 +170,10 @@ export default function ProjectDocumentsHub({
             message: "Document deleted",
           });
           await mutate();
-        } catch {
+        } catch (error) {
           notificationProvider.open({
             type: "error",
-            message: "Delete failed",
+            message: getApiErrorMessage(error, "Delete failed"),
           });
         } finally {
           setDeletingId(null);

@@ -15,6 +15,7 @@ import { useRouter } from "next/navigation";
 import LoadingIndicator from "@/components/LoadingIndicator";
 import { useAuth } from "@/providers/AuthProvider";
 import { getActiveWorkspaceId, setActiveWorkspaceId } from "@/utils/active-workspace";
+import { getApiErrorMessage } from "@/utils/functions";
 
 type BillingCycle = "monthly" | "yearly";
 type Audience = "personal" | "team";
@@ -91,8 +92,7 @@ export default function PricingPage() {
       .catch((error) => {
         notificationProvider.open({
           type: "error",
-          message: "Unable to load pricing",
-          description: error instanceof Error ? error.message : undefined,
+          message: getApiErrorMessage(error, "Unable to load pricing"),
         });
       })
       .finally(() => {
@@ -115,8 +115,7 @@ export default function PricingPage() {
       .catch((error) => {
         notificationProvider.open({
           type: "error",
-          message: "Unable to load your current plan",
-          description: error instanceof Error ? error.message : undefined,
+          message: getApiErrorMessage(error, "Unable to load your current plan"),
         });
       })
       .finally(() => {
@@ -172,8 +171,7 @@ export default function PricingPage() {
     } catch (error) {
       notificationProvider.open({
         type: "error",
-        message: "Unable to create Stripe checkout",
-        description: error instanceof Error ? error.message : undefined,
+        message: getApiErrorMessage(error, "Unable to create Stripe checkout"),
       });
     } finally {
       setLoadingPlan(undefined);
