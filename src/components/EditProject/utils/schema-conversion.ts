@@ -448,24 +448,52 @@ type TableClassification = {
     mvParentId?: string;
     /** MULTI_VALUED: the value column (PK non-FK). */
     mvValueCol?: LogicalColumn;
-    /** WEAK: owner table ID (from the FK PK column). */
-    weakOwnerId?: string;
+    /** WEAK: owner table IDs (from the FK PK columns; more than one when several owners identify the entity). */
+    weakOwnerIds?: string[];
     /** JUNCTION: referenced table IDs (one per FK PK column). */
     junctionRefTableIds?: string[];
+};
+
+/**
+ * Group FK columns into foreign keys. Columns pointing to DIFFERENT columns of the same table form one composite FK;
+ * a column pointing to a column that is already in a group of that table starts a new FK (e.g. placed_by and
+ * billed_to, both -> customer.id). Returns the groups per referenced table, in column order.
+ */
+const groupForeignKeys = <C extends LogicalTable["columns"][number]>(cols: C[]): Map<string, C[][]> => {
+    const byRefTable = new Map<string, C[][]>();
+    for (const col of cols) {
+        const fk = col.roles?.foreignKey;
+        if (!fk) continue;
+        const groups = byRefTable.get(fk.refTableId) ?? [];
+        const group = groups.find((g) => !g.some((c) => c.roles?.foreignKey?.refColumnId === fk.refColumnId));
+        if (group) group.push(col);
+        else groups.push([col]);
+        byRefTable.set(fk.refTableId, groups);
+    }
+    return byRefTable;
 };
 
 /**
  * Classify each logical table to determine its conceptual mapping.
  *
  * Classification priority (first match wins):
- *  1. ISA_CHILD: single PK col that is also FK to another table.
+ *  1. ISA_CHILD: the whole PK is one FK (single or composite) to another table.
  *  2. JUNCTION:  >= 2 PK cols, ALL are FK to existing tables.
- *  3. MULTI_VALUED: exactly 2 cols, both PK, exactly one FK.
+ *  3. MULTI_VALUED: all cols are PK: one value col + one FK (single or composite) to the owner;
+ *                being referenced by another table makes it a weak entity instead.
  *  4. WEAK:      composite PK (>= 2), partial FK among PKs, has non-PK cols.
  *  5. REGULAR:   everything else -> strong entity.
  */
 export const classifyTables = (tables: LogicalTable[]): TableClassification[] => {
     const tableIdSet = new Set(tables.map((t) => t.id));
+    // tables that some OTHER table has a FK to
+    const referencedByOthers = new Set<string>();
+    for (const t of tables) {
+        for (const c of t.columns ?? []) {
+            const refId = c.roles?.foreignKey?.refTableId;
+            if (refId && refId !== t.id) referencedByOthers.add(refId);
+        }
+    }
 
     return tables.map((table): TableClassification => {
         const cols = table.columns ?? [];
@@ -474,24 +502,24 @@ export const classifyTables = (tables: LogicalTable[]): TableClassification[] =>
         const pkNonFkCols = pkCols.filter((c) => !c.roles?.foreignKey);
         const nonPkCols = cols.filter((c) => !c.roles?.primaryKey);
 
-        // ── 1. ISA: single PK that is also FK ───────────────────────
-        if (
-            pkCols.length === 1 &&
-            pkFkCols.length === 1 &&
-            tableIdSet.has(pkFkCols[0].roles!.foreignKey!.refTableId)
-        ) {
-            return {
-                kind: "ISA_CHILD",
-                table,
-                isaParentId: pkFkCols[0].roles!.foreignKey!.refTableId,
-            };
+        // ── 1. ISA: the whole PK is ONE FK (single column or composite) to another table ──
+        if (pkCols.length >= 1 && pkFkCols.length === pkCols.length) {
+            const pkFkGroups = Array.from(groupForeignKeys(pkFkCols));
+            if (pkFkGroups.length === 1 && pkFkGroups[0][1].length === 1 && tableIdSet.has(pkFkGroups[0][0])) {
+                return {
+                    kind: "ISA_CHILD",
+                    table,
+                    isaParentId: pkFkGroups[0][0],
+                };
+            }
         }
 
         // ── 2. Junction: all PK cols (>= 2) are FK ──────────────────
         if (pkCols.length >= 2 && pkFkCols.length === pkCols.length) {
-            const refIds = pkFkCols
-                .map((c) => c.roles!.foreignKey!.refTableId)
-                .filter((id) => tableIdSet.has(id));
+            // one end per FK: the columns of a composite FK count once
+            const refIds = Array.from(groupForeignKeys(pkFkCols))
+                .filter(([refTableId]) => tableIdSet.has(refTableId))
+                .flatMap(([refTableId, groups]) => groups.map(() => refTableId));
             if (refIds.length >= 2) {
                 return {
                     kind: "JUNCTION",
@@ -501,21 +529,22 @@ export const classifyTables = (tables: LogicalTable[]): TableClassification[] =>
             }
         }
 
-        // ── 3. Multi-valued: 2 PK cols, 1 FK, 0 non-PK cols ────────
-        if (
-            cols.length === 2 &&
-            pkCols.length === 2 &&
-            pkFkCols.length === 1 &&
-            pkNonFkCols.length === 1 &&
-            nonPkCols.length === 0 &&
-            tableIdSet.has(pkFkCols[0].roles!.foreignKey!.refTableId)
-        ) {
-            return {
-                kind: "MULTI_VALUED",
-                table,
-                mvParentId: pkFkCols[0].roles!.foreignKey!.refTableId,
-                mvValueCol: pkNonFkCols[0],
-            };
+        // ── 3. Multi-valued: every column is PK, one value column + one FK (single or composite) to the owner ──
+        if (cols.length === pkCols.length && pkNonFkCols.length === 1 && pkFkCols.length >= 1) {
+            const fkGroups = Array.from(groupForeignKeys(pkFkCols));
+            const ownerId = fkGroups.length === 1 && fkGroups[0][1].length === 1 ? fkGroups[0][0] : undefined;
+            if (ownerId && tableIdSet.has(ownerId)) {
+                // A multi-valued attribute cannot be referenced by another table, so a referenced table is a weak entity
+                if (referencedByOthers.has(table.id)) {
+                    return { kind: "WEAK", table, weakOwnerIds: [ownerId] };
+                }
+                return {
+                    kind: "MULTI_VALUED",
+                    table,
+                    mvParentId: ownerId,
+                    mvValueCol: pkNonFkCols[0],
+                };
+            }
         }
 
         // ── 4. Weak entity: composite PK, partial FK, has extras ────
@@ -525,12 +554,12 @@ export const classifyTables = (tables: LogicalTable[]): TableClassification[] =>
             pkFkCols.length < pkCols.length &&
             nonPkCols.length > 0
         ) {
-            const ownerId = pkFkCols[0].roles!.foreignKey!.refTableId;
-            if (tableIdSet.has(ownerId)) {
+            const ownerIds = Array.from(groupForeignKeys(pkFkCols).keys()).filter((id) => tableIdSet.has(id));
+            if (ownerIds.length > 0) {
                 return {
                     kind: "WEAK",
                     table,
-                    weakOwnerId: ownerId,
+                    weakOwnerIds: ownerIds,
                 };
             }
         }
@@ -656,7 +685,7 @@ export const convertLogicalToConceptualWithNotices = (
                 isWeak &&
                 col.roles?.primaryKey &&
                 col.roles?.foreignKey &&
-                cls.weakOwnerId === col.roles.foreignKey?.refTableId;
+                !!cls.weakOwnerIds?.includes(col.roles.foreignKey.refTableId);
 
             if (isFKOnly || isISA || isWeakOwnerFK) continue;
 
@@ -709,18 +738,38 @@ export const convertLogicalToConceptualWithNotices = (
         const nonPkCols = (cls.table.columns ?? []).filter(
             (c) => !c.roles?.primaryKey,
         );
-        const relAttrs: AttrPayload[] = nonPkCols.map((col) => ({
-            id: generateCid(),
-            name: col.name,
-            kind: "simple" as const,
-            isKey: false,
-        }));
-
         const ends: RelPayload["ends"] = refIds.map((refId) => ({
             entityId: refId,
             cardinality: "N",
             optional: true,
         }));
+
+        // A FK outside the PK is determined by the PK participants -> one more participant with cardinality 1
+        // (the relationship becomes n-ary); its columns are no longer relationship attributes.
+        const consumedFkCols = new Set<string>();
+        for (const [refTableId, groups] of groupForeignKeys(nonPkCols)) {
+            if (!tableIdSet.has(refTableId) || junctionTableIds.has(refTableId) || mvTableIds.has(refTableId)) {
+                for (const group of groups) {
+                    for (const col of group) {
+                        warn(`${cls.table.name}.${col.name}: foreign key references a table that is not an entity, so it was kept as an attribute of the relationship.`);
+                    }
+                }
+                continue;
+            }
+            for (const group of groups) {
+                ends.push({ entityId: refTableId, cardinality: "1", optional: group.every((c) => c.nullable !== false) });
+                group.forEach((c) => consumedFkCols.add(c.id));
+            }
+        }
+
+        const relAttrs: AttrPayload[] = nonPkCols
+            .filter((col) => !consumedFkCols.has(col.id))
+            .map((col) => ({
+                id: generateCid(),
+                name: col.name,
+                kind: "simple" as const,
+                isKey: false,
+            }));
 
         relationships.push({
             id: generateCid(),
@@ -739,30 +788,32 @@ export const convertLogicalToConceptualWithNotices = (
         }
     }
 
-    // ── 3b. Weak entity -> identifying relationship to owner ─────────
+    // ── 3b. Weak entity -> one identifying relationship per owner ────
     for (const cls of classifications) {
-        if (cls.kind !== "WEAK" || !cls.weakOwnerId) continue;
+        if (cls.kind !== "WEAK") continue;
 
-        const pk = pairKey(cls.table.id, cls.weakOwnerId);
-        if (emittedRelPairs.has(pk)) {
-            warn(`${cls.table.name}: identifying relationship was not created because a relationship between the same entities already exists.`);
-            continue;
+        for (const ownerId of cls.weakOwnerIds ?? []) {
+            const pk = pairKey(cls.table.id, ownerId);
+            if (emittedRelPairs.has(pk)) {
+                warn(`${cls.table.name}: identifying relationship was not created because a relationship between the same entities already exists.`);
+                continue;
+            }
+            emittedRelPairs.add(pk);
+
+            const ownerTable = tables.find((t) => t.id === ownerId);
+            const relName = `${ownerTable?.name ?? "owner"}_${cls.table.name}`;
+
+            relationships.push({
+                id: generateCid(),
+                name: relName,
+                type: "identifying" as const,
+                ends: [
+                    // the owner can exist without weak entities; the weak entity always depends on its owner
+                    { entityId: ownerId, cardinality: "1", optional: true },
+                    { entityId: cls.table.id, cardinality: "N", optional: false },
+                ],
+            });
         }
-        emittedRelPairs.add(pk);
-
-        const ownerTable = tables.find((t) => t.id === cls.weakOwnerId);
-        const relName = `${ownerTable?.name ?? "owner"}_${cls.table.name}`;
-
-        relationships.push({
-            id: generateCid(),
-            name: relName,
-            type: "identifying" as const,
-            ends: [
-                // the owner can exist without weak entities; the weak entity always depends on its owner
-                { entityId: cls.weakOwnerId, cardinality: "1", optional: true },
-                { entityId: cls.table.id,     cardinality: "N", optional: false },
-            ],
-        });
     }
 
     // ── 3c. Regular FK columns -> N:1 association relationships ──────
@@ -771,6 +822,11 @@ export const convertLogicalToConceptualWithNotices = (
         if (cls.kind === "JUNCTION" || cls.kind === "MULTI_VALUED") continue;
 
         const table = cls.table;
+
+        // Group the FK columns of this table by referenced table. Columns that point to DIFFERENT columns of that table
+        // form one composite FK (one relationship); a second column pointing to a column that is already in the group
+        // is a separate FK (e.g. placed_by and billed_to, both -> customer.id) and gets its own relationship.
+        const eligibleFkCols: (typeof table.columns)[number][] = [];
         for (const col of table.columns ?? []) {
             if (!col.roles?.foreignKey) continue;
             const fk = col.roles.foreignKey;
@@ -797,40 +853,47 @@ export const convertLogicalToConceptualWithNotices = (
             if (
                 cls.kind === "WEAK" &&
                 col.roles?.primaryKey &&
-                cls.weakOwnerId === fk.refTableId
+                cls.weakOwnerIds?.includes(fk.refTableId)
             )
                 continue;
 
-            // Deduplicate by entity pair
-            const pk = pairKey(table.id, fk.refTableId);
-            const refTable = tables.find((t) => t.id === fk.refTableId);
-            if (emittedRelPairs.has(pk)) {
-                warn(`${table.name}.${col.name}: foreign key to ${refTable?.name ?? fk.refTableId} was merged into an existing relationship between the same entities.`);
-                continue;
-            }
-            emittedRelPairs.add(pk);
+            eligibleFkCols.push(col);
+        }
+        const fkGroups = groupForeignKeys(eligibleFkCols);
 
-            const relName = `${table.name}_${refTable?.name ?? fk.refTableId}`;
+        for (const [refTableId, groups] of fkGroups) {
+            const refTable = tables.find((t) => t.id === refTableId);
 
-            relationships.push({
-                id: generateCid(),
-                name: relName,
-                type: "association" as const,
-                ends: [
-                    {
-                        entityId: table.id,
-                        cardinality: "N",
-                        // a key column can never be NULL -> mandatory; otherwise follow the column's nullability
-                        // (the logical diagram stores no nullability, so only PK membership is known there)
-                        optional: col.roles?.primaryKey ? false : col.nullable !== false,
-                    },
-                    {
-                        entityId: fk.refTableId,
-                        cardinality: "1",
-                        // a FK does not force the referenced entity to have referencing rows
-                        optional: true,
-                    },
-                ],
+            groups.forEach((group) => {
+                const baseName = `${table.name}_${refTable?.name ?? refTableId}`;
+                // several FKs between the same tables, or a junction / identifying relationship already named like this
+                const needsSuffix = groups.length > 1 || relationships.some((x) => x.name === baseName);
+                const relName = needsSuffix ? `${baseName}_${group.map((c) => c.name).join("_")}` : baseName;
+
+                // A single-column FK that is also a candidate key / unique can hold each referenced value at most once -> 1-1.
+                // A column that is just one part of a composite FK does not make the relationship 1-1.
+                const fkEndCardinality = group.length === 1 && (group[0].unique || group[0].roles?.candidateKey) ? "1" : "N";
+
+                relationships.push({
+                    id: generateCid(),
+                    name: relName,
+                    type: "association" as const,
+                    ends: [
+                        {
+                            entityId: table.id,
+                            cardinality: fkEndCardinality,
+                            // a key column can never be NULL -> mandatory; otherwise follow the column's nullability
+                            // (the logical diagram stores no nullability, so only PK membership is known there)
+                            optional: group.every((c) => (c.roles?.primaryKey ? false : c.nullable !== false)),
+                        },
+                        {
+                            entityId: refTableId,
+                            cardinality: "1",
+                            // a FK does not force the referenced entity to have referencing rows
+                            optional: true,
+                        },
+                    ],
+                });
             });
         }
     }
