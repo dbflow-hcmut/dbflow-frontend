@@ -553,3 +553,129 @@ describe("round trip: logical -> conceptual -> logical keeps the schema", () => 
         expect(dataCols(back)).toEqual(dataCols(school));
     });
 });
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+describe("extended edge cases", () => {
+    const student = table("student", ["id:pk"]);
+    const course = table("course", ["id:pk"]);
+
+    it("a FK that references a candidate-key column (not the PK) still gives one relationship", () => {
+        const customer = table("customer", ["id:pk", "email:ck"]);
+        const order = table("order", ["id:pk", "customer_email:fk(customer.email)"]);
+        const r = convert(model([customer, order]));
+        expect(r.relsBetween("order", "customer")).toHaveLength(1);
+        expect(r.attrs("order")).not.toContain("customer_email");
+    });
+
+    it("two different junction tables between the same two entities give two relationships", () => {
+        const enrols = table("enrols", ["student_id:pk,fk(student.id)", "course_id:pk,fk(course.id)"]);
+        const waitlist = table("waitlist", ["student_id:pk,fk(student.id)", "course_id:pk,fk(course.id)"]);
+        const r = convert(model([student, course, enrols, waitlist]));
+        expect(r.c.relationships.map((x) => x.name).sort()).toEqual(["enrols", "waitlist"]);
+    });
+
+    it("a plain FK between two entities that also have a junction is kept as its own relationship", () => {
+        const enrols = table("enrols", ["student_id:pk,fk(student.id)", "course_id:pk,fk(course.id)"]);
+        const fav = table("student", ["id:pk", "favourite_course:fk(course.id)"]);
+        const r = convert(model([fav, course, enrols]));
+        expect(r.c.relationships).toHaveLength(2);
+    });
+
+    it("a non-PK FK of a junction table is not lost (the junction keeps its link to teacher)", () => {
+        const teacher = table("teacher", ["id:pk"]);
+        const enrols = table("enrols", ["student_id:pk,fk(student.id)", "course_id:pk,fk(course.id)", "teacher_id:fk(teacher.id)"]);
+        const r = convert(model([student, course, teacher, enrols]));
+        const touchesTeacher = r.c.relationships.some((x) => x.ends.some((e) => r.nameOf(e.entityId) === "teacher"));
+        expect(touchesTeacher).toBe(true);
+        // the FK is not left behind as a plain attribute of the relationship
+        expect(r.relByName("enrols")!.attributes?.map((a) => a.name) ?? []).not.toContain("teacher_id");
+    });
+
+    it("a recursive junction with its own column keeps that column on the relationship", () => {
+        const person = table("person", ["id:pk"]);
+        const follows = table("follows", ["follower_id:pk,fk(person.id)", "followee_id:pk,fk(person.id)", "since"]);
+        const r = convert(model([person, follows]));
+        expect(r.entityNames).toEqual(["person"]);
+        expect(r.relByName("follows")!.attributes?.map((a) => a.name)).toEqual(["since"]);
+    });
+
+    it("a ternary junction with an extra column keeps three ends and the attribute", () => {
+        const project = table("project", ["id:pk"]);
+        const supply = table("supply", ["student_id:pk,fk(student.id)", "course_id:pk,fk(course.id)", "project_id:pk,fk(project.id)", "qty"]);
+        const r = convert(model([student, course, project, supply]));
+        const rel = r.relByName("supply")!;
+        expect(rel.ends).toHaveLength(3);
+        expect(rel.attributes?.map((a) => a.name)).toEqual(["qty"]);
+    });
+
+    it("a multi-valued table whose owner is a weak entity (composite FK) is still a multi-valued attribute", () => {
+        const building = table("building", ["code:pk"]);
+        const room = table("room", ["building_code:pk,fk(building.code)", "room_no:pk", "floor"]);
+        const feature = table("room_feature", ["building_code:pk,fk(room.building_code)", "room_no:pk,fk(room.room_no)", "feature:pk"]);
+        const r = convert(model([building, room, feature]));
+        expect(r.entityNames).toEqual(["building", "room"]);
+        expect(r.entity("room").attributes.some((a) => a.name === "feature" && a.kind === "multi_valued")).toBe(true);
+    });
+
+    it("a table that has no columns at all still becomes an entity (no crash)", () => {
+        const r = convert(model([table("empty", [])]));
+        expect(r.entityNames).toEqual(["empty"]);
+    });
+
+    it("a subclass whose parent table is missing does not crash and keeps its own columns", () => {
+        const orphan = table("orphan", ["id:pk,fk(ghost.id)", "note"]);
+        const r = convert(model([orphan]));
+        expect(r.entityNames).toEqual(["orphan"]);
+        expect(r.attrs("orphan")).toContain("note");
+    });
+
+    it("a junction that references a missing table does not crash and reports it", () => {
+        const enrols = table("enrols", ["student_id:pk,fk(ghost.id)", "course_id:pk,fk(course.id)"]);
+        const r = convert(model([course, enrols]));
+        expect(r.entityNames).toContain("course");
+        expect(r.notices.length).toBeGreaterThan(0);
+    });
+
+    it("a table whose PK is a FK to itself does not hang", () => {
+        const emp = table("employee", ["id:pk,fk(employee.id)", "name"]);
+        expect(() => convert(model([emp]))).not.toThrow();
+        expect(convert(model([emp])).entityNames).toContain("employee");
+    });
+
+    it("two subclasses that reference each other (cyclic inheritance) do not hang", () => {
+        const a = table("a", ["id:pk,fk(b.id)"]);
+        const b = table("b", ["id:pk,fk(a.id)"]);
+        expect(() => convert(model([a, b]))).not.toThrow();
+    });
+
+    it("a FK from a grandchild subclass to a regular table is kept", () => {
+        const person = table("person", ["id:pk"]);
+        const stu = table("student", ["id:pk,fk(person.id)"]);
+        const phd = table("phd", ["id:pk,fk(student.id)", "advisor_id:fk(person.id)"]);
+        const r = convert(model([person, stu, phd]));
+        expect(r.relsBetween("phd", "person")).toHaveLength(1);
+        expect(r.c.generalizations).toHaveLength(2);
+    });
+
+    it("a FK column that is a candidate key but only one part of a composite FK stays N", () => {
+        const section = table("section", ["course_no:pk", "section_no:pk"]);
+        const enrol = table("enrol", ["id:pk", "course_no:fk(section.course_no),ck", "section_no:fk(section.section_no)"]);
+        const r = convert(model([section, enrol]));
+        const rel = r.relsBetween("enrol", "section")[0];
+        expect(r.endOf(rel, "enrol").cardinality).toBe("N");
+    });
+
+    it("column order of the attributes follows the table", () => {
+        const r = convert(model([table("t", ["id:pk", "c", "b", "a"])]));
+        expect(r.attrs("t")).toEqual(["id", "c", "b", "a"]);
+    });
+
+    it("a large schema (200 tables in a FK chain) converts without error", () => {
+        const tables = Array.from({ length: 200 }, (_, i) =>
+            table(`t${i}`, i === 0 ? ["id:pk"] : ["id:pk", `p:fk(t${i - 1}.id)`]),
+        );
+        const r = convert(model(tables));
+        expect(r.c.entities).toHaveLength(200);
+        expect(r.c.relationships).toHaveLength(199);
+    });
+});

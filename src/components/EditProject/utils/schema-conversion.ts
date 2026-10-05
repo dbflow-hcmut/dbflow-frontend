@@ -738,18 +738,38 @@ export const convertLogicalToConceptualWithNotices = (
         const nonPkCols = (cls.table.columns ?? []).filter(
             (c) => !c.roles?.primaryKey,
         );
-        const relAttrs: AttrPayload[] = nonPkCols.map((col) => ({
-            id: generateCid(),
-            name: col.name,
-            kind: "simple" as const,
-            isKey: false,
-        }));
-
         const ends: RelPayload["ends"] = refIds.map((refId) => ({
             entityId: refId,
             cardinality: "N",
             optional: true,
         }));
+
+        // A FK outside the PK is determined by the PK participants -> one more participant with cardinality 1
+        // (the relationship becomes n-ary); its columns are no longer relationship attributes.
+        const consumedFkCols = new Set<string>();
+        for (const [refTableId, groups] of groupForeignKeys(nonPkCols)) {
+            if (!tableIdSet.has(refTableId) || junctionTableIds.has(refTableId) || mvTableIds.has(refTableId)) {
+                for (const group of groups) {
+                    for (const col of group) {
+                        warn(`${cls.table.name}.${col.name}: foreign key references a table that is not an entity, so it was kept as an attribute of the relationship.`);
+                    }
+                }
+                continue;
+            }
+            for (const group of groups) {
+                ends.push({ entityId: refTableId, cardinality: "1", optional: group.every((c) => c.nullable !== false) });
+                group.forEach((c) => consumedFkCols.add(c.id));
+            }
+        }
+
+        const relAttrs: AttrPayload[] = nonPkCols
+            .filter((col) => !consumedFkCols.has(col.id))
+            .map((col) => ({
+                id: generateCid(),
+                name: col.name,
+                kind: "simple" as const,
+                isKey: false,
+            }));
 
         relationships.push({
             id: generateCid(),
@@ -797,8 +817,6 @@ export const convertLogicalToConceptualWithNotices = (
     }
 
     // ── 3c. Regular FK columns -> N:1 association relationships ──────
-    // Pairs already joined by a junction / weak-entity relationship; plain FKs between them are merged into it
-    const structuralRelPairs = new Set(emittedRelPairs);
     for (const cls of classifications) {
         // Only tables that became entities (not junction/MV)
         if (cls.kind === "JUNCTION" || cls.kind === "MULTI_VALUED") continue;
@@ -846,19 +864,11 @@ export const convertLogicalToConceptualWithNotices = (
         for (const [refTableId, groups] of fkGroups) {
             const refTable = tables.find((t) => t.id === refTableId);
 
-            // The junction / weak-entity relationship between these two tables already covers this FK
-            if (structuralRelPairs.has(pairKey(table.id, refTableId))) {
-                for (const group of groups) {
-                    for (const col of group) {
-                        warn(`${table.name}.${col.name}: foreign key to ${refTable?.name ?? refTableId} was merged into an existing relationship between the same entities.`);
-                    }
-                }
-                continue;
-            }
-
             groups.forEach((group) => {
                 const baseName = `${table.name}_${refTable?.name ?? refTableId}`;
-                const relName = groups.length === 1 ? baseName : `${baseName}_${group.map((c) => c.name).join("_")}`;
+                // several FKs between the same tables, or a junction / identifying relationship already named like this
+                const needsSuffix = groups.length > 1 || relationships.some((x) => x.name === baseName);
+                const relName = needsSuffix ? `${baseName}_${group.map((c) => c.name).join("_")}` : baseName;
 
                 // A single-column FK that is also a candidate key / unique can hold each referenced value at most once -> 1-1.
                 // A column that is just one part of a composite FK does not make the relationship 1-1.
