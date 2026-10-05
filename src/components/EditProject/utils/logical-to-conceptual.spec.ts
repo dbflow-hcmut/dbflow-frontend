@@ -12,7 +12,7 @@ import { convertLogicalToConceptualWithNotices, convertConceptualToLogicalWithNo
 import type { LogicalModelPayload } from "./logical-model.builder";
 
 // ── model builders ───────────────────────────────────────────────────────────────────────────────
-// column spec: "name" | "name:pk" | "name:fk(table.col)" | "name:pk,fk(table.col)" | flags notnull / unique / ck
+// column spec: "name" | "name:pk" | "name:fk(table.col)" | "name:pk,fk(table.col)" | flags notnull / ck (the UI has no UNIQUE toggle on logical, only PK and Candidate Key)
 
 type Table = LogicalModelPayload["tables"][number];
 
@@ -149,8 +149,8 @@ describe("foreign keys become relationships", () => {
         expect(optional.endOf(optional.relsBetween("order", "customer")[0], "order").optional).toBe(true);
     });
 
-    it("a UNIQUE FK is one-to-one, not one-to-many", () => {
-        const profile = table("profile", ["id:pk", "user_id:fk(customer.id),unique"]);
+    it("a FK column marked as candidate key is one-to-one, not one-to-many", () => {
+        const profile = table("profile", ["id:pk", "user_id:fk(customer.id),ck"]);
         const r = convert(model([customer, profile]));
         const rel = r.relsBetween("profile", "customer")[0];
         expect(r.endOf(rel, "profile").cardinality).toBe("1");
@@ -338,10 +338,19 @@ describe("weak entities", () => {
         expect(r.endOf(rel, "room").optional).toBe(false);
     });
 
-    it("a weak entity with ONLY its partial key (owner FK + key, nothing else) is still a weak entity, not a multi-valued attribute", () => {
+    it("a table with ONLY owner FK + key (nothing else) cannot be told apart from a multi-valued attribute, so it is read as one", () => {
         const section = table("section", ["building_code:pk,fk(building.code)", "sec_no:pk"]);
         const r = convert(model([building, section]));
-        expect(r.entityNames).toContain("section");
+        expect(r.entityNames).toEqual(["building"]);
+        expect(r.entity("building").attributes.some((a) => a.name === "sec_no" && a.kind === "multi_valued")).toBe(true);
+    });
+
+    it("a table with ONLY owner FK + key that another table references is a weak entity (a multi-valued attribute cannot be referenced)", () => {
+        const section = table("section", ["building_code:pk,fk(building.code)", "sec_no:pk"]);
+        const takes = table("takes", ["id:pk", "building_code:fk(section.building_code)", "sec_no:fk(section.sec_no)"]);
+        const r = convert(model([building, section, takes]));
+        expect(r.entity("section").kind).toBe("weak");
+        expect(r.c.relationships.some((x) => x.type === "identifying")).toBe(true);
     });
 
     it("weak entity of a weak entity (building -> room -> bed) gives two weak entities", () => {
